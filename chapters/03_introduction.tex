@@ -1,0 +1,115 @@
+% ==================================================
+% INTRODUCTION
+% ==================================================
+
+\section{Introduction}
+
+The rapid growth of online learning platforms has created unprecedented opportunities for students and employees to access educational content at scale. However, a large catalogue of videos, courses, and instructional documents can also create \textit{choice overload}: learners may know the general topic they want to study, but still struggle to choose the next useful resource. For platform operators and educators, this creates a practical need for recommendation systems that can adapt to each learner's interaction history and surface relevant next resources.
+
+This thesis focuses on the MARS (Mandarine Academy Recommender System) dataset, a real-world corporate e-learning dataset from Mandarine Academy. The project frames the task as sequential top-$K$ recommendation: given a learner's historical sequence of resource interactions, recommend the most relevant learning resources that should be considered next.
+
+\subsection{Problem Statement}
+
+The problem addressed in this thesis is:
+
+\begin{quote}
+Given a learner $u$ and the chronological interaction sequence $S_u = (i_1, i_2, \ldots, i_t)$, predict a ranked list of $K$ candidate learning resources $(\hat{i}_{t+1}^{1}, \ldots, \hat{i}_{t+1}^{K})$ that are likely to match the learner's next interaction.
+\end{quote}
+
+This is challenging in the MARS setting for several reasons:
+
+\begin{itemize}
+    \item The active interaction matrix is extremely sparse, with only 0.8547\% observed user--item pairs and 99.1453\% sparsity.
+    \item Learner histories are short for many users; only 1,676 out of 3,007 users have at least three interactions for leave-one-out evaluation.
+    \item Item popularity is highly skewed, meaning a small number of resources can dominate naive recommendation results.
+    \item Educational resources have useful but incomplete metadata; difficulty is available for only 40.70\% of items, while descriptions are available for 86.46\%.
+    \item Static recommenders lose the temporal structure of learning behavior, while neural sequential recommenders can be sensitive to sparse data and negative sampling choices.
+\end{itemize}
+
+\subsection{Objectives and Scope}
+
+The main objectives of the thesis are:
+
+\begin{enumerate}
+    \item Build a reproducible data pipeline for loading, validating, preprocessing, and analyzing the MARS dataset.
+    \item Define a sequential next-resource recommendation task using chronological user histories and leave-one-out evaluation.
+    \item Implement and evaluate baseline methods including popularity-based recommendation, item-based collaborative filtering, BPR-MF, and SASRec.
+    \item Develop a gSASRec-oriented model direction that uses Generalised BCE loss, multiple negative samples, and available item metadata where appropriate.
+    \item Measure recommendation quality using Recall@K, nDCG@K, HitRate@K, and practical ranking indicators such as diversity and novelty.
+\end{enumerate}
+
+The scope is limited to offline recommendation experiments and a prototype-scale demonstration. The thesis does not claim to measure real learning gain, user satisfaction, or production-level serving performance because these require online deployment and learner feedback. Cold-start handling is considered through metadata-aware item representations, but full personalization for completely new users is outside the core scope.
+
+\subsection{Research Motivation}
+
+The MARS dataset represents a realistic recommendation scenario because it combines implicit interaction logs, explicit ratings or watch signals, item metadata, and user profile information. The current EDA highlights several properties that make the dataset academically and practically interesting:
+
+\begin{itemize}
+    \item 3,007 users, 958 items, and 24,622 active interactions after preprocessing.
+    \item An average of 8.19 interactions per user, with a wide range from 1 to 395.
+    \item An average of 25.70 users per item, with a maximum of 886 users for the most popular resource.
+    \item Complete coverage for software, theme, duration, and type metadata, enabling content-aware extensions.
+\end{itemize}
+
+These characteristics motivate a model direction that combines sequential modeling with careful loss design and negative sampling, instead of relying only on popularity or static user--item affinity.
+
+\subsection{Dataset and Model Direction}
+
+The dataset consists of four main sources: implicit interactions, explicit interactions, item metadata, and user information. The preprocessing pipeline merges implicit and explicit interactions, removes duplicate events by user, item, and timestamp, and keeps active interactions for the main EDA. Explicit events with watch percentage greater than or equal to 50 are treated as active, while implicit events are treated as active by default.
+
+The intended modeling direction is to use gSASRec as the primary sequential recommender. The baseline SASRec architecture models the learner's ordered history with self-attention. The gSASRec direction keeps the Transformer-style sequential architecture but focuses on Generalised BCE loss and multiple negative sampling to reduce overconfidence under sparse, large-catalogue conditions. Additional planned components include confidence weighting from watch completion, metadata-based item embedding initialization, and reranking for diversity and novelty.
+
+\subsection{Thesis Contribution}
+
+The expected contributions of this thesis are:
+
+\begin{itemize}
+    \item A clear problem formulation for next learning resource prediction on the MARS dataset.
+    \item A reproducible EDA and preprocessing workflow for sparse e-learning recommendation data.
+    \item A systematic comparison between non-neural, matrix-factorization, SASRec, and gSASRec-oriented approaches.
+    \item An offline evaluation report and prototype output that can support future deployment work.
+\end{itemize}
+
+\subsection{Expected Output and Team Responsibilities}
+
+The expected project outputs are:
+
+\begin{itemize}
+    \item Source code for preprocessing, EDA, model training, evaluation, and inference.
+    \item EDA artifacts including summary tables, plots, and dataset reports.
+    \item Trained model checkpoints and configuration files for reproducible experiments.
+    \item Offline evaluation tables for Recall@K, nDCG@K, HitRate@K, diversity, and novelty.
+    \item A prototype recommendation demo, planned with Streamlit and a Python/FastAPI backend at demo scale.
+    \item Final thesis report, defense presentation, and supporting documentation.
+\end{itemize}
+
+The planned team responsibilities are:
+
+\begin{table}[H]
+    \centering
+    \caption{Planned team responsibilities}
+    \label{tab:team-responsibilities}
+    \begin{tabular}{p{4cm} p{9cm}}
+        \toprule
+        \textbf{Member} & \textbf{Primary responsibilities} \\
+        \midrule
+        Nguyễn Tấn Thắng & Team lead; project coordination; evaluation protocol; experiment tracking; final integration and presentation preparation. \\
+        Nguyễn Hoàng Việt & Data pipeline; EDA; preprocessing; dataset documentation; thesis writing for problem statement, data analysis, and methodology. \\
+        Lê Quốc Chính & Baseline implementation; gSASRec training support; demo application; result visualization and deployment documentation. \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\subsection{Thesis Organization}
+
+The remainder of this thesis is organized as follows:
+
+\begin{itemize}
+    \item \textbf{Chapter 2} provides background on recommendation systems and sequential models
+    \item \textbf{Chapter 3} reviews related work in sequential recommendation and e-learning
+    \item \textbf{Chapter 4} details our methodology and model architecture
+    \item \textbf{Chapter 5} presents experimental setup and results
+    \item \textbf{Chapter 6} concludes with key findings and future research directions
+\end{itemize}
+
+\newpage

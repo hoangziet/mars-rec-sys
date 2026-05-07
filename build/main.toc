@@ -1,0 +1,64 @@
+\babel@toc {vietnamese}{}\relax 
+\contentsline {section}{\numberline {1}Introduction}{6}{section.1}%
+\contentsline {subsection}{\numberline {1.1}Problem Statement}{6}{subsection.1.1}%
+\contentsline {subsection}{\numberline {1.2}Objectives and Scope}{6}{subsection.1.2}%
+\contentsline {subsection}{\numberline {1.3}Research Motivation}{7}{subsection.1.3}%
+\contentsline {subsection}{\numberline {1.4}Dataset and Model Direction}{7}{subsection.1.4}%
+\contentsline {subsection}{\numberline {1.5}Thesis Contribution}{7}{subsection.1.5}%
+\contentsline {subsection}{\numberline {1.6}Expected Output and Team Responsibilities}{8}{subsection.1.6}%
+\contentsline {subsection}{\numberline {1.7}Thesis Organization}{8}{subsection.1.7}%
+\contentsline {section}{\numberline {2}Background}{9}{section.2}%
+\contentsline {subsection}{\numberline {2.1}Recommendation Systems Fundamentals}{9}{subsection.2.1}%
+\contentsline {subsubsection}{\numberline {2.1.1}Collaborative Filtering}{9}{subsubsection.2.1.1}%
+\contentsline {subsubsection}{\numberline {2.1.2}Content-Based Filtering}{9}{subsubsection.2.1.2}%
+\contentsline {subsection}{\numberline {2.2}Sequential Recommendation Models}{9}{subsection.2.2}%
+\contentsline {subsubsection}{\numberline {2.2.1}Recurrent Neural Networks (RNNs)}{9}{subsubsection.2.2.1}%
+\contentsline {subsubsection}{\numberline {2.2.2}Self-Attention Mechanisms}{9}{subsubsection.2.2.2}%
+\contentsline {subsection}{\numberline {2.3}Graph-Based Sequential Recommendation}{9}{subsection.2.3}%
+\contentsline {subsubsection}{\numberline {2.3.1}The gSASRec Model}{9}{subsubsection.2.3.1}%
+\contentsline {subsection}{\numberline {2.4}The MARS E-Learning Dataset}{10}{subsection.2.4}%
+\contentsline {section}{\numberline {3}Related Work}{11}{section.3}%
+\contentsline {subsection}{\numberline {3.1}Sequential Recommendation Systems}{11}{subsection.3.1}%
+\contentsline {subsubsection}{\numberline {3.1.1}RNN-Based Approaches}{11}{subsubsection.3.1.1}%
+\contentsline {subsubsection}{\numberline {3.1.2}Attention-Based Methods}{11}{subsubsection.3.1.2}%
+\contentsline {subsubsection}{\numberline {3.1.3}Graph-Enhanced Approaches}{11}{subsubsection.3.1.3}%
+\contentsline {subsection}{\numberline {3.2}Sequential Recommendation in E-Learning}{11}{subsection.3.2}%
+\contentsline {subsection}{\numberline {3.3}Dataset Studies}{12}{subsection.3.3}%
+\contentsline {subsection}{\numberline {3.4}Performance Metrics}{12}{subsection.3.4}%
+\contentsline {subsection}{\numberline {3.5}Gap Analysis}{12}{subsection.3.5}%
+\contentsline {section}{\numberline {4}Methodology}{13}{section.4}%
+\contentsline {subsection}{\numberline {4.1}Methodology Overview}{13}{subsection.4.1}%
+\contentsline {subsection}{\numberline {4.2}Data Preprocessing}{13}{subsection.4.2}%
+\contentsline {subsubsection}{\numberline {4.2.1}Data Loading}{13}{subsubsection.4.2.1}%
+\contentsline {subsubsection}{\numberline {4.2.2}Interaction Construction}{13}{subsubsection.4.2.2}%
+\contentsline {subsubsection}{\numberline {4.2.3}Sequence Handling}{13}{subsubsection.4.2.3}%
+\contentsline {subsubsection}{\numberline {4.2.4}Filtering Strategy}{14}{subsubsection.4.2.4}%
+\contentsline {subsubsection}{\numberline {4.2.5}Evaluation Split}{14}{subsubsection.4.2.5}%
+\contentsline {subsection}{\numberline {4.3}Model Direction}{14}{subsection.4.3}%
+\contentsline {subsubsection}{\numberline {4.3.1}Baselines}{14}{subsubsection.4.3.1}%
+\contentsline {subsubsection}{\numberline {4.3.2}SASRec Backbone}{14}{subsubsection.4.3.2}%
+\contentsline {subsubsection}{\numberline {4.3.3}gSASRec Direction}{14}{subsubsection.4.3.3}%
+\contentsline {subsubsection}{\numberline {4.3.4}Metadata and Confidence Extensions}{15}{subsubsection.4.3.4}%
+\contentsline {subsection}{\numberline {4.4}Model Training}{15}{subsection.4.4}%
+\contentsline {subsubsection}{\numberline {4.4.1}Hyperparameters}{15}{subsubsection.4.4.1}%
+\contentsline {subsection}{\numberline {4.5}Evaluation Methodology}{15}{subsection.4.5}%
+\contentsline {section}{\numberline {5}Experiments}{16}{section.5}%
+\contentsline {subsection}{\numberline {5.1}Experimental Setup}{16}{subsection.5.1}%
+\contentsline {subsubsection}{\numberline {5.1.1}Dataset Statistics}{16}{subsubsection.5.1.1}%
+\contentsline {subsubsection}{\numberline {5.1.2}Implementation Details}{17}{subsubsection.5.1.2}%
+\contentsline {subsubsection}{\numberline {5.1.3}Hyperparameter Tuning}{18}{subsubsection.5.1.3}%
+\contentsline {subsection}{\numberline {5.2}Results}{18}{subsection.5.2}%
+\contentsline {subsubsection}{\numberline {5.2.1}Main Performance Results}{18}{subsubsection.5.2.1}%
+\contentsline {subsubsection}{\numberline {5.2.2}Ablation Study}{18}{subsubsection.5.2.2}%
+\contentsline {subsection}{\numberline {5.3}Analysis}{18}{subsection.5.3}%
+\contentsline {subsubsection}{\numberline {5.3.1}Performance Insights}{18}{subsubsection.5.3.1}%
+\contentsline {subsubsection}{\numberline {5.3.2}Learning Dynamics}{19}{subsubsection.5.3.2}%
+\contentsline {subsubsection}{\numberline {5.3.3}Error Analysis}{19}{subsubsection.5.3.3}%
+\contentsline {subsection}{\numberline {5.4}Statistical Significance}{19}{subsection.5.4}%
+\contentsline {section}{\numberline {6}Conclusion}{20}{section.6}%
+\contentsline {subsection}{\numberline {6.1}Summary of Contributions}{20}{subsection.6.1}%
+\contentsline {subsection}{\numberline {6.2}Key Findings}{20}{subsection.6.2}%
+\contentsline {subsection}{\numberline {6.3}Limitations}{20}{subsection.6.3}%
+\contentsline {subsection}{\numberline {6.4}Future Work}{21}{subsection.6.4}%
+\contentsline {subsection}{\numberline {6.5}Broader Impact}{21}{subsection.6.5}%
+\contentsline {subsection}{\numberline {6.6}Final Remarks}{21}{subsection.6.6}%
