@@ -89,7 +89,7 @@ class ExperimentTracker:
         plt.figure(figsize=(8, 5))
         for m, c in zip(metrics, colors):
             vals = [e.get(m, 0) for e in self.epochs]
-            plt.plot(epochs, vals, f"{c}-o", label=m, markersize=4)
+            plt.plot(epochs, vals, "-o", color=c, label=m, markersize=4)
         plt.xlabel("Epoch")
         plt.ylabel("Score")
         plt.title(f"{self.model_name} — Evaluation Metrics")
