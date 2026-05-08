@@ -193,12 +193,15 @@ def plot_comparison(results, output_dir):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("models", nargs="*", default=list(MODEL_CONFIGS.keys()),
+    parser.add_argument("models", nargs="*", default=None,
                         choices=list(MODEL_CONFIGS.keys()))
     parser.add_argument("--data_dir", default=DEFAULT_DATA_DIR)
     parser.add_argument("--output_dir", default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     args = parser.parse_args()
+
+    if not args.models:
+        args.models = list(MODEL_CONFIGS.keys())
 
     data_dir = Path(args.data_dir)
     stats = load_stats(data_dir / "dataset_stats.json")
@@ -211,7 +214,7 @@ def main():
 
     for name in args.models:
         cfg = MODEL_CONFIGS[name]
-        is_neural = name in ("sasrec", "gsasrec", "gru4rec", "bprmf")
+        is_neural = name in ("sasrec", "gsasrec", "gru4rec", "bert4rec", "bprmf")
 
         if is_neural:
             summary = run_neural_model(
