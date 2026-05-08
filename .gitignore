@@ -19,3 +19,10 @@ __pycache__/
 
 # IDE
 .vscode/
+
+# models
+*.pt
+
+# others
+.claude/
+.serena/
