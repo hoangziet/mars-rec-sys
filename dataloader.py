@@ -381,7 +381,7 @@ if __name__ == "__main__":
     print("Dataset stats:", stats)
 
     # Test SequenceDataset
-    print("\-- Test SequenceDataset (val) --")
+    print("-- Test SequenceDataset (val) --")
     val_loader = get_eval_loader("data/processed/val.csv", stats, batch_size=4)
     batch = next(iter(val_loader))
     print("input_seq shape:", batch["input_seq"].shape)   # [4, 50]
@@ -390,7 +390,7 @@ if __name__ == "__main__":
     print("mask sample    :", batch["mask"][0])
 
     # Test BPRDataset
-    print("\-- Test BPRDataset (train) --")
+    print("-- Test BPRDataset (train) --")
     bpr_loader = get_train_loader("bprmf", "data/processed/train.csv",
                                    stats, batch_size=4)
     batch = next(iter(bpr_loader))
@@ -399,7 +399,7 @@ if __name__ == "__main__":
     print("neg_item:", batch["neg_item"])
 
     # Test TrainSequenceDataset (SASRec)
-    print("\-- Test TrainSequenceDataset (SASRec) --")
+    print("-- Test TrainSequenceDataset (SASRec) --")
     train_loader = get_train_loader("sasrec", "data/processed/train.csv",
                                      stats, batch_size=4)
     batch = next(iter(train_loader))
