@@ -27,3 +27,6 @@ __pycache__/
 .claude/
 .serena/
 docs/
+
+# tests
+tests/
