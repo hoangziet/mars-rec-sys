@@ -10,10 +10,17 @@ Architecture:
     - Point-wise feed-forward sublayer with Conv1d
     - Binary cross-entropy loss with in-batch negative sampling
 
-Key differences from naive CE-over-vocab:
-    - Scoring via dot product between sequence hidden state and item embedding
-    - Loss computed at every valid position in the sequence (not just last)
-    - Negative items sampled per training step; not a classification head
+Training interface
+------------------
+    loss = model.loss(input_seq, pos_items, neg_items)
+
+    - input_seq : (B, L)  left-padded item indices
+    - pos_items : (B,)    ground-truth next item per sample (scalar)
+    - neg_items : (B,)    one randomly sampled negative per sample (scalar)
+
+Inference interface
+-------------------
+    scores = model.predict(input_seq)   # (B, n_items+1)
 """
 
 import torch
@@ -33,7 +40,7 @@ class PointWiseFeedForward(nn.Module):
         self.relu = nn.ReLU()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x: (B, L, D) — transpose to (B, D, L) for Conv1d
+        # x: (B, L, D) -> transpose to (B, D, L) for Conv1d
         out = self.relu(self.conv1(x.transpose(1, 2)))
         out = self.dropout(out)
         out = self.conv2(out)
@@ -44,9 +51,8 @@ class PointWiseFeedForward(nn.Module):
 class SASRecBlock(nn.Module):
     """One transformer block: causal multi-head self-attention + FFN.
 
-    Pre-LN formulation (LayerNorm applied before each sublayer) following
-    the original SASRec implementation.  Residual connections wrap both
-    sublayers.
+    Pre-LN formulation (LayerNorm applied before each sublayer).
+    Residual connections wrap both sublayers.
     """
 
     def __init__(self, hidden_dim: int, num_heads: int, dropout: float = 0.2) -> None:
@@ -59,7 +65,6 @@ class SASRecBlock(nn.Module):
             batch_first=True,
         )
         self.dropout1 = nn.Dropout(dropout)
-
         self.ln2 = nn.LayerNorm(hidden_dim)
         self.ffn = PointWiseFeedForward(hidden_dim, dropout)
         self.dropout2 = nn.Dropout(dropout)
@@ -70,22 +75,22 @@ class SASRecBlock(nn.Module):
         attn_mask: torch.Tensor | None = None,
         key_padding_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        # --- Self-attention sublayer ---
+        # Self-attention sublayer
         residual = x
         z = self.ln1(x)
         attn_out, _ = self.attn(
-            z, z, z,
+            z,
+            z,
+            z,
             attn_mask=attn_mask,
             key_padding_mask=key_padding_mask,
             need_weights=False,
         )
         x = residual + self.dropout1(attn_out)
 
-        # --- Feed-forward sublayer ---
+        # Feed-forward sublayer
         residual = x
-        z = self.ln2(x)
-        x = residual + self.dropout2(self.ffn(z))
-
+        x = residual + self.dropout2(self.ffn(self.ln2(x)))
         return x
 
 
@@ -99,9 +104,11 @@ class SASRec(nn.Module):
     max_len:
         Maximum sequence length for positional embeddings.
     hidden_dim:
-        Embedding / hidden dimension ``d``.
+        Embedding / hidden dimension d.
+    emb_dim:
+        Alias for hidden_dim for backward compatibility.
     num_heads:
-        Number of attention heads (must divide ``hidden_dim`` evenly).
+        Number of attention heads (must divide hidden_dim evenly).
     num_layers:
         Number of stacked SASRec blocks.
     dropout:
@@ -127,11 +134,9 @@ class SASRec(nn.Module):
         self.hidden_dim = hidden_dim
         self.pad_token = 0
 
-        # Embeddings — item index 0 is reserved as the padding token
         self.item_emb = nn.Embedding(n_items + 1, hidden_dim, padding_idx=0)
         self.pos_emb = nn.Embedding(max_len, hidden_dim)
         self.emb_dropout = nn.Dropout(dropout)
-
         self.blocks = nn.ModuleList(
             [SASRecBlock(hidden_dim, num_heads, dropout) for _ in range(num_layers)]
         )
@@ -139,52 +144,37 @@ class SASRec(nn.Module):
 
         self._init_weights()
 
-    # ------------------------------------------------------------------
-    # Initialisation
-    # ------------------------------------------------------------------
-
     def _init_weights(self) -> None:
         nn.init.normal_(self.item_emb.weight, std=0.01)
         nn.init.normal_(self.pos_emb.weight, std=0.01)
 
-    # ------------------------------------------------------------------
-    # Core encoder
-    # ------------------------------------------------------------------
-
     def _encode(self, input_seq: torch.Tensor) -> torch.Tensor:
-        """Encode an item sequence into contextualised hidden states.
-
-        Parameters
-        ----------
-        input_seq:
-            Long tensor of shape ``(B, L)`` with item indices.
-            Padding positions must contain ``self.pad_token`` (0).
-
-        Returns
-        -------
-        torch.Tensor
-            Hidden states of shape ``(B, L, D)``.
-        """
+        """Encode item sequence -> contextualised hidden states (B, L, D)."""
         B, L = input_seq.shape
         pos_ids = torch.arange(L, device=input_seq.device).unsqueeze(0).expand(B, L)
 
         x = self.item_emb(input_seq) + self.pos_emb(pos_ids)
         x = self.emb_dropout(x)
 
-        # Causal mask: upper-triangular True → those positions are masked out
         causal_mask = torch.triu(
             torch.ones(L, L, device=input_seq.device, dtype=torch.bool), diagonal=1
         )
-        key_padding_mask = input_seq == self.pad_token  # (B, L)
+        key_padding_mask = input_seq == self.pad_token
 
         for block in self.blocks:
             x = block(x, attn_mask=causal_mask, key_padding_mask=key_padding_mask)
 
-        return self.final_ln(x)  # (B, L, D)
+        return self.final_ln(x)
 
-    # ------------------------------------------------------------------
-    # Training: BCE loss with negative sampling
-    # ------------------------------------------------------------------
+    def _last_hidden(self, input_seq: torch.Tensor) -> torch.Tensor:
+        """Extract hidden state at the last non-padding position. Returns (B, D)."""
+        hidden = self._encode(input_seq)
+        mask = input_seq != self.pad_token
+        has_valid = mask.any(dim=1)
+        last_idx = mask.long().flip(dims=[1]).argmax(dim=1)
+        last_idx = (input_seq.size(1) - 1) - last_idx
+        last_idx = torch.where(has_valid, last_idx, torch.zeros_like(last_idx))
+        return hidden[torch.arange(hidden.size(0), device=hidden.device), last_idx]
 
     def loss(
         self,
@@ -192,91 +182,38 @@ class SASRec(nn.Module):
         pos_items: torch.Tensor,
         neg_items: torch.Tensor,
     ) -> torch.Tensor:
-        """Compute binary cross-entropy loss over the full sequence.
-
-        At each position ``t``, the model observes ``input_seq[:, :t+1]``
-        and is asked to rank ``pos_items[:, t]`` above ``neg_items[:, t]``.
-        Padding positions (pos_items == 0) are excluded from the loss.
+        """BCE loss at the last valid sequence position.
 
         Parameters
         ----------
-        input_seq:
-            ``(B, L)`` — input item indices (shifted left by one from targets).
-        pos_items:
-            ``(B, L)`` — ground-truth next items at each position.
-        neg_items:
-            ``(B, L)`` — one randomly sampled negative item per position.
-
-        Returns
-        -------
-        torch.Tensor
-            Scalar loss.
+        input_seq : (B, L) — left-padded input.
+        pos_items : (B,)   — ground-truth next item (scalar per sample).
+        neg_items : (B,)   — one sampled negative (scalar per sample).
         """
-        hidden = self._encode(input_seq)  # (B, L, D)
+        h = self._last_hidden(input_seq)  # (B, D)
 
-        pos_emb = self.item_emb(pos_items)   # (B, L, D)
-        neg_emb = self.item_emb(neg_items)   # (B, L, D)
+        pos_emb = self.item_emb(pos_items)  # (B, D)
+        neg_emb = self.item_emb(neg_items)  # (B, D)
 
-        pos_logits = (hidden * pos_emb).sum(dim=-1)  # (B, L)
-        neg_logits = (hidden * neg_emb).sum(dim=-1)  # (B, L)
+        pos_logits = (h * pos_emb).sum(dim=-1)  # (B,)
+        neg_logits = (h * neg_emb).sum(dim=-1)  # (B,)
 
-        # Mask out padding positions
-        mask = pos_items != self.pad_token   # (B, L)
-
-        loss = F.binary_cross_entropy_with_logits(
-            torch.cat([pos_logits[mask], neg_logits[mask]]),
-            torch.cat([
-                torch.ones(mask.sum(), device=input_seq.device),
-                torch.zeros(mask.sum(), device=input_seq.device),
-            ]),
+        return F.binary_cross_entropy_with_logits(
+            torch.cat([pos_logits, neg_logits]),
+            torch.cat(
+                [
+                    torch.ones(pos_logits.size(0), device=input_seq.device),
+                    torch.zeros(neg_logits.size(0), device=input_seq.device),
+                ]
+            ),
         )
-        return loss
-
-    # ------------------------------------------------------------------
-    # Inference: score all items from the last valid position
-    # ------------------------------------------------------------------
 
     def predict(self, input_seq: torch.Tensor) -> torch.Tensor:
-        """Return logit scores for all items given an input sequence.
-
-        Scores are computed as dot products between the hidden state at
-        the last *valid* (non-padding) position and every item embedding.
-
-        Parameters
-        ----------
-        input_seq:
-            ``(B, L)`` — item-index sequence.  Padding on the left.
-
-        Returns
-        -------
-        torch.Tensor
-            Score tensor of shape ``(B, n_items + 1)``.
-        """
-        hidden = self._encode(input_seq)  # (B, L, D)
-
-        # Locate the last non-padding position for each sequence in the batch
-        mask = input_seq != self.pad_token          # (B, L)
-        has_valid = mask.any(dim=1)                 # (B,)
-        last_idx = (
-            mask.long().cumsum(dim=1).argmax(dim=1) # rightmost non-zero
-            if True
-            else torch.zeros(input_seq.size(0), dtype=torch.long)
-        )
-        # More reliable: find last True by flipping
-        last_idx = mask.long().flip(dims=[1]).argmax(dim=1)
-        last_idx = (input_seq.size(1) - 1) - last_idx
-        last_idx = torch.where(has_valid, last_idx, torch.zeros_like(last_idx))
-
-        last_hidden = hidden[torch.arange(hidden.size(0), device=hidden.device), last_idx]
-        # (B, D) @ (D, n_items+1) → (B, n_items+1)
-        return last_hidden @ self.item_emb.weight.T
-
-    # ------------------------------------------------------------------
-    # Convenience alias kept for eval harnesses that call .forward()
-    # ------------------------------------------------------------------
+        """Return scores (B, n_items+1) via dot-product with item_emb."""
+        return self._last_hidden(input_seq) @ self.item_emb.weight.T
 
     def forward(self, input_seq: torch.Tensor) -> torch.Tensor:
-        """Alias for ``predict`` — returns scores over full item vocab."""
+        """Alias for predict — returns scores over full item vocab."""
         return self.predict(input_seq)
 
 

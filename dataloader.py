@@ -18,10 +18,10 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader, Dataset
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def load_stats(stats_path: str = "data/processed/dataset_stats.json") -> dict:
     with open(stats_path) as f:
@@ -44,6 +44,7 @@ def pad_sequence(seq: list[int], max_len: int, pad_token: int = 0) -> list[int]:
 # ---------------------------------------------------------------------------
 # 1. TrainSequenceDataset  — SASRec / gSASRec / GRU4Rec
 # ---------------------------------------------------------------------------
+
 
 class TrainSequenceDataset(Dataset):
     """Sliding-window dataset for next-item prediction training.
@@ -96,10 +97,10 @@ class TrainSequenceDataset(Dataset):
         self._all_items = np.arange(1, self._n_items + 1, dtype=np.int64)
 
         # Expand into per-position samples + pre-sample negatives
-        self.input_seqs:  list[list[int]] = []
-        self.pos_targets: list[int]       = []
-        self.neg_targets: list[int]       = []
-        self.confidences: list[float]     = []
+        self.input_seqs: list[list[int]] = []
+        self.pos_targets: list[int] = []
+        self.neg_targets: list[int] = []
+        self.confidences: list[float] = []
 
         for seq, confs in raw:
             if len(seq) < 2:
@@ -126,10 +127,10 @@ class TrainSequenceDataset(Dataset):
         inp = self.input_seqs[idx]
         mask = [int(t != self.pad_token) for t in inp]
         return {
-            "input_seq" : torch.tensor(inp,                   dtype=torch.long),
-            "pos_items" : torch.tensor(self.pos_targets[idx], dtype=torch.long),
-            "neg_items" : torch.tensor(self.neg_targets[idx], dtype=torch.long),
-            "mask"      : torch.tensor(mask,                  dtype=torch.bool),
+            "input_seq": torch.tensor(inp, dtype=torch.long),
+            "pos_items": torch.tensor(self.pos_targets[idx], dtype=torch.long),
+            "neg_items": torch.tensor(self.neg_targets[idx], dtype=torch.long),
+            "mask": torch.tensor(mask, dtype=torch.bool),
             "confidence": torch.tensor(self.confidences[idx], dtype=torch.float),
         }
 
@@ -137,6 +138,7 @@ class TrainSequenceDataset(Dataset):
 # ---------------------------------------------------------------------------
 # 2. MaskedSequenceDataset  — BERT4Rec
 # ---------------------------------------------------------------------------
+
 
 class MaskedSequenceDataset(Dataset):
     """Masked Item Modelling dataset for BERT4Rec.
@@ -157,17 +159,17 @@ class MaskedSequenceDataset(Dataset):
         is_train: bool = True,
     ) -> None:
         df = pd.read_csv(csv_path)
-        self.max_len    = max_len
-        self.pad_token  = pad_token
+        self.max_len = max_len
+        self.pad_token = pad_token
         self.mask_token = n_items + 1
-        self.mask_prob  = mask_prob
-        self.is_train   = is_train
+        self.mask_prob = mask_prob
+        self.is_train = is_train
 
         if is_train:
-            self.seqs    = [parse_seq(s) for s in df["item_sequence"]]
+            self.seqs = [parse_seq(s) for s in df["item_sequence"]]
             self.targets = None
         else:
-            self.seqs    = [parse_seq(s) for s in df["train_seq"]]
+            self.seqs = [parse_seq(s) for s in df["train_seq"]]
             self.targets = df["target"].tolist()
 
     def __len__(self) -> int:
@@ -188,23 +190,24 @@ class MaskedSequenceDataset(Dataset):
                 masked_seq[force] = self.mask_token
                 labels[force] = seq[force]
             padded_seq = pad_sequence(masked_seq, self.max_len, self.pad_token)
-            padded_lbl = pad_sequence(labels,     self.max_len, 0)
+            padded_lbl = pad_sequence(labels, self.max_len, 0)
         else:
             masked_seq = seq + [self.mask_token]
             labels = [0] * len(masked_seq)
             labels[-1] = self.targets[idx]
             padded_seq = pad_sequence(masked_seq, self.max_len, self.pad_token)
-            padded_lbl = pad_sequence(labels,     self.max_len, 0)
+            padded_lbl = pad_sequence(labels, self.max_len, 0)
 
         return {
             "input_seq": torch.tensor(padded_seq, dtype=torch.long),
-            "labels"   : torch.tensor(padded_lbl, dtype=torch.long),
+            "labels": torch.tensor(padded_lbl, dtype=torch.long),
         }
 
 
 # ---------------------------------------------------------------------------
 # 3. BPRDataset  — BPR-MF
 # ---------------------------------------------------------------------------
+
 
 class BPRDataset(Dataset):
     """(user, pos_item, neg_item) triplets for BPR-MF training.
@@ -240,7 +243,7 @@ class BPRDataset(Dataset):
             if neg not in seen:
                 break
         return {
-            "user"    : torch.tensor(uid, dtype=torch.long),
+            "user": torch.tensor(uid, dtype=torch.long),
             "pos_item": torch.tensor(pos, dtype=torch.long),
             "neg_item": torch.tensor(neg, dtype=torch.long),
         }
@@ -249,6 +252,7 @@ class BPRDataset(Dataset):
 # ---------------------------------------------------------------------------
 # 4. EvalDataset  — shared val / test
 # ---------------------------------------------------------------------------
+
 
 class EvalDataset(Dataset):
     """Evaluation dataset: 1 ground-truth + ``num_neg`` negatives.
@@ -269,15 +273,17 @@ class EvalDataset(Dataset):
         if neg_mode not in {"random", "popularity", "mixed"}:
             raise ValueError(f"Unknown neg_mode '{neg_mode}'.")
         if neg_mode in {"popularity", "mixed"} and item_popularity is None:
-            raise ValueError("item_popularity required for popularity / mixed neg_mode.")
+            raise ValueError(
+                "item_popularity required for popularity / mixed neg_mode."
+            )
 
         df = pd.read_csv(csv_path)
-        self.max_len   = max_len
+        self.max_len = max_len
         self.pad_token = pad_token
-        self.n_items   = n_items
+        self.n_items = n_items
 
-        self.users   = df["user_idx"].tolist()
-        self.seqs    = [parse_seq(s) for s in df["train_seq"]]
+        self.users = df["user_idx"].tolist()
+        self.seqs = [parse_seq(s) for s in df["train_seq"]]
         self.targets = df["target"].tolist()
 
         user_history: dict[int, set[int]] = {}
@@ -289,7 +295,7 @@ class EvalDataset(Dataset):
         self._candidates: list[list[int]] = []
 
         for uid, tgt in zip(self.users, self.targets):
-            seen      = user_history[uid]
+            seen = user_history[uid]
             available = np.setdiff1d(all_items, list(seen))
 
             if len(available) < num_neg:
@@ -298,20 +304,30 @@ class EvalDataset(Dataset):
                 negs = np.random.choice(available, size=num_neg, replace=False).tolist()
             elif neg_mode == "popularity":
                 weights = np.array(
-                    [item_popularity[i] if i < len(item_popularity) else 0.0
-                     for i in available], dtype=float,
+                    [
+                        item_popularity[i] if i < len(item_popularity) else 0.0
+                        for i in available
+                    ],
+                    dtype=float,
                 )
                 weights = weights / weights.sum() if weights.sum() > 0 else None
-                negs = np.random.choice(available, size=num_neg, replace=False, p=weights).tolist()
+                negs = np.random.choice(
+                    available, size=num_neg, replace=False, p=weights
+                ).tolist()
             else:  # mixed
                 half = num_neg // 2
                 pop_w = np.array(
-                    [item_popularity[i] if i < len(item_popularity) else 0.0
-                     for i in available], dtype=float,
+                    [
+                        item_popularity[i] if i < len(item_popularity) else 0.0
+                        for i in available
+                    ],
+                    dtype=float,
                 )
                 pop_w = pop_w / pop_w.sum() if pop_w.sum() > 0 else None
                 pop_negs = set(
-                    np.random.choice(available, size=half, replace=False, p=pop_w).tolist()
+                    np.random.choice(
+                        available, size=half, replace=False, p=pop_w
+                    ).tolist()
                 )
                 rand_pool = np.setdiff1d(available, list(pop_negs))
                 rand_negs = np.random.choice(
@@ -328,12 +344,12 @@ class EvalDataset(Dataset):
 
     def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
         padded = self._padded_seqs[idx]
-        mask   = [int(t != self.pad_token) for t in padded]
+        mask = [int(t != self.pad_token) for t in padded]
         return {
-            "user"      : torch.tensor(self.users[idx],   dtype=torch.long),
-            "input_seq" : torch.tensor(padded,            dtype=torch.long),
-            "mask"      : torch.tensor(mask,              dtype=torch.bool),
-            "target"    : torch.tensor(self.targets[idx], dtype=torch.long),
+            "user": torch.tensor(self.users[idx], dtype=torch.long),
+            "input_seq": torch.tensor(padded, dtype=torch.long),
+            "mask": torch.tensor(mask, dtype=torch.bool),
+            "target": torch.tensor(self.targets[idx], dtype=torch.long),
             "candidates": torch.tensor(self._candidates[idx], dtype=torch.long),
         }
 
@@ -341,6 +357,7 @@ class EvalDataset(Dataset):
 # ---------------------------------------------------------------------------
 # Factory helpers
 # ---------------------------------------------------------------------------
+
 
 def get_train_loader(
     model_type: str,
@@ -355,7 +372,9 @@ def get_train_loader(
 
     if model_type in ("sasrec", "gsasrec", "gru4rec"):
         dataset = TrainSequenceDataset(
-            train_csv, max_len=max_len, pad_token=0,
+            train_csv,
+            max_len=max_len,
+            pad_token=0,
             use_confidence=(use_confidence or model_type == "gsasrec"),
             n_items=n_items,
         )
@@ -368,7 +387,9 @@ def get_train_loader(
     else:
         return None
 
-    return DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
+    return DataLoader(
+        dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers
+    )
 
 
 def get_eval_loader(
@@ -382,8 +403,14 @@ def get_eval_loader(
     item_popularity: np.ndarray | None = None,
 ) -> DataLoader:
     dataset = EvalDataset(
-        eval_csv, n_items=stats["n_items"], max_len=max_len,
-        pad_token=0, num_neg=num_neg, neg_mode=neg_mode,
+        eval_csv,
+        n_items=stats["n_items"],
+        max_len=max_len,
+        pad_token=0,
+        num_neg=num_neg,
+        neg_mode=neg_mode,
         item_popularity=item_popularity,
     )
-    return DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
+    return DataLoader(
+        dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers
+    )

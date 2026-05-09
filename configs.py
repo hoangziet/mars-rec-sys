@@ -1,7 +1,7 @@
 """
 configs.py
 ==========
-Centralized hyperparameter configurations for all models.
+Centralised hyperparameter configurations for all models.
 """
 
 MODEL_CONFIGS = {
@@ -26,6 +26,8 @@ MODEL_CONFIGS = {
             "num_heads": 2,
             "num_layers": 2,
             "dropout": 0.2,
+            "beta": 0.2,  # gBCE temperature (paper default)
+            "num_neg": 1,  # negatives per positive
         },
         "train_kwargs": {
             "batch_size": 256,
