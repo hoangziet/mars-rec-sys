@@ -43,6 +43,8 @@ uv run python run_experiment.py <model_name> [options]
 
 Available models: `sasrec`, `gsasrec`, `gru4rec`, `bert4rec`, `bprmf`, `itemcf`, `popularity`
 
+Note: `gsasrec` in this repo is confidence-weighted SASRec baseline, not full gSASRec reproduction.
+
 ```bash
 # Train SASRec with default config
 uv run python run_experiment.py sasrec
@@ -72,6 +74,11 @@ uv run python run_all.py
 
 # Train only selected models
 uv run python run_all.py sasrec gru4rec bprmf
+
+# Choose evaluation negative sampling protocol
+uv run python run_all.py --neg_mode random
+uv run python run_all.py --neg_mode popularity
+uv run python run_all.py --neg_mode mixed
 ```
 
 ### Output structure
@@ -108,7 +115,13 @@ All configs are centralized in `configs.py` — edit there to change defaults.
 
 ### Evaluation metrics
 
-All models are evaluated with the same protocol: **1 positive + 99 random negatives = 100 candidates**, ranked by model score.
+All models are evaluated with one positive target plus configurable negative candidates. `run_all.py --neg_mode` supports:
+
+- `random`: sample unseen negatives uniformly.
+- `popularity`: sample unseen negatives weighted by item popularity.
+- `mixed`: use half popularity-weighted negatives and half random unseen negatives.
+
+Default protocol: **1 positive + 99 random negatives = 100 candidates**, ranked by model score.
 
 | Metric | Meaning |
 |--------|---------|
@@ -116,3 +129,18 @@ All models are evaluated with the same protocol: **1 positive + 99 random negati
 | **NDCG@K** | Normalized Discounted Cumulative Gain — penalizes lower ranks |
 
 Reported at K=10 and K=20.
+
+## Implementation Fidelity Notes
+
+- SASRec: simplified next-item CE baseline.
+- gSASRec: confidence-weighted SASRec baseline (not full gsasrec reference reproduction).
+- GRU4Rec: padded-sequence handling fixed via mask-aware endpoint selection.
+- BERT4Rec: training mask now guarantees at least one supervised position.
+- BPR-MF: user history accumulation fixed for negative sampling correctness.
+
+## Calibration Commands
+
+```bash
+uv run python scripts/data_quality_audit.py --data_dir data/processed --out experiments/data_audit.json
+uv run python scripts/calibration_suite.py --data_dir data/processed --out experiments/calibration_report.json
+```
