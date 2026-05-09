@@ -16,11 +16,11 @@ print("=" * 50)
 print("Step 1: Load raw data")
 print("=" * 50)
 
-implicit = pd.read_csv(RAW_DIR / "implicit_ratings_en.csv",
+implicit = pd.read_csv(RAW_DIR / "implicit_ratings.csv",
                        parse_dates=["created_at"])
-explicit = pd.read_csv(RAW_DIR / "explicit_ratings_en.csv",
+explicit = pd.read_csv(RAW_DIR / "explicit_ratings.csv",
                        parse_dates=["created_at"])
-items    = pd.read_csv(RAW_DIR / "items_en.csv")
+items    = pd.read_csv(RAW_DIR / "items.csv")
 
 print(f"Implicit: {len(implicit):,} rows | {implicit['user_id'].nunique():,} users | {implicit['item_id'].nunique():,} items")
 print(f"Explicit: {len(explicit):,} rows | {explicit['user_id'].nunique():,} users")
