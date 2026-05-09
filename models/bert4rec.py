@@ -11,6 +11,7 @@ Architecture:
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 class BERT4Rec(nn.Module):
@@ -50,6 +51,14 @@ class BERT4Rec(nn.Module):
         padding_mask = (input_seq == self.pad_token)
         x = self.transformer(x, src_key_padding_mask=padding_mask)
         return self.out(x)
+
+    def loss(self, input_seq, labels):
+        logits = self.forward(input_seq)
+        return F.cross_entropy(
+            logits.view(-1, logits.size(-1)),
+            labels.view(-1),
+            ignore_index=0,
+        )
 
 
 def get_model(n_items, **kwargs):
