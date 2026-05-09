@@ -163,7 +163,10 @@ def run_neural_model(
     else:
         raise ValueError(f"No criterion defined for model: {model_name}")
 
-    if model_name in ("sasrec", "gsasrec", "gru4rec", "bert4rec"):
+    # NOTE: bert4rec must be separated from the sequential group.
+    # evaluate_sequential expects (B, n_items+1) logits (last-position output),
+    # but bert4rec.forward() returns (B, L, vocab_size) — different shape.
+    if model_name in ("sasrec", "gsasrec", "gru4rec"):
         eval_fn = lambda m, l, d: evaluate_sequential(m, l, d)
     elif model_name == "bert4rec":
         eval_fn = lambda m, l, d: evaluate_bert4rec(m, l, d)
