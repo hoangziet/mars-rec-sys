@@ -27,6 +27,22 @@ from evaluate import evaluate_sequential, evaluate_bert4rec, evaluate_bprmf, eva
 from trainer import Trainer
 
 
+def masked_cross_entropy_for_valid_sequences(model, batch, device, criterion):
+    inp = batch["input_seq"].to(device)
+    target = batch["target"].to(device)
+    mask = batch.get("mask")
+    if mask is None:
+        return criterion(model(inp), target)
+
+    mask = mask.to(device)
+    valid_rows = mask.any(dim=1)
+    if not torch.any(valid_rows):
+        return torch.zeros((), device=device, requires_grad=True)
+
+    logits = model(inp[valid_rows], mask=mask[valid_rows])
+    return criterion(logits, target[valid_rows])
+
+
 def run_neural_model(model_name, data_dir, stats, device, output_dir,
                      model_kwargs, train_kwargs, seed, neg_mode="random", item_popularity=None):
     np.random.seed(seed)
@@ -84,12 +100,7 @@ def run_neural_model(model_name, data_dir, stats, device, output_dir,
         import torch.nn as nn
         ce = nn.CrossEntropyLoss()
         def criterion_fn(m, batch, dev):
-            inp = batch["input_seq"].to(dev)
-            mask = batch.get("mask")
-            if mask is not None:
-                mask = mask.to(dev)
-            logits = m(inp, mask=mask)
-            return ce(logits, batch["target"].to(dev))
+            return masked_cross_entropy_for_valid_sequences(m, batch, dev, ce)
         eval_fn = lambda m, l, d: evaluate_sequential(m, l, d)
 
     elif model_name == "gsasrec":

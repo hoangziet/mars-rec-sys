@@ -2,185 +2,164 @@
 dataloader.py
 =============
 Shared DataLoader for all 7 models.
-Each model will use its appropriate class.
 
 Classes:
-  - SequenceDataset      : GRU4Rec, SASRec, gSASRec
-  - MaskedSequenceDataset: BERT4Rec
-  - BPRDataset           : BPR-MF
-  - MatrixDataset        : Item-based CF, Popularity
+  - TrainSequenceDataset : SASRec, gSASRec, GRU4Rec — sliding-window next-item prediction
+  - MaskedSequenceDataset: BERT4Rec — masked item modelling
+  - BPRDataset           : BPR-MF — (user, pos, neg) triplets
+  - EvalDataset          : shared val / test — 100-candidate ranking
 """
 
-import json
 import ast
+import json
+
 import numpy as np
 import pandas as pd
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader, Dataset
 
 
-# Helpers 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
-def load_stats(stats_path="data/processed/dataset_stats.json"):
+def load_stats(stats_path: str = "data/processed/dataset_stats.json") -> dict:
     with open(stats_path) as f:
         return json.load(f)
 
 
-def parse_seq(s):
-    """Parse string "[1, 2, 3]" or list to list of int."""
+def parse_seq(s) -> list[int]:
+    """Parse a stringified list '"[1, 2, 3]"' or a Python list to list[int]."""
     if isinstance(s, list):
         return s
     return ast.literal_eval(s)
 
 
-def pad_sequence(seq, max_len, pad_token=0):
-    """Pad left by pad_token, cut if > max_len."""
-    seq = seq[-max_len:]                         
-    pad_len = max_len - len(seq)
-    return [pad_token] * pad_len + seq       
+def pad_sequence(seq: list[int], max_len: int, pad_token: int = 0) -> list[int]:
+    """Truncate to max_len (keep the most recent items), then left-pad."""
+    seq = seq[-max_len:]
+    return [pad_token] * (max_len - len(seq)) + seq
 
 
+# ---------------------------------------------------------------------------
+# 1. TrainSequenceDataset  — SASRec / gSASRec / GRU4Rec
+# ---------------------------------------------------------------------------
 
-# 1. SequenceDataset — use for GRU4Rec, SASRec, gSASRec
+class TrainSequenceDataset(Dataset):
+    """Sliding-window dataset for next-item prediction training.
 
-class SequenceDataset(Dataset):
+    From a full sequence ``[a, b, c, d, e]`` the dataset creates:
+
+    .. code-block:: text
+
+        input_seq = [pad, pad, a, b, c]   (left-padded)
+        pos_items = b  (the next item to predict at this position)
+        neg_items = ?  (randomly sampled, pre-computed at init)
+
+    This provides a training signal at every sequence position, not just
+    the last one — matching the original SASRec paper training protocol.
+
+    ``neg_items`` are pre-sampled at construction time so ``__getitem__``
+    is O(1) and DataLoader workers don't block each other.
     """
-    Each sample:
-      - input_seq : tensor [max_len]        — sequence of items (left padded)
-      - target    : tensor scalar           — item to predict
-      - mask      : tensor [max_len] bool   — True = valid position, False = padding
-      - confidence: tensor scalar (float)   — watch_percentage / 100, used only by gSASRec
 
-    Used for: train / val / test
-    """
-
-    def __init__(self, csv_path, max_len=50, pad_token=0, use_confidence=False):
-        """
-        Args:
-            csv_path       : path to train.csv / val.csv / test.csv
-            max_len        : maximum sequence length (padding/truncation)
-            pad_token      : token padding (default 0)
-            use_confidence : True if used for gSASRec
-        """
+    def __init__(
+        self,
+        csv_path: str,
+        max_len: int = 50,
+        pad_token: int = 0,
+        use_confidence: bool = False,
+        n_items: int | None = None,
+    ) -> None:
         df = pd.read_csv(csv_path)
-        self.max_len        = max_len
-        self.pad_token      = pad_token
+        self.max_len = max_len
+        self.pad_token = pad_token
         self.use_confidence = use_confidence
 
-        self.users      = df["user_idx"].tolist()
-        self.train_seqs = [parse_seq(s) for s in df["train_seq"]]
-        self.targets    = df["target"].tolist()
+        if use_confidence and "confidence" not in df.columns:
+            raise ValueError(
+                "TrainSequenceDataset: 'confidence' column not found. "
+                "Set use_confidence=False or provide the column."
+            )
 
-        # confidence is only available in train.csv (gSASRec)
-        if use_confidence and "confidence" in df.columns:
-            self.confidences = df["confidence"].fillna(1.0).tolist()
-        else:
-            self.confidences = [1.0] * len(df)
+        all_items: set[int] = set()
+        raw: list[tuple[list[int], list[float]]] = []
 
-    def __len__(self):
-        return len(self.users)
+        for row in df.itertuples(index=False):
+            seq = parse_seq(row.item_sequence)
+            all_items.update(seq)
+            conf_val = float(row.confidence) if use_confidence else 1.0
+            confs = [conf_val] * len(seq)
+            raw.append((seq, confs))
 
-    def __getitem__(self, idx):
-        seq    = self.train_seqs[idx]
-        padded = pad_sequence(seq, self.max_len, self.pad_token)
-        mask   = [0 if t == self.pad_token else 1 for t in padded]
+        self._n_items = n_items if n_items is not None else max(all_items)
+        self._all_items = np.arange(1, self._n_items + 1, dtype=np.int64)
 
+        # Expand into per-position samples + pre-sample negatives
+        self.input_seqs:  list[list[int]] = []
+        self.pos_targets: list[int]       = []
+        self.neg_targets: list[int]       = []
+        self.confidences: list[float]     = []
+
+        for seq, confs in raw:
+            if len(seq) < 2:
+                continue
+            seen = set(seq)
+            neg_pool = np.setdiff1d(self._all_items, list(seen))
+            if len(neg_pool) == 0:
+                neg_pool = self._all_items
+
+            for i in range(1, len(seq)):
+                inp = seq[:i]
+                tgt = seq[i]
+                neg = int(np.random.choice(neg_pool))
+
+                self.input_seqs.append(pad_sequence(inp, max_len, pad_token))
+                self.pos_targets.append(tgt)
+                self.neg_targets.append(neg)
+                self.confidences.append(confs[i])
+
+    def __len__(self) -> int:
+        return len(self.pos_targets)
+
+    def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
+        inp = self.input_seqs[idx]
+        mask = [int(t != self.pad_token) for t in inp]
         return {
-            "user"      : torch.tensor(self.users[idx],       dtype=torch.long),
-            "input_seq" : torch.tensor(padded,                dtype=torch.long),
-            "target"    : torch.tensor(self.targets[idx],     dtype=torch.long),
+            "input_seq" : torch.tensor(inp,                   dtype=torch.long),
+            "pos_items" : torch.tensor(self.pos_targets[idx], dtype=torch.long),
+            "neg_items" : torch.tensor(self.neg_targets[idx], dtype=torch.long),
             "mask"      : torch.tensor(mask,                  dtype=torch.bool),
             "confidence": torch.tensor(self.confidences[idx], dtype=torch.float),
         }
 
 
-
-# 2. TrainSequenceDataset — sliding window for training
-#    (SASRec paper uses this approach instead of only predicting the last item)
-
-class TrainSequenceDataset(Dataset):
-    """
-    Used for the TRAIN phase of SASRec / gSASRec / GRU4Rec.
-    From a sequence [a,b,c,d,e], it creates pairs:
-      input=[a,b,c,d]  target=[b,c,d,e]  (next-item prediction at each step)
-
-    More efficient than SequenceDataset as it utilizes the full sequence,
-    not just predicting the last item.
-    """
-
-    def __init__(self, csv_path, max_len=50, pad_token=0, use_confidence=False):
-        df = pd.read_csv(csv_path)
-        self.max_len        = max_len
-        self.pad_token      = pad_token
-        self.use_confidence = use_confidence
-
-        if use_confidence and "confidence" not in df.columns:
-            raise ValueError("TrainSequenceDataset requires 'confidence' column when use_confidence=True")
-
-        self.samples = []
-        for _, row in df.iterrows():
-            seq  = parse_seq(row["item_sequence"])   # full train sequence
-            conf = float(row["confidence"]) if use_confidence else 1.0
-
-            if len(seq) < 2:
-                # Sequence too short, cannot create input-target pairs
-                # Still added to ensure every user has a sample
-                self.samples.append({
-                    "input": [pad_token] * max_len,
-                    "target": seq[-1] if seq else pad_token,
-                    "confidence": conf,
-                })
-                continue
-
-            # Create sliding window
-            for i in range(1, len(seq)):
-                inp = seq[:i]                         # [a], [a,b], [a,b,c]...
-                tgt = seq[i]                          # b, c, d...
-                self.samples.append({
-                    "input": pad_sequence(inp, max_len, pad_token),
-                    "target": tgt,
-                    "confidence": conf,
-                })
-
-    def __len__(self):
-        return len(self.samples)
-
-    def __getitem__(self, idx):
-        s    = self.samples[idx]
-        mask = [0 if t == self.pad_token else 1 for t in s["input"]]
-        return {
-            "input_seq" : torch.tensor(s["input"],      dtype=torch.long),
-            "target"    : torch.tensor(s["target"],     dtype=torch.long),
-            "mask"      : torch.tensor(mask,            dtype=torch.bool),
-            "confidence": torch.tensor(s["confidence"], dtype=torch.float),
-        }
-
-
-
-# 3. MaskedSequenceDataset — used for BERT4Rec
+# ---------------------------------------------------------------------------
+# 2. MaskedSequenceDataset  — BERT4Rec
+# ---------------------------------------------------------------------------
 
 class MaskedSequenceDataset(Dataset):
-    """
-    BERT4Rec uses Masked Item Modeling (similar to BERT).
-    Randomly masks 15% of items in the sequence -> model predicts masked items.
+    """Masked Item Modelling dataset for BERT4Rec.
 
-    Special tokens:
-      pad_token  = 0
-      mask_token = n_items + 1  (adds 1 special token apart from item IDs)
+    Special tokens
+    --------------
+    - ``pad_token``  = 0
+    - ``mask_token`` = n_items + 1
     """
 
-    def __init__(self, csv_path, n_items, max_len=50,
-                 pad_token=0, mask_prob=0.15, is_train=True):
-        """
-        Args:
-            n_items   : total number of items (from dataset_stats.json)
-            mask_prob : xác suất mask mỗi item (default 0.15)
-            is_train  : True = random mask | False = mask last item (val/test)
-        """
+    def __init__(
+        self,
+        csv_path: str,
+        n_items: int,
+        max_len: int = 50,
+        pad_token: int = 0,
+        mask_prob: float = 0.15,
+        is_train: bool = True,
+    ) -> None:
         df = pd.read_csv(csv_path)
         self.max_len    = max_len
         self.pad_token  = pad_token
-        self.mask_token = n_items + 1     # special token
+        self.mask_token = n_items + 1
         self.mask_prob  = mask_prob
         self.is_train   = is_train
 
@@ -191,30 +170,28 @@ class MaskedSequenceDataset(Dataset):
             self.seqs    = [parse_seq(s) for s in df["train_seq"]]
             self.targets = df["target"].tolist()
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.seqs)
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
         seq = self.seqs[idx]
 
         if self.is_train:
-            # Random mask 15% items
             masked_seq = seq.copy()
-            labels     = [0] * len(seq)        # 0 = do not predict at this position
+            labels = [0] * len(seq)
             for i, item in enumerate(seq):
                 if np.random.random() < self.mask_prob:
                     masked_seq[i] = self.mask_token
-                    labels[i]     = item        # ground truth
+                    labels[i] = item
             if seq and not any(labels):
-                force_idx = np.random.randint(len(seq))
-                masked_seq[force_idx] = self.mask_token
-                labels[force_idx] = seq[force_idx]
+                force = np.random.randint(len(seq))
+                masked_seq[force] = self.mask_token
+                labels[force] = seq[force]
             padded_seq = pad_sequence(masked_seq, self.max_len, self.pad_token)
             padded_lbl = pad_sequence(labels,     self.max_len, 0)
         else:
-            # Val/Test: mask the last item → predict
             masked_seq = seq + [self.mask_token]
-            labels     = [0] * len(masked_seq)
+            labels = [0] * len(masked_seq)
             labels[-1] = self.targets[idx]
             padded_seq = pad_sequence(masked_seq, self.max_len, self.pad_token)
             padded_lbl = pad_sequence(labels,     self.max_len, 0)
@@ -225,49 +202,43 @@ class MaskedSequenceDataset(Dataset):
         }
 
 
-
-# 4. BPRDataset — used for BPR-MF
+# ---------------------------------------------------------------------------
+# 3. BPRDataset  — BPR-MF
+# ---------------------------------------------------------------------------
 
 class BPRDataset(Dataset):
-    """
-    BPR requires triplets: (user, pos_item, neg_item)
-    neg_item is randomly sampled from items the user hasn't seen.
+    """(user, pos_item, neg_item) triplets for BPR-MF training.
 
-    Each epoch re-samples a different neg_item -> creating new data.
+    Includes a ``max_retry`` guard to prevent infinite loops when a user
+    has seen nearly every item in the catalogue.
     """
 
-    def __init__(self, csv_path, n_items):
-        """
-        Args:
-            n_items: total items (for random negative sampling)
-        """
+    _MAX_NEG_RETRY: int = 500
+
+    def __init__(self, csv_path: str, n_items: int) -> None:
         df = pd.read_csv(csv_path)
         self.n_items = n_items
+        self.user_items: dict[int, set[int]] = {}
+        self.samples: list[tuple[int, int]] = []
 
-        # Set of items each user has seen -> avoid sampling as negative
-        self.user_items = {}
-        self.samples    = []
-
-        for _, row in df.iterrows():
-            uid  = int(row["user_idx"])
-            seq  = parse_seq(row["item_sequence"])
+        for row in df.itertuples(index=False):
+            uid = int(row.user_idx)
+            seq = parse_seq(row.item_sequence)
             self.user_items.setdefault(uid, set()).update(seq)
-            # Each item in the sequence is a positive sample
             for pos in seq:
                 self.samples.append((uid, pos))
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.samples)
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
         uid, pos = self.samples[idx]
-
-        # Sample random negative item (not in user's history)
-        while True:
+        seen = self.user_items[uid]
+        neg = 1
+        for _ in range(self._MAX_NEG_RETRY):
             neg = np.random.randint(1, self.n_items + 1)
-            if neg not in self.user_items[uid]:
+            if neg not in seen:
                 break
-
         return {
             "user"    : torch.tensor(uid, dtype=torch.long),
             "pos_item": torch.tensor(pos, dtype=torch.long),
@@ -275,142 +246,118 @@ class BPRDataset(Dataset):
         }
 
 
-
-# 5. EvalDataset — shared for val/test across all models
+# ---------------------------------------------------------------------------
+# 4. EvalDataset  — shared val / test
+# ---------------------------------------------------------------------------
 
 class EvalDataset(Dataset):
-    """
-    Used for evaluation (val.csv / test.csv).
-    Returns:
-      - input_seq : history sequence (padded)
-      - target    : item cần predict (ground truth)
-      - neg_items : 99 items random (unseen) + 1 target = 100 candidates
+    """Evaluation dataset: 1 ground-truth + ``num_neg`` negatives.
 
-    Standard evaluation: model rank 100 items, calculates HR@K and NDCG@K.
+    Negatives are pre-sampled once at construction → deterministic metrics.
     """
 
-    def __init__(self, csv_path, n_items, max_len=50, pad_token=0, num_neg=99,
-                 neg_mode="random", item_popularity=None):
+    def __init__(
+        self,
+        csv_path: str,
+        n_items: int,
+        max_len: int = 50,
+        pad_token: int = 0,
+        num_neg: int = 99,
+        neg_mode: str = "random",
+        item_popularity: np.ndarray | None = None,
+    ) -> None:
         if neg_mode not in {"random", "popularity", "mixed"}:
-            raise ValueError(f"Unknown neg_mode: {neg_mode}")
+            raise ValueError(f"Unknown neg_mode '{neg_mode}'.")
         if neg_mode in {"popularity", "mixed"} and item_popularity is None:
-            raise ValueError("item_popularity is required for popularity negative sampling")
+            raise ValueError("item_popularity required for popularity / mixed neg_mode.")
 
         df = pd.read_csv(csv_path)
-        self.max_len  = max_len
+        self.max_len   = max_len
         self.pad_token = pad_token
-        self.n_items  = n_items
-        self.num_neg  = num_neg
-        self.neg_mode = neg_mode
-        self.item_popularity = item_popularity
+        self.n_items   = n_items
 
         self.users   = df["user_idx"].tolist()
         self.seqs    = [parse_seq(s) for s in df["train_seq"]]
         self.targets = df["target"].tolist()
 
-        # Pre-build user history for negative sampling
-        self.user_history = {}
+        user_history: dict[int, set[int]] = {}
         for uid, seq, tgt in zip(self.users, self.seqs, self.targets):
-            self.user_history.setdefault(uid, set()).update(set(seq) | {tgt})
+            user_history.setdefault(uid, set()).update(seq)
+            user_history[uid].add(tgt)
 
-    def __len__(self):
+        all_items = np.arange(1, n_items + 1, dtype=np.int64)
+        self._candidates: list[list[int]] = []
+
+        for uid, tgt in zip(self.users, self.targets):
+            seen      = user_history[uid]
+            available = np.setdiff1d(all_items, list(seen))
+
+            if len(available) < num_neg:
+                negs = np.random.choice(available, size=num_neg, replace=True).tolist()
+            elif neg_mode == "random":
+                negs = np.random.choice(available, size=num_neg, replace=False).tolist()
+            elif neg_mode == "popularity":
+                weights = np.array(
+                    [item_popularity[i] if i < len(item_popularity) else 0.0
+                     for i in available], dtype=float,
+                )
+                weights = weights / weights.sum() if weights.sum() > 0 else None
+                negs = np.random.choice(available, size=num_neg, replace=False, p=weights).tolist()
+            else:  # mixed
+                half = num_neg // 2
+                pop_w = np.array(
+                    [item_popularity[i] if i < len(item_popularity) else 0.0
+                     for i in available], dtype=float,
+                )
+                pop_w = pop_w / pop_w.sum() if pop_w.sum() > 0 else None
+                pop_negs = set(
+                    np.random.choice(available, size=half, replace=False, p=pop_w).tolist()
+                )
+                rand_pool = np.setdiff1d(available, list(pop_negs))
+                rand_negs = np.random.choice(
+                    rand_pool, size=num_neg - half, replace=False
+                ).tolist()
+                negs = list(pop_negs) + rand_negs
+
+            self._candidates.append([tgt] + negs)
+
+        self._padded_seqs = [pad_sequence(seq, max_len, pad_token) for seq in self.seqs]
+
+    def __len__(self) -> int:
         return len(self.users)
 
-    def _available_negatives(self, seen):
-        return [item for item in range(1, self.n_items + 1) if item not in seen]
-
-    def _sample_random_negatives(self, available, count, excluded=None):
-        excluded = set() if excluded is None else set(excluded)
-        pool = [item for item in available if item not in excluded]
-        if len(pool) < count:
-            raise ValueError(f"Cannot sample {count} negatives from {len(pool)} unseen items")
-        if count == 0:
-            return []
-        return np.random.choice(pool, size=count, replace=False).tolist()
-
-    def _sample_popularity_negatives(self, available, count, excluded=None):
-        excluded = set() if excluded is None else set(excluded)
-        pool = [item for item in available if item not in excluded]
-        if len(pool) < count:
-            raise ValueError(f"Cannot sample {count} negatives from {len(pool)} unseen items")
-        if count == 0:
-            return []
-
-        weights = np.array([
-            self.item_popularity[item] if item < len(self.item_popularity) else 0
-            for item in pool
-        ], dtype=float)
-        if weights.sum() <= 0:
-            weights = None
-        else:
-            weights = weights / weights.sum()
-        return np.random.choice(pool, size=count, replace=False, p=weights).tolist()
-
-    def _sample_negatives(self, seen):
-        available = self._available_negatives(seen)
-        if len(available) < self.num_neg:
-            raise ValueError(f"Cannot sample {self.num_neg} negatives from {len(available)} unseen items")
-
-        if self.neg_mode == "random":
-            return self._sample_random_negatives(available, self.num_neg)
-        if self.neg_mode == "popularity":
-            return self._sample_popularity_negatives(available, self.num_neg)
-
-        popularity_count = self.num_neg // 2
-        random_count = self.num_neg - popularity_count
-        neg_items = self._sample_popularity_negatives(available, popularity_count)
-        neg_items.extend(self._sample_random_negatives(available, random_count, excluded=neg_items))
-        return neg_items
-
-    def __getitem__(self, idx):
-        uid = self.users[idx]
-        seq = self.seqs[idx]
-        tgt = self.targets[idx]
-
-        padded = pad_sequence(seq, self.max_len, self.pad_token)
-        mask   = [0 if t == self.pad_token else 1 for t in padded]
-
-        seen = self.user_history.get(uid, set())
-        neg_items = self._sample_negatives(seen)
-
-        # candidates = [target] + negatives - target must stay at index 0
-        candidates = [tgt] + neg_items
-        if candidates[0] != tgt:
-            raise ValueError("Target must be first candidate")
-        if len(candidates) != 1 + self.num_neg:
-            raise ValueError("Candidate length mismatch")
-        if len(candidates) != len(set(candidates)):
-            raise ValueError("Candidates must be unique")
-        if not set(neg_items).isdisjoint(seen):
-            raise ValueError("Negative candidates must be unseen")
-
+    def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
+        padded = self._padded_seqs[idx]
+        mask   = [int(t != self.pad_token) for t in padded]
         return {
-            "user"      : torch.tensor(uid,        dtype=torch.long),
-            "input_seq" : torch.tensor(padded,     dtype=torch.long),
-            "mask"      : torch.tensor(mask,       dtype=torch.bool),
-            "target"    : torch.tensor(tgt,        dtype=torch.long),
-            "candidates": torch.tensor(candidates, dtype=torch.long),
+            "user"      : torch.tensor(self.users[idx],   dtype=torch.long),
+            "input_seq" : torch.tensor(padded,            dtype=torch.long),
+            "mask"      : torch.tensor(mask,              dtype=torch.bool),
+            "target"    : torch.tensor(self.targets[idx], dtype=torch.long),
+            "candidates": torch.tensor(self._candidates[idx], dtype=torch.long),
         }
 
 
+# ---------------------------------------------------------------------------
+# Factory helpers
+# ---------------------------------------------------------------------------
 
-# 6. Factory functions — convenience
-
-def get_train_loader(model_type, train_csv, stats, batch_size=256,
-                     max_len=50, num_workers=0, use_confidence=False):
-    """
-    Returns the appropriate DataLoader for each model.
-
-    Args:
-        model_type: "sasrec" | "gsasrec" | "gru4rec" |
-                    "bert4rec" | "bprmf" | "popularity" | "itemcf"
-    """
+def get_train_loader(
+    model_type: str,
+    train_csv: str,
+    stats: dict,
+    batch_size: int = 256,
+    max_len: int = 50,
+    num_workers: int = 0,
+    use_confidence: bool = False,
+) -> DataLoader | None:
     n_items = stats["n_items"]
 
     if model_type in ("sasrec", "gsasrec", "gru4rec"):
         dataset = TrainSequenceDataset(
             train_csv, max_len=max_len, pad_token=0,
-            use_confidence=(model_type == "gsasrec")
+            use_confidence=(use_confidence or model_type == "gsasrec"),
+            n_items=n_items,
         )
     elif model_type == "bert4rec":
         dataset = MaskedSequenceDataset(
@@ -419,62 +366,24 @@ def get_train_loader(model_type, train_csv, stats, batch_size=256,
     elif model_type == "bprmf":
         dataset = BPRDataset(train_csv, n_items=n_items)
     else:
-        # Popularity and ItemCF do not need DataLoader
         return None
 
-    return DataLoader(dataset, batch_size=batch_size,
-                      shuffle=True, num_workers=num_workers)
+    return DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
 
 
-def get_eval_loader(eval_csv, stats, batch_size=64,
-                    max_len=50, num_workers=0, num_neg=99,
-                    neg_mode="random", item_popularity=None):
-    """Shared for val and test across all models."""
+def get_eval_loader(
+    eval_csv: str,
+    stats: dict,
+    batch_size: int = 64,
+    max_len: int = 50,
+    num_workers: int = 0,
+    num_neg: int = 99,
+    neg_mode: str = "random",
+    item_popularity: np.ndarray | None = None,
+) -> DataLoader:
     dataset = EvalDataset(
-        eval_csv,
-        n_items=stats["n_items"],
-        max_len=max_len,
-        pad_token=0,
-        num_neg=num_neg,
-        neg_mode=neg_mode,
+        eval_csv, n_items=stats["n_items"], max_len=max_len,
+        pad_token=0, num_neg=num_neg, neg_mode=neg_mode,
         item_popularity=item_popularity,
     )
-    return DataLoader(dataset, batch_size=batch_size,
-                      shuffle=False, num_workers=num_workers)
-
-
-
-# Quick test
-
-if __name__ == "__main__":
-    stats = load_stats("data/processed/dataset_stats.json")
-    print("Dataset stats:", stats)
-
-    # Test SequenceDataset
-    print("-- Test SequenceDataset (val) --")
-    val_loader = get_eval_loader("data/processed/val.csv", stats, batch_size=4)
-    batch = next(iter(val_loader))
-    print("input_seq shape:", batch["input_seq"].shape)   # [4, 50]
-    print("target shape   :", batch["target"].shape)      # [4]
-    print("candidates     :", batch["candidates"].shape)  # [4, 100]
-    print("mask sample    :", batch["mask"][0])
-
-    # Test BPRDataset
-    print("-- Test BPRDataset (train) --")
-    bpr_loader = get_train_loader("bprmf", "data/processed/train.csv",
-                                   stats, batch_size=4)
-    batch = next(iter(bpr_loader))
-    print("user    :", batch["user"])
-    print("pos_item:", batch["pos_item"])
-    print("neg_item:", batch["neg_item"])
-
-    # Test TrainSequenceDataset (SASRec)
-    print("-- Test TrainSequenceDataset (SASRec) --")
-    train_loader = get_train_loader("sasrec", "data/processed/train.csv",
-                                     stats, batch_size=4)
-    batch = next(iter(train_loader))
-    print("input_seq shape:", batch["input_seq"].shape)
-    print("target shape   :", batch["target"].shape)
-    print("mask sample    :", batch["mask"][0])
-
-    print("\nDataLoader test passed!")
+    return DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
