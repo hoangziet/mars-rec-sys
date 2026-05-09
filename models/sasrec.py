@@ -64,10 +64,12 @@ class SASRecBlock(nn.Module):
 
 class SASRec(nn.Module):
     def __init__(
-        self, n_items, max_len=50, hidden_dim=64,
+        self, n_items, max_len=50, hidden_dim=64, emb_dim=None,
         num_heads=2, num_layers=2, dropout=0.2,
     ):
         super().__init__()
+        if emb_dim is not None:
+            hidden_dim = emb_dim
         self.n_items = n_items
         self.max_len = max_len
         self.hidden_dim = hidden_dim
@@ -105,9 +107,11 @@ class SASRec(nn.Module):
         if mask is None:
             last_hidden = x[:, -1, :]
         else:
-            seq_lens = mask.sum(dim=1) - 1
-            seq_lens = torch.clamp(seq_lens, min=0)
-            last_hidden = x[torch.arange(B, device=x.device), seq_lens]
+            has_valid = mask.any(dim=1)
+            reversed_indices = torch.flip(mask.to(dtype=torch.long), dims=[1]).argmax(dim=1)
+            last_indices = (L - 1) - reversed_indices
+            last_indices = torch.where(has_valid, last_indices, torch.zeros_like(last_indices))
+            last_hidden = x[torch.arange(B, device=x.device), last_indices]
 
         return self.output(last_hidden)
 

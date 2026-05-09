@@ -18,6 +18,8 @@ class BPRMF(nn.Module):
         super().__init__()
         self.user_embedding = nn.Embedding(n_users + 1, emb_dim, padding_idx=0)
         self.item_embedding = nn.Embedding(n_items + 1, emb_dim, padding_idx=0)
+        self.user_emb = self.user_embedding
+        self.item_emb = self.item_embedding
         nn.init.normal_(self.user_embedding.weight, std=0.01)
         nn.init.normal_(self.item_embedding.weight, std=0.01)
 
@@ -26,6 +28,10 @@ class BPRMF(nn.Module):
         p = self.item_embedding(pos_items)
         n = self.item_embedding(neg_items)
         return (u * p).sum(dim=-1), (u * n).sum(dim=-1)
+
+    def loss(self, users, pos_items, neg_items, reg_lambda=1e-4):
+        pos_scores, neg_scores = self.forward(users, pos_items, neg_items)
+        return bpr_loss(pos_scores, neg_scores, reg_lambda=reg_lambda, model=self)
 
     def score(self, users, items):
         u = self.user_embedding(users)
