@@ -64,9 +64,7 @@ class GSASRecBlock(nn.Module):
         residual = x
         z = self.ln1(x)
         attn_out, _ = self.attn(
-            z,
-            z,
-            z,
+            z, z, z,
             attn_mask=attn_mask,
             key_padding_mask=key_padding_mask,
             need_weights=False,
@@ -83,7 +81,7 @@ class GSASRec(nn.Module):
     Parameters
     ----------
     beta:
-        gBCE temperature. beta=1 → standard BCE (= SASRec).
+        gBCE temperature. beta=1 -> standard BCE (= SASRec).
         Petrov & Macdonald recommend beta=0.2.
     num_neg:
         Number of negatives per positive expected during training.
@@ -106,24 +104,26 @@ class GSASRec(nn.Module):
         if emb_dim is not None:
             hidden_dim = emb_dim
 
-        self.n_items = n_items
-        self.max_len = max_len
+        self.n_items    = n_items
+        self.max_len    = max_len
         self.hidden_dim = hidden_dim
-        self.pad_token = 0
-        self.beta = beta
-        self.num_neg = num_neg
+        self.pad_token  = 0
+        self.beta       = beta
+        self.num_neg    = num_neg
 
-        self.item_emb = nn.Embedding(n_items + 1, hidden_dim, padding_idx=0)
-        self.pos_emb = nn.Embedding(max_len, hidden_dim)
+        self.item_emb    = nn.Embedding(n_items + 1, hidden_dim, padding_idx=0)
+        self.pos_emb     = nn.Embedding(max_len, hidden_dim)
         self.emb_dropout = nn.Dropout(dropout)
-        self.blocks = nn.ModuleList(
+        self.blocks      = nn.ModuleList(
             [GSASRecBlock(hidden_dim, num_heads, dropout) for _ in range(num_layers)]
         )
         self.final_ln = nn.LayerNorm(hidden_dim)
 
         nn.init.normal_(self.item_emb.weight, std=0.01)
-        nn.init.normal_(self.pos_emb.weight, std=0.01)
+        nn.init.normal_(self.pos_emb.weight,  std=0.01)
 
+    # ------------------------------------------------------------------
+    # Encoder
     # ------------------------------------------------------------------
 
     def _encode(self, input_seq: torch.Tensor) -> torch.Tensor:
@@ -139,13 +139,13 @@ class GSASRec(nn.Module):
         return self.final_ln(x)
 
     def _last_hidden(self, input_seq: torch.Tensor) -> torch.Tensor:
-        """Extract hidden state at the last non-padding position."""
-        hidden = self._encode(input_seq)
-        mask = input_seq != self.pad_token
+        """Extract hidden state at the last non-padding position. Returns (B, D)."""
+        hidden    = self._encode(input_seq)
+        mask      = input_seq != self.pad_token
         has_valid = mask.any(dim=1)
-        last_idx = mask.long().flip(dims=[1]).argmax(dim=1)
-        last_idx = (input_seq.size(1) - 1) - last_idx
-        last_idx = torch.where(has_valid, last_idx, torch.zeros_like(last_idx))
+        last_idx  = mask.long().flip(dims=[1]).argmax(dim=1)
+        last_idx  = (input_seq.size(1) - 1) - last_idx
+        last_idx  = torch.where(has_valid, last_idx, torch.zeros_like(last_idx))
         return hidden[torch.arange(hidden.size(0), device=hidden.device), last_idx]
 
     # ------------------------------------------------------------------
@@ -164,32 +164,31 @@ class GSASRec(nn.Module):
         Parameters
         ----------
         input_seq  : (B, L)
-        pos_items  : (B, L) — dataloader format; last valid position is used.
-        neg_items  : (B, L) or (B, K) — if (B, L), last valid pos is used;
-                    if (B, K) already extracted, used directly.
+        pos_items  : (B,) or (B, L) — if 2-D, last valid position is extracted.
+        neg_items  : (B,), (B, K), or (B, L) — reshaped accordingly.
         confidence : (B,) optional watch_percentage / 100.
         """
-        # Extract last valid position from (B, L) tensors
+        # Normalise pos/neg to (B,) and (B, K)
         if pos_items.dim() == 2 and pos_items.size(1) > 1:
-            mask = pos_items != self.pad_token
+            mask      = pos_items != self.pad_token
             has_valid = mask.any(dim=1)
-            last_idx = mask.long().flip(dims=[1]).argmax(dim=1)
-            last_idx = (pos_items.size(1) - 1) - last_idx
-            last_idx = torch.where(has_valid, last_idx, torch.zeros_like(last_idx))
+            last_idx  = mask.long().flip(dims=[1]).argmax(dim=1)
+            last_idx  = (pos_items.size(1) - 1) - last_idx
+            last_idx  = torch.where(has_valid, last_idx, torch.zeros_like(last_idx))
 
-            B = input_seq.size(0)
+            B      = input_seq.size(0)
             arange = torch.arange(B, device=input_seq.device)
-            pos_items = pos_items[arange, last_idx]  # (B,)
-            neg_items = neg_items[arange, last_idx].unsqueeze(1)  # (B, 1)
+            pos_items = pos_items[arange, last_idx]              # (B,)
+            neg_items = neg_items[arange, last_idx].unsqueeze(1) # (B, 1)
         elif neg_items.dim() == 1:
-            neg_items = neg_items.unsqueeze(1)  # (B,) → (B, 1)
+            neg_items = neg_items.unsqueeze(1)                   # (B,) -> (B, 1)
 
-        h = self._last_hidden(input_seq)  # (B, D)
+        h = self._last_hidden(input_seq)             # (B, D)
 
-        pos_emb = self.item_emb(pos_items)  # (B, D)
-        neg_emb = self.item_emb(neg_items)  # (B, K, D)
+        pos_emb   = self.item_emb(pos_items)         # (B, D)
+        neg_emb   = self.item_emb(neg_items)         # (B, K, D)
 
-        pos_score = (h * pos_emb).sum(dim=-1)  # (B,)
+        pos_score = (h * pos_emb).sum(dim=-1)        # (B,)
         neg_score = torch.bmm(neg_emb, h.unsqueeze(-1)).squeeze(-1)  # (B, K)
 
         pos_loss = F.binary_cross_entropy_with_logits(
@@ -205,6 +204,18 @@ class GSASRec(nn.Module):
             gbce = gbce * torch.clamp(confidence.float(), min=0.0)
 
         return gbce.mean()
+
+    # ------------------------------------------------------------------
+    # Inference
+    # ------------------------------------------------------------------
+
+    def predict(self, input_seq: torch.Tensor) -> torch.Tensor:
+        """Return scores (B, n_items+1) via dot-product with item_emb."""
+        return self._last_hidden(input_seq) @ self.item_emb.weight.T
+
+    def forward(self, input_seq: torch.Tensor) -> torch.Tensor:
+        """Alias for predict — returns scores over full item vocab."""
+        return self.predict(input_seq)
 
 
 def get_model(n_items: int, **kwargs) -> GSASRec:
