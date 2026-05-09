@@ -155,7 +155,7 @@ def evaluate_bprmf(model, eval_loader, device, k_list=(10, 20)):
         item_emb = model.item_embedding(candidates)      # [B, 100, dim]
 
         # Score = dot product
-        scores = torch.bmm(-
+        scores = torch.bmm(
             item_emb,                                    # [B, 100, dim]
             user_emb.unsqueeze(-1)                       # [B, dim, 1]
         ).squeeze(-1)                                    # [B, 100]
@@ -169,11 +169,12 @@ def evaluate_bprmf(model, eval_loader, device, k_list=(10, 20)):
 def evaluate_popularity(item_scores, eval_loader, k_list=(10, 20)):
     """
     Popularity does not need model forward.
-    item_scores: dict {item_idx: count} — already calculated from interactions.csv
+    item_scores: dict {item_idx: count} or ndarray indexed by item id.
 
     For each user, rank 100 candidates by popularity.
     """
     all_scores = []
+    use_mapping = hasattr(item_scores, "get")
 
     for batch in eval_loader:
         candidates = batch["candidates"].numpy()         # [B, 100]
@@ -181,6 +182,7 @@ def evaluate_popularity(item_scores, eval_loader, k_list=(10, 20)):
         for i in range(candidates.shape[0]):
             scores = np.array([
                 item_scores.get(int(c), 0)
+                if use_mapping else (item_scores[int(c)] if 0 <= int(c) < len(item_scores) else 0)
                 for c in candidates[i]
             ], dtype=np.float32)
             all_scores.append(scores)
