@@ -32,10 +32,10 @@ import torch.nn.functional as F
 class PointWiseFeedForward(nn.Module):
     def __init__(self, hidden_dim: int, dropout: float = 0.2) -> None:
         super().__init__()
-        self.conv1   = nn.Conv1d(hidden_dim, hidden_dim, kernel_size=1)
-        self.conv2   = nn.Conv1d(hidden_dim, hidden_dim, kernel_size=1)
+        self.conv1 = nn.Conv1d(hidden_dim, hidden_dim, kernel_size=1)
+        self.conv2 = nn.Conv1d(hidden_dim, hidden_dim, kernel_size=1)
         self.dropout = nn.Dropout(dropout)
-        self.relu    = nn.ReLU()
+        self.relu = nn.ReLU()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         out = self.relu(self.conv1(x.transpose(1, 2)))
@@ -48,21 +48,29 @@ class PointWiseFeedForward(nn.Module):
 class GSASRecBlock(nn.Module):
     def __init__(self, hidden_dim: int, num_heads: int, dropout: float = 0.2) -> None:
         super().__init__()
-        self.ln1      = nn.LayerNorm(hidden_dim)
-        self.attn     = nn.MultiheadAttention(
-            embed_dim=hidden_dim, num_heads=num_heads,
-            dropout=dropout, batch_first=True,
+        self.ln1 = nn.LayerNorm(hidden_dim)
+        self.attn = nn.MultiheadAttention(
+            embed_dim=hidden_dim,
+            num_heads=num_heads,
+            dropout=dropout,
+            batch_first=True,
         )
         self.dropout1 = nn.Dropout(dropout)
-        self.ln2      = nn.LayerNorm(hidden_dim)
-        self.ffn      = PointWiseFeedForward(hidden_dim, dropout)
+        self.ln2 = nn.LayerNorm(hidden_dim)
+        self.ffn = PointWiseFeedForward(hidden_dim, dropout)
         self.dropout2 = nn.Dropout(dropout)
 
     def forward(self, x, attn_mask=None, key_padding_mask=None):
         residual = x
         z = self.ln1(x)
-        attn_out, _ = self.attn(z, z, z,
-            attn_mask=attn_mask, key_padding_mask=key_padding_mask, need_weights=False)
+        attn_out, _ = self.attn(
+            z,
+            z,
+            z,
+            attn_mask=attn_mask,
+            key_padding_mask=key_padding_mask,
+            need_weights=False,
+        )
         x = residual + self.dropout1(attn_out)
         residual = x
         x = residual + self.dropout2(self.ffn(self.ln2(x)))
@@ -98,23 +106,23 @@ class GSASRec(nn.Module):
         if emb_dim is not None:
             hidden_dim = emb_dim
 
-        self.n_items    = n_items
-        self.max_len    = max_len
+        self.n_items = n_items
+        self.max_len = max_len
         self.hidden_dim = hidden_dim
-        self.pad_token  = 0
-        self.beta       = beta
-        self.num_neg    = num_neg
+        self.pad_token = 0
+        self.beta = beta
+        self.num_neg = num_neg
 
-        self.item_emb    = nn.Embedding(n_items + 1, hidden_dim, padding_idx=0)
-        self.pos_emb     = nn.Embedding(max_len, hidden_dim)
+        self.item_emb = nn.Embedding(n_items + 1, hidden_dim, padding_idx=0)
+        self.pos_emb = nn.Embedding(max_len, hidden_dim)
         self.emb_dropout = nn.Dropout(dropout)
-        self.blocks      = nn.ModuleList(
+        self.blocks = nn.ModuleList(
             [GSASRecBlock(hidden_dim, num_heads, dropout) for _ in range(num_layers)]
         )
         self.final_ln = nn.LayerNorm(hidden_dim)
 
         nn.init.normal_(self.item_emb.weight, std=0.01)
-        nn.init.normal_(self.pos_emb.weight,  std=0.01)
+        nn.init.normal_(self.pos_emb.weight, std=0.01)
 
     # ------------------------------------------------------------------
 
@@ -151,45 +159,52 @@ class GSASRec(nn.Module):
         neg_items: torch.Tensor,
         confidence: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """Generalised BCE loss.
+        """Generalised BCE loss at the last valid sequence position.
 
-        L = beta * BCE(pos=1) + (1-beta) * mean_k[BCE(neg_k=0)]
+        Parameters
+        ----------
+        input_seq  : (B, L)
+        pos_items  : (B, L) — dataloader format; last valid position is used.
+        neg_items  : (B, L) or (B, K) — if (B, L), last valid pos is used;
+                    if (B, K) already extracted, used directly.
+        confidence : (B,) optional watch_percentage / 100.
         """
-        if neg_items.dim() == 1:
-            neg_items = neg_items.unsqueeze(1)   # (B,) → (B, 1)
+        # Extract last valid position from (B, L) tensors
+        if pos_items.dim() == 2 and pos_items.size(1) > 1:
+            mask = pos_items != self.pad_token
+            has_valid = mask.any(dim=1)
+            last_idx = mask.long().flip(dims=[1]).argmax(dim=1)
+            last_idx = (pos_items.size(1) - 1) - last_idx
+            last_idx = torch.where(has_valid, last_idx, torch.zeros_like(last_idx))
 
-        h = self._last_hidden(input_seq)          # (B, D)
+            B = input_seq.size(0)
+            arange = torch.arange(B, device=input_seq.device)
+            pos_items = pos_items[arange, last_idx]  # (B,)
+            neg_items = neg_items[arange, last_idx].unsqueeze(1)  # (B, 1)
+        elif neg_items.dim() == 1:
+            neg_items = neg_items.unsqueeze(1)  # (B,) → (B, 1)
 
-        pos_emb = self.item_emb(pos_items)        # (B, D)
-        neg_emb = self.item_emb(neg_items)        # (B, K, D)
+        h = self._last_hidden(input_seq)  # (B, D)
 
-        pos_score = (h * pos_emb).sum(dim=-1)                             # (B,)
-        neg_score = torch.bmm(neg_emb, h.unsqueeze(-1)).squeeze(-1)       # (B, K)
+        pos_emb = self.item_emb(pos_items)  # (B, D)
+        neg_emb = self.item_emb(neg_items)  # (B, K, D)
+
+        pos_score = (h * pos_emb).sum(dim=-1)  # (B,)
+        neg_score = torch.bmm(neg_emb, h.unsqueeze(-1)).squeeze(-1)  # (B, K)
 
         pos_loss = F.binary_cross_entropy_with_logits(
             pos_score, torch.ones_like(pos_score), reduction="none"
-        )  # (B,)
+        )
         neg_loss = F.binary_cross_entropy_with_logits(
             neg_score, torch.zeros_like(neg_score), reduction="none"
-        ).mean(dim=1)  # (B,)
+        ).mean(dim=1)
 
-        gbce = self.beta * pos_loss + (1.0 - self.beta) * neg_loss        # (B,)
+        gbce = self.beta * pos_loss + (1.0 - self.beta) * neg_loss  # (B,)
 
         if confidence is not None:
             gbce = gbce * torch.clamp(confidence.float(), min=0.0)
 
         return gbce.mean()
-
-    # ------------------------------------------------------------------
-    # Inference
-    # ------------------------------------------------------------------
-
-    def predict(self, input_seq: torch.Tensor) -> torch.Tensor:
-        """Return scores (B, n_items+1) over full item vocabulary."""
-        return self._last_hidden(input_seq) @ self.item_emb.weight.T
-
-    def forward(self, input_seq: torch.Tensor) -> torch.Tensor:
-        return self.predict(input_seq)
 
 
 def get_model(n_items: int, **kwargs) -> GSASRec:
