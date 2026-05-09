@@ -1,2 +1,0 @@
-user_idx,item_sequence,seq_len,target
-1,"[1, 2, 3]",3,4
