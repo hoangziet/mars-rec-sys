@@ -114,10 +114,13 @@ class TrainSequenceDataset(Dataset):
         self.pad_token      = pad_token
         self.use_confidence = use_confidence
 
+        if use_confidence and "confidence" not in df.columns:
+            raise ValueError("TrainSequenceDataset requires 'confidence' column when use_confidence=True")
+
         self.samples = []
         for _, row in df.iterrows():
             seq  = parse_seq(row["item_sequence"])   # full train sequence
-            conf = float(row.get("confidence", 1.0)) if use_confidence else 1.0
+            conf = float(row["confidence"]) if use_confidence else 1.0
 
             if len(seq) < 2:
                 # Sequence too short, cannot create input-target pairs
@@ -202,6 +205,10 @@ class MaskedSequenceDataset(Dataset):
                 if np.random.random() < self.mask_prob:
                     masked_seq[i] = self.mask_token
                     labels[i]     = item        # ground truth
+            if seq and not any(labels):
+                force_idx = np.random.randint(len(seq))
+                masked_seq[force_idx] = self.mask_token
+                labels[force_idx] = seq[force_idx]
             padded_seq = pad_sequence(masked_seq, self.max_len, self.pad_token)
             padded_lbl = pad_sequence(labels,     self.max_len, 0)
         else:
@@ -244,7 +251,7 @@ class BPRDataset(Dataset):
         for _, row in df.iterrows():
             uid  = int(row["user_idx"])
             seq  = parse_seq(row["item_sequence"])
-            self.user_items[uid] = set(seq)
+            self.user_items.setdefault(uid, set()).update(seq)
             # Each item in the sequence is a positive sample
             for pos in seq:
                 self.samples.append((uid, pos))
@@ -282,12 +289,20 @@ class EvalDataset(Dataset):
     Standard evaluation: model rank 100 items, calculates HR@K and NDCG@K.
     """
 
-    def __init__(self, csv_path, n_items, max_len=50, pad_token=0, num_neg=99):
+    def __init__(self, csv_path, n_items, max_len=50, pad_token=0, num_neg=99,
+                 neg_mode="random", item_popularity=None):
+        if neg_mode not in {"random", "popularity", "mixed"}:
+            raise ValueError(f"Unknown neg_mode: {neg_mode}")
+        if neg_mode in {"popularity", "mixed"} and item_popularity is None:
+            raise ValueError("item_popularity is required for popularity negative sampling")
+
         df = pd.read_csv(csv_path)
         self.max_len  = max_len
         self.pad_token = pad_token
         self.n_items  = n_items
         self.num_neg  = num_neg
+        self.neg_mode = neg_mode
+        self.item_popularity = item_popularity
 
         self.users   = df["user_idx"].tolist()
         self.seqs    = [parse_seq(s) for s in df["train_seq"]]
@@ -296,10 +311,56 @@ class EvalDataset(Dataset):
         # Pre-build user history for negative sampling
         self.user_history = {}
         for uid, seq, tgt in zip(self.users, self.seqs, self.targets):
-            self.user_history[uid] = set(seq) | {tgt}
+            self.user_history.setdefault(uid, set()).update(set(seq) | {tgt})
 
     def __len__(self):
         return len(self.users)
+
+    def _available_negatives(self, seen):
+        return [item for item in range(1, self.n_items + 1) if item not in seen]
+
+    def _sample_random_negatives(self, available, count, excluded=None):
+        excluded = set() if excluded is None else set(excluded)
+        pool = [item for item in available if item not in excluded]
+        if len(pool) < count:
+            raise ValueError(f"Cannot sample {count} negatives from {len(pool)} unseen items")
+        if count == 0:
+            return []
+        return np.random.choice(pool, size=count, replace=False).tolist()
+
+    def _sample_popularity_negatives(self, available, count, excluded=None):
+        excluded = set() if excluded is None else set(excluded)
+        pool = [item for item in available if item not in excluded]
+        if len(pool) < count:
+            raise ValueError(f"Cannot sample {count} negatives from {len(pool)} unseen items")
+        if count == 0:
+            return []
+
+        weights = np.array([
+            self.item_popularity[item] if item < len(self.item_popularity) else 0
+            for item in pool
+        ], dtype=float)
+        if weights.sum() <= 0:
+            weights = None
+        else:
+            weights = weights / weights.sum()
+        return np.random.choice(pool, size=count, replace=False, p=weights).tolist()
+
+    def _sample_negatives(self, seen):
+        available = self._available_negatives(seen)
+        if len(available) < self.num_neg:
+            raise ValueError(f"Cannot sample {self.num_neg} negatives from {len(available)} unseen items")
+
+        if self.neg_mode == "random":
+            return self._sample_random_negatives(available, self.num_neg)
+        if self.neg_mode == "popularity":
+            return self._sample_popularity_negatives(available, self.num_neg)
+
+        popularity_count = self.num_neg // 2
+        random_count = self.num_neg - popularity_count
+        neg_items = self._sample_popularity_negatives(available, popularity_count)
+        neg_items.extend(self._sample_random_negatives(available, random_count, excluded=neg_items))
+        return neg_items
 
     def __getitem__(self, idx):
         uid = self.users[idx]
@@ -309,16 +370,19 @@ class EvalDataset(Dataset):
         padded = pad_sequence(seq, self.max_len, self.pad_token)
         mask   = [0 if t == self.pad_token else 1 for t in padded]
 
-        # Sample 99 negative items
-        neg_items = []
-        seen      = self.user_history.get(uid, set())
-        while len(neg_items) < self.num_neg:
-            neg = np.random.randint(1, self.n_items + 1)
-            if neg not in seen and neg not in neg_items:
-                neg_items.append(neg)
+        seen = self.user_history.get(uid, set())
+        neg_items = self._sample_negatives(seen)
 
-        # candidates = [target] + [99 negs] - model must rank target at the top
+        # candidates = [target] + negatives - target must stay at index 0
         candidates = [tgt] + neg_items
+        if candidates[0] != tgt:
+            raise ValueError("Target must be first candidate")
+        if len(candidates) != 1 + self.num_neg:
+            raise ValueError("Candidate length mismatch")
+        if len(candidates) != len(set(candidates)):
+            raise ValueError("Candidates must be unique")
+        if not set(neg_items).isdisjoint(seen):
+            raise ValueError("Negative candidates must be unseen")
 
         return {
             "user"      : torch.tensor(uid,        dtype=torch.long),
@@ -363,11 +427,17 @@ def get_train_loader(model_type, train_csv, stats, batch_size=256,
 
 
 def get_eval_loader(eval_csv, stats, batch_size=64,
-                    max_len=50, num_workers=0, num_neg=99):
+                    max_len=50, num_workers=0, num_neg=99,
+                    neg_mode="random", item_popularity=None):
     """Shared for val and test across all models."""
     dataset = EvalDataset(
-        eval_csv, n_items=stats["n_items"],
-        max_len=max_len, pad_token=0, num_neg=num_neg
+        eval_csv,
+        n_items=stats["n_items"],
+        max_len=max_len,
+        pad_token=0,
+        num_neg=num_neg,
+        neg_mode=neg_mode,
+        item_popularity=item_popularity,
     )
     return DataLoader(dataset, batch_size=batch_size,
                       shuffle=False, num_workers=num_workers)

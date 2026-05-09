@@ -31,13 +31,13 @@ class ExperimentTracker:
         self.best_val_ndcg: float = -1.0
         self.test_results: dict = {}
 
-    def log_epoch(self, epoch: int, train_loss: float, val_loss: float,
+    def log_epoch(self, epoch: int, train_loss: float, val_loss: float | None,
                   val_metrics: dict):
         """Record one epoch's results."""
         entry = {
             "epoch": epoch,
             "train_loss": round(train_loss, 6),
-            "val_loss": round(val_loss, 6),
+            "val_loss": None if val_loss is None else round(val_loss, 6),
         }
         entry.update({k: round(v, 6) for k, v in val_metrics.items()})
         self.epochs.append(entry)
@@ -67,14 +67,18 @@ class ExperimentTracker:
         epochs = [e["epoch"] for e in self.epochs]
         train = [e["train_loss"] for e in self.epochs]
         val = [e["val_loss"] for e in self.epochs]
+        has_val = any(v is not None for v in val)
 
         plt.figure(figsize=(8, 5))
         plt.plot(epochs, train, "b-o", label="Train Loss", markersize=4)
-        plt.plot(epochs, val, "r-o", label="Val Loss", markersize=4)
+        if has_val:
+            plt.plot(epochs, val, "r-o", label="Val Loss", markersize=4)
         plt.xlabel("Epoch")
         plt.ylabel("Loss")
         plt.title(f"{self.model_name} — Loss Curve")
-        plt.legend()
+        handles, labels = plt.gca().get_legend_handles_labels()
+        if handles:
+            plt.legend()
         plt.grid(True, alpha=0.3)
         plt.tight_layout()
         plt.savefig(path, dpi=150)
@@ -160,7 +164,7 @@ class Trainer:
 
             # Validate
             val_metrics = eval_fn(model, val_loader, self.device)
-            val_loss = val_metrics.get("val_loss", 0.0)
+            val_loss = val_metrics.get("val_loss")
 
             # Log
             self.tracker.log_epoch(epoch, train_loss, val_loss, val_metrics)
@@ -168,10 +172,11 @@ class Trainer:
             # Print
             hr10 = val_metrics.get("HR@10", 0)
             ndcg10 = val_metrics.get("NDCG@10", 0)
+            val_loss_str = "NA" if val_loss is None else f"{val_loss:.4f}"
             print(
                 f"  Epoch {epoch:02d}/{epochs:02d} | "
                 f"train_loss={train_loss:.4f} | "
-                f"val_loss={val_loss:.4f} | "
+                f"val_loss={val_loss_str} | "
                 f"HR@10={hr10:.4f} | "
                 f"NDCG@10={ndcg10:.4f}"
             )
