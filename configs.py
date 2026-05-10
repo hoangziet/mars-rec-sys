@@ -16,6 +16,7 @@ MODEL_CONFIGS = {
             "batch_size": 256,
             "epochs": 20,
             "lr": 1e-3,
+            "weight_decay": 1e-4,
             "max_len": 50,
             "gradient_clip": 5.0,
         },
@@ -26,14 +27,16 @@ MODEL_CONFIGS = {
             "num_heads": 2,
             "num_layers": 2,
             "dropout": 0.2,
-            "beta": 0.2,  # gBCE temperature (paper default)
-            "num_neg": 1,  # negatives per positive
+            "t": 0.5,      # gBCE temperature (paper default: 0.5)
+            "num_neg": 32, # negatives per positive (paper default: 32)
         },
         "train_kwargs": {
             "batch_size": 256,
             "epochs": 20,
             "lr": 1e-3,
+            "weight_decay": 1e-4,
             "max_len": 50,
+            "num_neg": 32,  # passed to TrainSequenceDataset
             "gradient_clip": 5.0,
         },
     },

@@ -14,9 +14,6 @@ import pandas as pd
 from collections import Counter
 from pathlib import Path
 
-from evaluate import compute_metrics
-
-
 class PopularityRecommender:
     def __init__(self):
         self.item_counts = {}
@@ -35,36 +32,10 @@ class PopularityRecommender:
             for c in candidates
         ], dtype=np.float32)
 
-    def evaluate(self, eval_csv, k_list=(10, 20), num_neg=99):
-        df = pd.read_csv(eval_csv)
-        all_scores = []
-
-        user_history = {}
-        for _, row in df.iterrows():
-            uid = int(row["user_idx"])
-            seq = _parse_seq(row["train_seq"])
-            tgt = int(row["target"])
-            user_history[uid] = set(seq) | {tgt}
-
-        all_item_ids = list(self.item_counts.keys())
-
-        for _, row in df.iterrows():
-            uid = int(row["user_idx"])
-            tgt = int(row["target"])
-            seen = user_history.get(uid, set())
-
-            neg_pool = [i for i in all_item_ids if i not in seen]
-            neg_items = np.random.choice(
-                neg_pool,
-                size=min(num_neg, len(neg_pool)),
-                replace=False
-            ).tolist()
-
-            candidates = [tgt] + neg_items
-            scores = self.score_candidates(candidates)
-            all_scores.append(scores)
-
-        return compute_metrics(all_scores, k_list)
+    def evaluate(self, *args, **kwargs):
+        raise NotImplementedError(
+            "Use pipeline.metrics.evaluate_popularity() for full-sort evaluation."
+        )
 
     def recommend(self, user_history=None, top_k=10):
         if user_history is None:

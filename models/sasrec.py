@@ -5,7 +5,7 @@ SASRec — Self-Attentive Sequential Recommendation.
 Reference: Kang & McAuley, ICDM 2018.
 
 Architecture:
-    - Item embedding + learnable positional embedding
+    - Item embedding (scaled by sqrt(d)) + 1-indexed learnable positional embedding
     - Stacked causal (unidirectional) self-attention blocks
     - Point-wise feed-forward sublayer with Conv1d
     - Binary cross-entropy loss with in-batch negative sampling
@@ -57,7 +57,7 @@ class SASRecBlock(nn.Module):
 
     def __init__(self, hidden_dim: int, num_heads: int, dropout: float = 0.2) -> None:
         super().__init__()
-        self.ln1 = nn.LayerNorm(hidden_dim)
+        self.ln1 = nn.LayerNorm(hidden_dim, eps=1e-8)
         self.attn = nn.MultiheadAttention(
             embed_dim=hidden_dim,
             num_heads=num_heads,
@@ -65,7 +65,7 @@ class SASRecBlock(nn.Module):
             batch_first=True,
         )
         self.dropout1 = nn.Dropout(dropout)
-        self.ln2 = nn.LayerNorm(hidden_dim)
+        self.ln2 = nn.LayerNorm(hidden_dim, eps=1e-8)
         self.ffn = PointWiseFeedForward(hidden_dim, dropout)
         self.dropout2 = nn.Dropout(dropout)
 
@@ -73,9 +73,18 @@ class SASRecBlock(nn.Module):
         self,
         x: torch.Tensor,
         attn_mask: torch.Tensor | None = None,
-        key_padding_mask: torch.Tensor | None = None,
+        padding_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        # Self-attention sublayer
+        """
+        Follows the reference SASRec.pytorch implementation: only the causal
+        attention mask is applied.  Padding positions start with x=0 (due to
+        item_emb(0)=0 and pos_emb(0)=0 from padding_idx=0), and the model
+        learns to ignore them naturally via the training signal.  No explicit
+        zeroing of padding outputs is performed because that creates artificial
+        gradient signals that cause training instability after several epochs.
+        The ``padding_mask`` argument is accepted but unused; ``_last_hidden``
+        correctly extracts the last non-padding position for prediction.
+        """
         residual = x
         z = self.ln1(x)
         attn_out, _ = self.attn(
@@ -83,14 +92,13 @@ class SASRecBlock(nn.Module):
             z,
             z,
             attn_mask=attn_mask,
-            key_padding_mask=key_padding_mask,
-            need_weights=False,
         )
         x = residual + self.dropout1(attn_out)
 
         # Feed-forward sublayer
         residual = x
         x = residual + self.dropout2(self.ffn(self.ln2(x)))
+
         return x
 
 
@@ -135,12 +143,15 @@ class SASRec(nn.Module):
         self.pad_token = 0
 
         self.item_emb = nn.Embedding(n_items + 1, hidden_dim, padding_idx=0)
-        self.pos_emb = nn.Embedding(max_len, hidden_dim)
+        # 1-indexed positional embeddings: index 0 is reserved (padding_idx=0 → zero vector).
+        # Padding positions in the input get pos index 0, so their positional embedding
+        # is always the zero vector — preventing any non-zero signal at padding positions.
+        self.pos_emb = nn.Embedding(max_len + 1, hidden_dim, padding_idx=0)
         self.emb_dropout = nn.Dropout(dropout)
         self.blocks = nn.ModuleList(
             [SASRecBlock(hidden_dim, num_heads, dropout) for _ in range(num_layers)]
         )
-        self.final_ln = nn.LayerNorm(hidden_dim)
+        self.final_ln = nn.LayerNorm(hidden_dim, eps=1e-8)
 
         self._init_weights()
 
@@ -151,18 +162,22 @@ class SASRec(nn.Module):
     def _encode(self, input_seq: torch.Tensor) -> torch.Tensor:
         """Encode item sequence -> contextualised hidden states (B, L, D)."""
         B, L = input_seq.shape
-        pos_ids = torch.arange(L, device=input_seq.device).unsqueeze(0).expand(B, L)
 
-        x = self.item_emb(input_seq) + self.pos_emb(pos_ids)
+        # 1-indexed positions; padding positions (input == 0) get pos_id = 0 → zero vector.
+        pos_ids = torch.arange(1, L + 1, device=input_seq.device).unsqueeze(0).expand(B, L)
+        pos_ids = pos_ids * (input_seq != self.pad_token).long()
+
+        # Scale item embeddings by sqrt(d) to balance magnitude with positional embeddings.
+        x = self.item_emb(input_seq) * (self.hidden_dim ** 0.5) + self.pos_emb(pos_ids)
         x = self.emb_dropout(x)
 
         causal_mask = torch.triu(
             torch.ones(L, L, device=input_seq.device, dtype=torch.bool), diagonal=1
         )
-        key_padding_mask = input_seq == self.pad_token
+        padding_mask = input_seq == self.pad_token  # (B, L) True for padding
 
         for block in self.blocks:
-            x = block(x, attn_mask=causal_mask, key_padding_mask=key_padding_mask)
+            x = block(x, attn_mask=causal_mask, padding_mask=padding_mask)
 
         return self.final_ln(x)
 

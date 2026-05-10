@@ -9,6 +9,7 @@ Classes:
 """
 
 import json
+import math
 import os
 from pathlib import Path
 
@@ -128,7 +129,8 @@ class Trainer:
     def train(self, model, train_loader, val_loader, test_loader,
               optimizer, epochs: int,
               criterion_fn, eval_fn,
-              gradient_clip: float = 5.0):
+              gradient_clip: float = 5.0,
+              val_loss_loader=None):
         """
         Full training pipeline.
 
@@ -162,9 +164,22 @@ class Trainer:
                 model, train_loader, optimizer, criterion_fn, gradient_clip
             )
 
+            # Stop immediately if training has collapsed to NaN — parameters are
+            # now corrupt, so there is no point continuing or evaluating.
+            if math.isnan(train_loss):
+                print(
+                    f"  Epoch {epoch:02d}/{epochs:02d} | "
+                    f"train_loss=nan — NaN detected, stopping early."
+                )
+                break
+
             # Validate
             val_metrics = eval_fn(model, val_loader, self.device)
-            val_loss = val_metrics.get("val_loss")
+            val_loss = (
+                self._compute_val_loss(model, val_loss_loader, criterion_fn)
+                if val_loss_loader is not None
+                else val_metrics.get("val_loss")
+            )
 
             # Log
             self.tracker.log_epoch(epoch, train_loss, val_loss, val_metrics)
@@ -181,8 +196,9 @@ class Trainer:
                 f"NDCG@10={ndcg10:.4f}"
             )
 
-            # Best model tracking
-            if ndcg10 > best_val_ndcg:
+            # Best model tracking — guard against NaN/Inf metrics (e.g. from NaN
+            # embeddings) which would otherwise overwrite a valid checkpoint.
+            if math.isfinite(ndcg10) and ndcg10 > best_val_ndcg:
                 best_val_ndcg = ndcg10
                 best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
 
@@ -206,6 +222,20 @@ class Trainer:
 
         return self.tracker
 
+    def _compute_val_loss(self, model, val_loss_loader, criterion_fn) -> float:
+        """Compute mean loss on val_loss_loader in eval mode."""
+        model.eval()
+        total_loss = 0.0
+        n_samples = 0
+        with torch.no_grad():
+            for batch in val_loss_loader:
+                loss = criterion_fn(model, batch, self.device)
+                bs = batch[list(batch.keys())[0]].size(0)
+                total_loss += loss.item() * bs
+                n_samples += bs
+        model.train()
+        return total_loss / max(n_samples, 1)
+
     # Internal
     def _train_one_epoch(self, model, loader, optimizer, criterion_fn,
                          gradient_clip: float):
@@ -213,19 +243,47 @@ class Trainer:
         total_loss = 0.0
         n_samples = 0
 
+        nan_batches = 0
+        total_batches = 0
         for batch in tqdm(loader, desc=f"  [{self.model_name}] Train", leave=False):
+            total_batches += 1
             optimizer.zero_grad()
             loss = criterion_fn(model, batch, self.device)
+
+            # Loss is already NaN/Inf — model weights are corrupt.  Report NaN
+            # to the outer loop so training stops before we do more damage.
+            if not torch.isfinite(loss):
+                nan_batches += 1
+                continue
+
             loss.backward()
 
+            # clip_grad_norm_ returns the total gradient norm before clipping.
+            # If it is NaN/Inf (overflow in backward pass), discard the update
+            # to protect model parameters.  This is the first line of defence
+            # against gradient explosion — the batch is skipped cleanly.
             if gradient_clip > 0:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clip)
+                grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clip)
+            else:
+                grad_norm = torch.stack(
+                    [p.grad.norm() for p in model.parameters() if p.grad is not None]
+                ).norm()
+
+            if not torch.isfinite(grad_norm):
+                optimizer.zero_grad()
+                nan_batches += 1
+                continue
 
             optimizer.step()
 
             bs = batch[list(batch.keys())[0]].size(0)
             total_loss += loss.item() * bs
             n_samples += bs
+
+        # If most batches had non-finite gradients the model has diverged.
+        # Return NaN so the outer loop triggers early stopping.
+        if nan_batches > 0 and nan_batches >= total_batches // 2:
+            return float("nan")
 
         return total_loss / max(n_samples, 1)
 
