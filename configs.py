@@ -32,6 +32,7 @@ MODEL_CONFIGS = {
             "dropout": 0.2,
             "t": 0.5,      # gBCE temperature (paper default: 0.5)
             "num_neg": 32, # negatives per positive (paper default: 32)
+            "pos_smoothing": 0.0,
         },
         "train_kwargs": {
             "batch_size": 256,
@@ -59,6 +60,7 @@ MODEL_CONFIGS = {
             "lr": 1e-3,
             "max_len": 50,
             "gradient_clip": 5.0,
+            "loss_type": "ce",
         },
     },
     "bprmf": {
