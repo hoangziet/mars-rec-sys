@@ -66,7 +66,12 @@ def main():
         print(f"\nModel '{args.model}' not found.")
         sys.exit(1)
 
-    optimizer      = torch.optim.Adam(model.parameters(), lr=train_kwargs.get("lr", 1e-3), weight_decay=train_kwargs.get("weight_decay", 0.0))
+    optimizer      = torch.optim.Adam(
+        model.parameters(),
+        lr=train_kwargs.get("lr", 1e-3),
+        betas=(0.9, train_kwargs.get("beta2", 0.999)),
+        weight_decay=train_kwargs.get("weight_decay", 0.0),
+    )
     criterion_fn   = build_criterion_fn(args.model, train_kwargs)
     eval_fn        = build_eval_fn(args.model)
     val_loss_loader = get_val_loss_loader(
@@ -91,6 +96,8 @@ def main():
         eval_fn=eval_fn,
         gradient_clip=train_kwargs.get("gradient_clip", 5.0),
         val_loss_loader=val_loss_loader,
+        early_stop_patience=train_kwargs.get("early_stop_patience", 0),
+        early_stop_min_delta=train_kwargs.get("early_stop_min_delta", 1e-4),
     )
 
 
