@@ -101,6 +101,7 @@ class GSASRec(nn.Module):
         dropout: float = 0.2,
         t: float = 0.5,
         num_neg: int = 32,
+        pos_smoothing: float = 0.0,
     ) -> None:
         super().__init__()
         if emb_dim is not None:
@@ -112,6 +113,7 @@ class GSASRec(nn.Module):
         self.pad_token  = 0
         self.t          = t
         self.num_neg    = num_neg
+        self.pos_smoothing = pos_smoothing
 
         self.item_emb    = nn.Embedding(n_items + 1, hidden_dim, padding_idx=0)
         # 1-indexed positions; index 0 (padding_idx=0) → zero vector for padding tokens.
@@ -134,6 +136,10 @@ class GSASRec(nn.Module):
         # 1-indexed positions; padding tokens get pos_id = 0 → zero pos embedding.
         pos_ids = torch.arange(1, L + 1, device=input_seq.device).unsqueeze(0).expand(B, L)
         pos_ids = pos_ids * (input_seq != self.pad_token).long()
+
+        if self.training and self.pos_smoothing > 0:
+            noise = torch.randn(B, L, device=input_seq.device) * self.pos_smoothing
+            pos_ids = (pos_ids.float() + noise).clamp(min=0.0).long()
 
         x = self.item_emb(input_seq) * (self.hidden_dim ** 0.5) + self.pos_emb(pos_ids)
         x = self.emb_dropout(x)
