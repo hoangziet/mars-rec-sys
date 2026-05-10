@@ -55,13 +55,13 @@ class TrainSequenceDataset(Dataset):
 
         input_seq = [pad, pad, a, b, c]   (left-padded)
         pos_items = b  (the next item to predict at this position)
-        neg_items = ?  (randomly sampled, pre-computed at init)
+        neg_items = ?  (randomly sampled per __getitem__ call)
 
     This provides a training signal at every sequence position, not just
     the last one — matching the original SASRec paper training protocol.
 
-    ``neg_items`` are pre-sampled at construction time so ``__getitem__``
-    is O(1) and DataLoader workers don't block each other.
+    ``neg_items`` are sampled fresh on each ``__getitem__`` call from items
+    not seen by the user, ensuring per-epoch negative diversity.
     """
 
     def __init__(
@@ -88,7 +88,7 @@ class TrainSequenceDataset(Dataset):
             )
 
         all_items: set[int] = set()
-        raw: list[tuple[list[int], list[float]]] = []
+        self.samples: list[dict] = []
 
         has_conf_seq = "confidence_sequence" in df.columns
 
@@ -98,64 +98,55 @@ class TrainSequenceDataset(Dataset):
             if not use_confidence:
                 confs = [1.0] * len(seq)
             elif has_conf_seq:
-                # Per-item confidence list: confidence_sequence[i] = watch% for seq[i]
                 confs = [float(c) for c in parse_seq(row.confidence_sequence)]
                 if len(confs) != len(seq):
                     confs = confs[:len(seq)] + [1.0] * max(0, len(seq) - len(confs))
             else:
-                # Legacy: single scalar confidence applied to all positions
                 confs = [float(row.confidence)] * len(seq)
-            raw.append((seq, confs))
+
+            if len(seq) < 2:
+                continue
+            seen = set(seq)
+            for i in range(1, len(seq)):
+                inp = seq[:i]
+                tgt = seq[i]
+                self.samples.append({
+                    "input": pad_sequence(inp, max_len, pad_token),
+                    "pos": tgt,
+                    "seen": seen,
+                    "conf": confs[i],
+                })
 
         self._n_items = n_items if n_items is not None else max(all_items)
         self._all_items = np.arange(1, self._n_items + 1, dtype=np.int64)
 
-        # Expand into per-position samples + pre-sample negatives
-        self.input_seqs: list[list[int]] = []
-        self.pos_targets: list[int] = []
-        self.neg_targets: list[list[int]] = []  # (num_neg,) per sample
-        self.confidences: list[float] = []
-
-        for seq, confs in raw:
-            if len(seq) < 2:
-                continue
-            seen = set(seq)
-            neg_pool = np.setdiff1d(self._all_items, list(seen))
-            if len(neg_pool) == 0:
-                neg_pool = self._all_items
-
-            for i in range(1, len(seq)):
-                inp = seq[:i]
-                tgt = seq[i]
-                negs = np.random.choice(
-                    neg_pool,
-                    size=num_neg,
-                    replace=len(neg_pool) < num_neg,
-                ).tolist()
-
-                self.input_seqs.append(pad_sequence(inp, max_len, pad_token))
-                self.pos_targets.append(tgt)
-                self.neg_targets.append(negs)
-                self.confidences.append(confs[i])
-
     def __len__(self) -> int:
-        return len(self.pos_targets)
+        return len(self.samples)
 
     def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
-        inp = self.input_seqs[idx]
+        s = self.samples[idx]
+        inp = s["input"]
+        pos = s["pos"]
+        seen = s["seen"]
+        neg_pool = np.setdiff1d(self._all_items, list(seen))
+        if len(neg_pool) == 0:
+            neg_pool = self._all_items
+        negs = np.random.choice(
+            neg_pool,
+            size=self.num_neg,
+            replace=len(neg_pool) < self.num_neg,
+        ).tolist()
+
         mask = [int(t != self.pad_token) for t in inp]
-        negs = self.neg_targets[idx]
-        # Return neg_items as (num_neg,) — squeeze to scalar when num_neg==1
-        # for backward compatibility with SASRec/GRU4Rec which expect (B,) neg.
         neg_tensor = torch.tensor(negs, dtype=torch.long)
         if self.num_neg == 1:
             neg_tensor = neg_tensor.squeeze(0)
         return {
             "input_seq": torch.tensor(inp, dtype=torch.long),
-            "pos_items": torch.tensor(self.pos_targets[idx], dtype=torch.long),
+            "pos_items": torch.tensor(pos, dtype=torch.long),
             "neg_items": neg_tensor,
             "mask": torch.tensor(mask, dtype=torch.bool),
-            "confidence": torch.tensor(self.confidences[idx], dtype=torch.float),
+            "confidence": torch.tensor(s["conf"], dtype=torch.float),
         }
 
 
