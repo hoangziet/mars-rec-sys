@@ -9,6 +9,7 @@ data/processed/
 # python
 .venv/
 .mypy_cache/
+.pytest_cache/
 __pycache__/
 *.pyc
 *.pyo
@@ -27,3 +28,4 @@ __pycache__/
 .claude/
 .serena/
 docs/
+AGENTS.md 
