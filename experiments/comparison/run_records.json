@@ -6,17 +6,17 @@
     "seed": 42,
     "eval_protocol": "full_sort",
     "metrics": {
-      "HR@10": 0.3561,
-      "NDCG@10": 0.2209,
-      "HR@20": 0.4423,
-      "NDCG@20": 0.2426
+      "Recall@10": 0.374,
+      "NDCG@10": 0.2349,
+      "Recall@20": 0.4686,
+      "NDCG@20": 0.2587
     },
     "train_summary": {
-      "best_val_ndcg10": 0.2523,
-      "best_epoch": 10
+      "best_val_ndcg10": 0.2693,
+      "best_epoch": 24
     },
     "git": {
-      "commit": "42a37a6e9e163df58d728cde44d6b4040ed5b563"
+      "commit": "945a51cbe4f1a661f7a475fdf3aa0059426f2fe3"
     }
   },
   {
@@ -26,17 +26,17 @@
     "seed": 42,
     "eval_protocol": "full_sort",
     "metrics": {
-      "HR@10": 0.3513,
-      "NDCG@10": 0.2394,
-      "HR@20": 0.4148,
-      "NDCG@20": 0.2554
+      "Recall@10": 0.3585,
+      "NDCG@10": 0.2491,
+      "Recall@20": 0.4205,
+      "NDCG@20": 0.2648
     },
     "train_summary": {
-      "best_val_ndcg10": 0.2719,
-      "best_epoch": 19
+      "best_val_ndcg10": 0.2837,
+      "best_epoch": 35
     },
     "git": {
-      "commit": "42a37a6e9e163df58d728cde44d6b4040ed5b563"
+      "commit": "945a51cbe4f1a661f7a475fdf3aa0059426f2fe3"
     }
   },
   {
@@ -46,9 +46,9 @@
     "seed": 42,
     "eval_protocol": "full_sort",
     "metrics": {
-      "HR@10": 0.4115,
+      "Recall@10": 0.4115,
       "NDCG@10": 0.2991,
-      "HR@20": 0.4865,
+      "Recall@20": 0.4865,
       "NDCG@20": 0.318
     },
     "train_summary": {
@@ -56,7 +56,7 @@
       "best_epoch": 20
     },
     "git": {
-      "commit": "42a37a6e9e163df58d728cde44d6b4040ed5b563"
+      "commit": "945a51cbe4f1a661f7a475fdf3aa0059426f2fe3"
     }
   },
   {
@@ -66,9 +66,9 @@
     "seed": 42,
     "eval_protocol": "full_sort",
     "metrics": {
-      "HR@10": 0.1846,
+      "Recall@10": 0.1846,
       "NDCG@10": 0.1063,
-      "HR@20": 0.2576,
+      "Recall@20": 0.2576,
       "NDCG@20": 0.1246
     },
     "train_summary": {
@@ -76,7 +76,7 @@
       "best_epoch": 20
     },
     "git": {
-      "commit": "42a37a6e9e163df58d728cde44d6b4040ed5b563"
+      "commit": "945a51cbe4f1a661f7a475fdf3aa0059426f2fe3"
     }
   },
   {
@@ -86,17 +86,17 @@
     "seed": 42,
     "eval_protocol": "full_sort",
     "metrics": {
-      "HR@10": 0.3206,
-      "NDCG@10": 0.2064,
-      "HR@20": 0.4028,
-      "NDCG@20": 0.2272
+      "Recall@10": 0.2462,
+      "NDCG@10": 0.1505,
+      "Recall@20": 0.3258,
+      "NDCG@20": 0.1705
     },
     "train_summary": {
-      "best_val_ndcg10": 0.2434,
+      "best_val_ndcg10": 0.1834,
       "best_epoch": 20
     },
     "git": {
-      "commit": "42a37a6e9e163df58d728cde44d6b4040ed5b563"
+      "commit": "945a51cbe4f1a661f7a475fdf3aa0059426f2fe3"
     }
   },
   {
@@ -106,9 +106,9 @@
     "seed": 42,
     "eval_protocol": "full_sort",
     "metrics": {
-      "HR@10": 0.2494,
+      "Recall@10": 0.2494,
       "NDCG@10": 0.1323,
-      "HR@20": 0.3545,
+      "Recall@20": 0.3545,
       "NDCG@20": 0.1588
     },
     "train_summary": {
@@ -116,7 +116,7 @@
       "best_epoch": 0
     },
     "git": {
-      "commit": "42a37a6e9e163df58d728cde44d6b4040ed5b563"
+      "commit": "945a51cbe4f1a661f7a475fdf3aa0059426f2fe3"
     }
   },
   {
@@ -126,9 +126,9 @@
     "seed": 42,
     "eval_protocol": "full_sort",
     "metrics": {
-      "HR@10": 0.0673,
+      "Recall@10": 0.0673,
       "NDCG@10": 0.0328,
-      "HR@20": 0.1117,
+      "Recall@20": 0.1117,
       "NDCG@20": 0.0439
     },
     "train_summary": {
@@ -136,7 +136,7 @@
       "best_epoch": 0
     },
     "git": {
-      "commit": "42a37a6e9e163df58d728cde44d6b4040ed5b563"
+      "commit": "945a51cbe4f1a661f7a475fdf3aa0059426f2fe3"
     }
   }
 ]
