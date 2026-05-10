@@ -11,6 +11,7 @@ MODEL_CONFIGS = {
             "num_heads": 2,
             "num_layers": 2,
             "dropout": 0.2,
+            "norm_first": True,
         },
         "train_kwargs": {
             "batch_size": 256,

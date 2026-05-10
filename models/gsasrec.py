@@ -46,8 +46,10 @@ class PointWiseFeedForward(nn.Module):
 
 
 class GSASRecBlock(nn.Module):
-    def __init__(self, hidden_dim: int, num_heads: int, dropout: float = 0.2) -> None:
+    def __init__(self, hidden_dim: int, num_heads: int, dropout: float = 0.2,
+                 norm_first: bool = True) -> None:
         super().__init__()
+        self.norm_first = norm_first
         self.ln1 = nn.LayerNorm(hidden_dim, eps=1e-8)
         self.attn = nn.MultiheadAttention(
             embed_dim=hidden_dim,
@@ -63,14 +65,19 @@ class GSASRecBlock(nn.Module):
     def forward(self, x, attn_mask=None, padding_mask=None):
         # Same as SASRec: causal mask only, no explicit padding zeroing.
         # padding_mask is accepted for API compatibility but is not applied.
-        residual = x
-        z = self.ln1(x)
-        attn_out, _ = self.attn(z, z, z, attn_mask=attn_mask)
-        x = residual + self.dropout1(attn_out)
-
-        residual = x
-        x = residual + self.dropout2(self.ffn(self.ln2(x)))
-
+        if self.norm_first:
+            # Pre-LN
+            residual = x
+            z = self.ln1(x)
+            attn_out, _ = self.attn(z, z, z, attn_mask=attn_mask)
+            x = residual + self.dropout1(attn_out)
+            residual = x
+            x = residual + self.dropout2(self.ffn(self.ln2(x)))
+        else:
+            # Post-LN
+            attn_out, _ = self.attn(x, x, x, attn_mask=attn_mask)
+            x = self.ln1(x + self.dropout1(attn_out))
+            x = self.ln2(x + self.dropout2(self.ffn(x)))
         return x
 
 
@@ -102,6 +109,7 @@ class GSASRec(nn.Module):
         t: float = 0.5,
         num_neg: int = 32,
         pos_smoothing: float = 0.0,
+        norm_first: bool = True,
     ) -> None:
         super().__init__()
         if emb_dim is not None:
@@ -120,7 +128,8 @@ class GSASRec(nn.Module):
         self.pos_emb     = nn.Embedding(max_len + 1, hidden_dim, padding_idx=0)
         self.emb_dropout = nn.Dropout(dropout)
         self.blocks      = nn.ModuleList(
-            [GSASRecBlock(hidden_dim, num_heads, dropout) for _ in range(num_layers)]
+            [GSASRecBlock(hidden_dim, num_heads, dropout, norm_first)
+             for _ in range(num_layers)]
         )
         self.final_ln = nn.LayerNorm(hidden_dim, eps=1e-8)
 
