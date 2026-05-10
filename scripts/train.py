@@ -72,6 +72,18 @@ def main():
         betas=(0.9, train_kwargs.get("beta2", 0.999)),
         weight_decay=train_kwargs.get("weight_decay", 0.0),
     )
+
+    warmup_steps = train_kwargs.get("warmup_steps", 0)
+    scheduler = None
+    if warmup_steps > 0:
+        total_steps = train_kwargs["epochs"] * len(train_loader)
+        def lr_lambda(step):
+            if step < warmup_steps:
+                return step / max(warmup_steps, 1)
+            progress = (step - warmup_steps) / max(total_steps - warmup_steps, 1)
+            return max(0.0, 1.0 - progress)
+        scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+
     criterion_fn   = build_criterion_fn(args.model, train_kwargs)
     eval_fn        = build_eval_fn(args.model)
     val_loss_loader = get_val_loss_loader(
@@ -98,6 +110,7 @@ def main():
         val_loss_loader=val_loss_loader,
         early_stop_patience=train_kwargs.get("early_stop_patience", 0),
         early_stop_min_delta=train_kwargs.get("early_stop_min_delta", 1e-4),
+        scheduler=scheduler,
     )
 
 

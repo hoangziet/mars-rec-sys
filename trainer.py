@@ -132,7 +132,8 @@ class Trainer:
               gradient_clip: float = 5.0,
               val_loss_loader=None,
               early_stop_patience: int = 0,
-              early_stop_min_delta: float = 1e-4):
+              early_stop_min_delta: float = 1e-4,
+              scheduler=None):
         """
         Full training pipeline.
 
@@ -164,7 +165,8 @@ class Trainer:
         for epoch in range(1, epochs + 1):
             # Train
             train_loss = self._train_one_epoch(
-                model, train_loader, optimizer, criterion_fn, gradient_clip
+                model, train_loader, optimizer, criterion_fn, gradient_clip,
+                scheduler,
             )
 
             # Stop immediately if training has collapsed to NaN — parameters are
@@ -222,6 +224,13 @@ class Trainer:
                         )
                         break
 
+            # Step ReduceLROnPlateau scheduler after validation (needs metric).
+            # All other schedulers (e.g. LambdaLR for warmup) are stepped
+            # per-batch inside _train_one_epoch.
+            if scheduler is not None:
+                if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                    scheduler.step(val_metrics.get("NDCG@10", 0))
+
         # Load best model
         if best_state is not None:
             model.load_state_dict(best_state)
@@ -258,7 +267,7 @@ class Trainer:
 
     # Internal
     def _train_one_epoch(self, model, loader, optimizer, criterion_fn,
-                         gradient_clip: float):
+                         gradient_clip: float, scheduler=None):
         model.train()
         total_loss = 0.0
         n_samples = 0
@@ -295,6 +304,13 @@ class Trainer:
                 continue
 
             optimizer.step()
+
+            # Step per-batch scheduler (warmup, decay, etc.).
+            # ReduceLROnPlateau is excluded — it is stepped per-epoch.
+            if scheduler is not None and not isinstance(
+                scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau
+            ):
+                scheduler.step()
 
             bs = batch[list(batch.keys())[0]].size(0)
             total_loss += loss.item() * bs
