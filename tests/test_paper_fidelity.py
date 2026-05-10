@@ -134,7 +134,7 @@ class TestBPRMFL2Scaling:
     """BPR-MF L2 regularization scaling matches reference."""
 
     def test_l2_per_vector_scaling(self):
-        """L2 should be sum(||e_i||²/2) across batch, not divided by batch_size."""
+        """L2 should be normalized by batch_size for batch-size-independent lambda."""
         from models.bprmf import bpr_loss
         u = torch.randn(4, 8)
         p = torch.randn(4, 8)
@@ -144,7 +144,7 @@ class TestBPRMFL2Scaling:
 
         loss = bpr_loss(pos_scores, neg_scores, reg_lambda=1.0,
                         u_emb=u, p_emb=p, n_emb=n)
-        expected_reg = (u.pow(2).sum() + p.pow(2).sum() + n.pow(2).sum()) / 2.0
+        expected_reg = (u.pow(2).sum() + p.pow(2).sum() + n.pow(2).sum()) / (2.0 * u.size(0))
         ce = -torch.log(torch.sigmoid(pos_scores - neg_scores)).mean()
         expected = ce + expected_reg
         assert torch.allclose(loss, expected, rtol=1e-4), \
