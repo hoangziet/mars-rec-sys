@@ -1,146 +1,227 @@
 # mars-rec-sys
-Course recommendation system on the MARS dataset
 
-## 1. Python Environment Setup
+Sequential course recommendation system built on the MARS e-learning dataset.
 
-This project uses `pyproject.toml` for dependency management and is pre-configured for `uv`.
+Implements and compares 7 models — from simple heuristics to state-of-the-art Transformers — using a unified training and **full-sort evaluation** pipeline.
 
-**Step 1:** Install `uv` (if not already installed)
+---
+
+## Dataset
+
+| Stat | Value |
+|------|-------|
+| Users | 15,989 |
+| Items | 2,300 courses |
+| Interactions | 264,880 |
+| Sparsity | 99.3% |
+| Split | Leave-one-out (val = second-last item, test = last item per user) |
+
+Raw data: `data/raw/` — requires `implicit_ratings.csv`, `explicit_ratings.csv`, `items.csv`.
+
+---
+
+## Models
+
+| Model | Type | Loss | Key feature |
+|-------|------|------|-------------|
+| **SASRec** | Sequential / Transformer | BCE | Causal self-attention, Pre-LN, `sqrt(d)` embedding scaling |
+| **gSASRec** | Sequential / Transformer | gBCE | Sampling-bias corrected BCE, confidence-weighted, 32 negatives |
+| **GRU4Rec** | Sequential / RNN | Cross-Entropy | GRU with full-catalog CE loss, embedding dropout, `bias=False` |
+| **BERT4Rec** | Sequential / Transformer | Cross-Entropy | Bidirectional encoder, masked item modelling, weight-tied head |
+| **BPR-MF** | Matrix Factorization | BPR | Classic user-item embedding with L2 regularization |
+| **Item-CF** | Heuristic | — | Item-item cosine similarity |
+| **Popularity** | Heuristic | — | Global item frequency baseline |
+
+---
+
+## Evaluation Protocol
+
+All models are evaluated using **full-sort ranking**: the target item is ranked against the **entire item catalog** (2,300 courses), with items from the user's training history masked to `-inf` before ranking.
+
+This is stricter than the sampled-100-candidate protocol used in some original papers, and matches the RecBole standard for fair comparison.
+
+| Metric | Description |
+|--------|-------------|
+| **HR@K** | Hit Rate — is the target item in the top-K recommendations? (0 or 1) |
+| **NDCG@K** | Normalized Discounted Cumulative Gain — penalises lower ranks within top-K |
+
+Reported at K = 10 and K = 20.
+
+---
+
+## Setup
+
+**1. Install `uv`** (if not already installed):
 ```bash
 pip install uv
 ```
 
-**Step 2:** Sync the environment and install dependencies (including PyTorch with CUDA support)
+**2. Install dependencies:**
 ```bash
 uv sync
 ```
 
-## 2. Data Folders Setup
-
-The project requires two main directories inside the root `data/` folder:
-
-- **`data/raw/`**: The folder containing the raw original MARS data files (`explicit_ratings_en.csv`, `implicit_ratings_en.csv`, `items_en.csv`, `users_en.csv`).
-- **`data/processed/`**: The folder containing the preprocessed data. You can run the following command to generate the processed files (such as `train.csv`, `val.csv`, `test.csv`, `dataset_stats.json`...):
-  ```bash
-  uv run python data/processed.py
-  ```
-
-**Sample directory structure:**
-```text
-data/
-├── processed/       <-- Receives preprocessing results
-├── raw/             <-- Download and place raw files here
-└── processed.py     <-- Script to process data from raw -> processed
+**3. Preprocess raw data:**
+```bash
+uv run python data/preprocess.py
 ```
 
-## 3. Train Models
+Reads `data/raw/` and writes train / val / test splits plus `dataset_stats.json` to `data/processed/`.
 
-### Train a single model
+---
+
+## Training
+
+### Single model
 
 ```bash
-uv run python run_experiment.py <model_name> [options]
+uv run python scripts/train.py <model_name> [options]
 ```
 
-Available models: `sasrec`, `gsasrec`, `gru4rec`, `bert4rec`, `bprmf`, `itemcf`, `popularity`
-
-Note: `gsasrec` in this repo is confidence-weighted SASRec baseline, not full gSASRec reproduction.
-
 ```bash
-# Train SASRec with default config
-uv run python run_experiment.py sasrec
+# Train with default config
+uv run python scripts/train.py sasrec
 
 # Override hyperparameters
-uv run python run_experiment.py gru4rec --epochs 50 --lr 5e-4 --batch_size 1024
+uv run python scripts/train.py gsasrec --epochs 50 --lr 5e-4
 
-# Train BPR-MF with custom seed
-uv run python run_experiment.py bprmf --seed 123
+# Custom seed
+uv run python scripts/train.py bprmf --seed 123
 ```
 
-Options:
 | Flag | Description | Default |
 |------|-------------|---------|
 | `--data_dir` | Path to processed data | `data/processed` |
-| `--output_dir` | Path to save experiment artifacts | `experiments` |
-| `--epochs` | Number of training epochs | (per model config) |
-| `--lr` | Learning rate | (per model config) |
-| `--batch_size` | Batch size | (per model config) |
+| `--output_dir` | Where to save artifacts | `experiments` |
+| `--epochs` | Training epochs | per model config |
+| `--lr` | Learning rate | per model config |
+| `--batch_size` | Batch size | per model config |
 | `--seed` | Random seed | `42` |
 
-### Train all models + comparison
+### All models + comparison report
 
 ```bash
 # Train all 7 models sequentially
-uv run python run_all.py
+uv run python scripts/train_all.py
 
-# Train only selected models
-uv run python run_all.py sasrec gru4rec bprmf
-
-# Choose evaluation negative sampling protocol
-uv run python run_all.py --neg_mode random
-uv run python run_all.py --neg_mode popularity
-uv run python run_all.py --neg_mode mixed
+# Train a subset
+uv run python scripts/train_all.py sasrec gsasrec bert4rec
 ```
 
-### Output structure
+### Inference
 
-After training, artifacts are saved to `experiments/`:
+```bash
+# Top-10 recommendations for user 42
+uv run python scripts/predict.py sasrec --user_id 42 --top_k 10
 
-```text
+# Show course titles (requires items.csv)
+uv run python scripts/predict.py sasrec --user_id 42 --top_k 10 --show_titles
+```
+
+---
+
+## Output Structure
+
+```
 experiments/
 ├── sasrec/
+│   ├── best_model.pt      # Best checkpoint (by val NDCG@10)
 │   ├── metrics.json       # Per-epoch: train_loss, val_loss, HR@10, NDCG@10, ...
-│   ├── loss_plot.png      # Train/val loss curve
-│   ├── metrics_plot.png   # HR@10, NDCG@10, HR@20, NDCG@20 curves
-│   └── best_model.pt      # Best checkpoint (by val NDCG@10)
+│   ├── loss_plot.png      # Train / val loss curves
+│   └── metrics_plot.png   # HR@10, NDCG@10, HR@20, NDCG@20 curves
 ├── gru4rec/
 │   └── ...
 └── comparison/
-    ├── comparison.json    # Aggregated test results for all models
-    └── comparison.png     # Bar chart comparison
+    ├── comparison.json         # Test-set results per model
+    ├── aggregate_metrics.json  # Aggregated metrics across models
+    ├── run_records.json        # Full experiment metadata
+    └── comparison.png          # Bar chart leaderboard
 ```
 
-### Default hyperparameters
+---
 
-| Model | emb/hidden | layers | heads | dropout | batch_size | epochs | lr |
-|-------|-----------|--------|-------|---------|------------|--------|-----|
+## Default Hyperparameters
+
+| Model | emb / hidden | layers | heads | dropout | batch | epochs | lr |
+|-------|-------------|--------|-------|---------|-------|--------|----|
 | SASRec | 64 | 2 | 2 | 0.2 | 256 | 20 | 1e-3 |
 | gSASRec | 64 | 2 | 2 | 0.2 | 256 | 20 | 1e-3 |
-| GRU4Rec | emb=64, hid=128 | 1 | - | 0.2 | 512 | 20 | 1e-3 |
+| GRU4Rec | emb=64, hid=128 | 1 | — | 0.2 | 512 | 20 | 1e-3 |
 | BERT4Rec | 64 | 2 | 2 | 0.2 | 256 | 20 | 1e-3 |
-| BPR-MF | 64 | - | - | - | 1024 | 20 | 1e-3 |
-| Item-CF | top_k_sim=20 | - | - | - | - | - | - |
-| Popularity | - | - | - | - | - | - | - |
+| BPR-MF | 64 | — | — | — | 1024 | 20 | 1e-3 |
 
-All configs are centralized in `configs.py` — edit there to change defaults.
+All configs live in `configs.py` — edit there to change defaults.
 
-### Evaluation metrics
+---
 
-All models are evaluated with one positive target plus configurable negative candidates. `run_all.py --neg_mode` supports:
+## Project Structure
 
-- `random`: sample unseen negatives uniformly.
-- `popularity`: sample unseen negatives weighted by item popularity.
-- `mixed`: use half popularity-weighted negatives and half random unseen negatives.
+```
+mars-rec-sys/
+├── configs.py              # Centralised hyperparameter configs for all models
+├── trainer.py              # Unified training loop, checkpointing, experiment tracking
+│
+├── pipeline/
+│   ├── loaders.py          # Dataset classes + DataLoader factories
+│   │                       #   TrainSequenceDataset, MaskedSequenceDataset,
+│   │                       #   BPRDataset, FullSortEvalDataset
+│   ├── metrics.py          # Full-sort eval functions + HR/NDCG computation
+│   └── builder.py          # Model / criterion / eval-fn factory functions
+│
+├── models/
+│   ├── sasrec.py           # SASRec (Kang & McAuley, ICDM 2018)
+│   ├── gsasrec.py          # gSASRec (Petrov & Macdonald, RecSys 2023)
+│   ├── gru4rec.py          # GRU4Rec (Hidasi et al., ICLR 2016)
+│   ├── bert4rec.py         # BERT4Rec (Sun et al., CIKM 2019)
+│   ├── bprmf.py            # BPR-MF (Rendle et al., UAI 2009)
+│   ├── itemcf.py           # Item-based Collaborative Filtering
+│   └── popularity.py       # Popularity baseline
+│
+├── scripts/
+│   ├── train.py            # Entry point: train a single model
+│   ├── train_all.py        # Entry point: train all models + comparison report
+│   └── predict.py          # Inference: top-K recommendations from checkpoint
+│
+├── data/
+│   ├── preprocess.py       # Raw data → processed splits pipeline
+│   ├── raw/                # Input: implicit_ratings.csv, items.csv, ...
+│   └── processed/          # Output: train.csv, val.csv, test.csv, stats.json
+│
+├── tests/
+│   ├── conftest.py         # sys.path setup for pytest
+│   ├── test_metrics.py     # HR/NDCG correctness, _ranks_from_logits
+│   ├── test_dataloader.py  # Dataset shapes, padding, history masking
+│   └── test_models.py      # Forward pass, loss validity, no NaN, weight tying
+│
+└── docs/
+    └── references/         # Reference implementations (SASRec, gSASRec, RecBole, ...)
+```
 
-Default protocol: **1 positive + 99 random negatives = 100 candidates**, ranked by model score.
+---
 
-| Metric | Meaning |
-|--------|---------|
-| **HR@K** | Hit Rate — is the target item in top-K? (1 or 0) |
-| **NDCG@K** | Normalized Discounted Cumulative Gain — penalizes lower ranks |
-
-Reported at K=10 and K=20.
-
-## Implementation Fidelity Notes
-
-- SASRec: simplified next-item CE baseline.
-- gSASRec: confidence-weighted SASRec baseline (not full gsasrec reference reproduction).
-- GRU4Rec: padded-sequence handling fixed via mask-aware endpoint selection.
-- BERT4Rec: training mask now guarantees at least one supervised position.
-- BPR-MF: user history accumulation fixed for negative sampling correctness.
-
-## Calibration Commands
+## Running Tests
 
 ```bash
-uv run python scripts/data_quality_audit.py --data_dir data/processed --out experiments/data_audit.json
-uv run python scripts/calibration_suite.py --data_dir data/processed --out experiments/calibration_report.json
+uv run pytest tests/ -v
 ```
+
+49 tests covering metrics, data loading, and all 5 neural models.
+
+---
+
+## Implementation Notes
+
+### SASRec
+Pre-LN transformer with causal (unidirectional) self-attention. `sqrt(d)` scaling on item embeddings. 1-indexed positional embeddings (`padding_idx=0`). Padding positions are zeroed out after each sublayer to prevent NaN propagation. BCE loss with 1 random negative per positive.
+
+### gSASRec
+Architecturally identical to SASRec. Uses **gBCE loss** (generalised Binary Cross-Entropy) with logit transformation to correct for sampling bias in sparse data. `num_neg=32`, temperature `t=0.5` (paper defaults). Each positive is weighted by `watch_percentage / 100` as a confidence signal.
+
+### GRU4Rec
+GRU encoder with `bias=False`, embedding dropout, and Xavier initialisation (matching RecBole). Uses **Cross-Entropy loss over the full item catalog** — no negative sampling required. This is the correct setting for **user-based** sequential recommendation (as opposed to the original session-based BPR-max paper setting).
+
+### BERT4Rec
+Bidirectional Transformer encoder with masked item modelling (15% random mask). Input LayerNorm applied after embedding sum (BERT convention). MLM prediction head: `Linear → GELU → LayerNorm`. Weight-tied output projection with per-item bias. CE loss with `ignore_index=0` for padding.
+
+### BPR-MF
+User and item embeddings (1-indexed, `padding_idx=0`). Xavier uniform init. Bayesian Personalized Ranking loss with batch-level L2 regularisation applied to fetched embeddings only (not the full table).

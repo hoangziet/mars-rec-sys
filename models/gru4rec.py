@@ -5,18 +5,17 @@ GRU4Rec — sequential recommender using GRU.
 Reference: Hidasi et al., ICLR 2016.
 
 Architecture:
-    - Item embeddings
+    - Item embeddings with embedding dropout
     - GRU encoder (PackedSequence for variable-length left-padded inputs)
-    - Binary cross-entropy loss with negative sampling
-    - Scoring via dot product with item embedding table (no Linear head)
+    - Cross-Entropy loss over the full item catalog (RecBole convention)
+    - Scoring via dot product with item embedding table
 
 Training interface
 ------------------
-    loss = model.loss(input_seq, pos_items, neg_items)
+    loss = model.loss(input_seq, pos_items)
 
     - input_seq : (B, L)  left-padded item indices
-    - pos_items : (B,)    ground-truth next item per sample (scalar)
-    - neg_items : (B,)    one randomly sampled negative per sample (scalar)
+    - pos_items : (B,)    ground-truth next item per sample
 
 Inference interface
 -------------------
@@ -29,7 +28,7 @@ import torch.nn.functional as F
 
 
 class GRU4Rec(nn.Module):
-    """GRU4Rec model.
+    """GRU4Rec model with Cross-Entropy loss (RecBole convention).
 
     Parameters
     ----------
@@ -61,10 +60,13 @@ class GRU4Rec(nn.Module):
         self.pad_token = 0
 
         self.item_emb = nn.Embedding(n_items + 1, emb_dim, padding_idx=0)
+        # Embedding dropout applied before GRU (matches RecBole GRU4Rec)
+        self.emb_dropout = nn.Dropout(dropout)
         self.gru = nn.GRU(
             input_size=emb_dim,
             hidden_size=hidden_dim,
             num_layers=num_layers,
+            bias=False,   # matches RecBole GRU4Rec
             batch_first=True,
             dropout=dropout if num_layers > 1 else 0.0,
         )
@@ -75,21 +77,33 @@ class GRU4Rec(nn.Module):
         if hidden_dim != emb_dim:
             self.proj = nn.Linear(hidden_dim, emb_dim, bias=False)
 
-        nn.init.normal_(self.item_emb.weight, std=0.01)
+        self._init_weights()
+
+    def _init_weights(self) -> None:
+        nn.init.xavier_normal_(self.item_emb.weight)
+        with torch.no_grad():
+            self.item_emb.weight[0].zero_()   # keep padding row zeroed
+        nn.init.xavier_uniform_(self.gru.weight_hh_l0)
+        nn.init.xavier_uniform_(self.gru.weight_ih_l0)
+        if self.proj is not None:
+            nn.init.xavier_uniform_(self.proj.weight)
 
     def _encode(self, input_seq: torch.Tensor) -> torch.Tensor:
-        """Run GRU over item sequence, return last valid hidden state (B, emb_dim).
+        """Run GRU over left-padded item sequence, return last-position hidden state.
 
-        Uses PackedSequence so padding tokens are ignored by the GRU.
+        With ``bias=False`` and ``item_emb(0) = 0`` (padding token), the GRU
+        hidden state stays exactly 0 through all leading padding steps
+        (h=0, x=0 → r=z=0.5, n=0 → h_new=0).  Real items appear at the END
+        of the left-padded sequence, so ``output[:, -1, :]`` is always the
+        hidden state after processing all real items in chronological order.
+
+        PackedSequence must NOT be used here: it packs the first ``lengths``
+        timesteps, which for left-padded sequences are all padding — causing
+        the GRU to see only zeros and output near-zero hidden states.
         """
-        lengths = (input_seq != self.pad_token).long().sum(dim=1).clamp(min=1)
-        x = self.item_emb(input_seq)  # (B, L, emb_dim)
-
-        packed = nn.utils.rnn.pack_padded_sequence(
-            x, lengths.cpu(), batch_first=True, enforce_sorted=False
-        )
-        _, h = self.gru(packed)  # h: (num_layers, B, hidden_dim)
-        last = self.output_dropout(h[-1])  # (B, hidden_dim)
+        x = self.emb_dropout(self.item_emb(input_seq))  # (B, L, emb_dim)
+        output, _ = self.gru(x)                          # (B, L, hidden_dim)
+        last = self.output_dropout(output[:, -1, :])     # (B, hidden_dim)
 
         if self.proj is not None:
             last = self.proj(last)  # (B, emb_dim)
@@ -100,33 +114,20 @@ class GRU4Rec(nn.Module):
         self,
         input_seq: torch.Tensor,
         pos_items: torch.Tensor,
-        neg_items: torch.Tensor,
     ) -> torch.Tensor:
-        """BCE loss.
+        """Cross-Entropy loss over the full item catalog.
+
+        Scores the hidden state against ALL item embeddings and trains with
+        softmax CE — no negative sampling required.  Matches RecBole GRU4Rec.
 
         Parameters
         ----------
         input_seq : (B, L) — left-padded input.
-        pos_items : (B,)   — ground-truth next item (scalar per sample).
-        neg_items : (B,)   — one sampled negative (scalar per sample).
+        pos_items : (B,)   — ground-truth next item index.
         """
-        h = self._encode(input_seq)  # (B, emb_dim)
-
-        pos_emb = self.item_emb(pos_items)  # (B, emb_dim)
-        neg_emb = self.item_emb(neg_items)  # (B, emb_dim)
-
-        pos_logits = (h * pos_emb).sum(dim=-1)  # (B,)
-        neg_logits = (h * neg_emb).sum(dim=-1)  # (B,)
-
-        return F.binary_cross_entropy_with_logits(
-            torch.cat([pos_logits, neg_logits]),
-            torch.cat(
-                [
-                    torch.ones(pos_logits.size(0), device=input_seq.device),
-                    torch.zeros(neg_logits.size(0), device=input_seq.device),
-                ]
-            ),
-        )
+        h = self._encode(input_seq)              # (B, emb_dim)
+        logits = h @ self.item_emb.weight.T      # (B, n_items+1)
+        return F.cross_entropy(logits, pos_items)
 
     def predict(self, input_seq: torch.Tensor) -> torch.Tensor:
         """Return scores (B, n_items+1) via dot-product with item_emb."""

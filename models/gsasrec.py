@@ -48,7 +48,7 @@ class PointWiseFeedForward(nn.Module):
 class GSASRecBlock(nn.Module):
     def __init__(self, hidden_dim: int, num_heads: int, dropout: float = 0.2) -> None:
         super().__init__()
-        self.ln1 = nn.LayerNorm(hidden_dim)
+        self.ln1 = nn.LayerNorm(hidden_dim, eps=1e-8)
         self.attn = nn.MultiheadAttention(
             embed_dim=hidden_dim,
             num_heads=num_heads,
@@ -56,22 +56,21 @@ class GSASRecBlock(nn.Module):
             batch_first=True,
         )
         self.dropout1 = nn.Dropout(dropout)
-        self.ln2 = nn.LayerNorm(hidden_dim)
+        self.ln2 = nn.LayerNorm(hidden_dim, eps=1e-8)
         self.ffn = PointWiseFeedForward(hidden_dim, dropout)
         self.dropout2 = nn.Dropout(dropout)
 
-    def forward(self, x, attn_mask=None, key_padding_mask=None):
+    def forward(self, x, attn_mask=None, padding_mask=None):
+        # Same as SASRec: causal mask only, no explicit padding zeroing.
+        # padding_mask is accepted for API compatibility but is not applied.
         residual = x
         z = self.ln1(x)
-        attn_out, _ = self.attn(
-            z, z, z,
-            attn_mask=attn_mask,
-            key_padding_mask=key_padding_mask,
-            need_weights=False,
-        )
+        attn_out, _ = self.attn(z, z, z, attn_mask=attn_mask)
         x = residual + self.dropout1(attn_out)
+
         residual = x
         x = residual + self.dropout2(self.ffn(self.ln2(x)))
+
         return x
 
 
@@ -80,12 +79,15 @@ class GSASRec(nn.Module):
 
     Parameters
     ----------
-    beta:
-        gBCE temperature. beta=1 -> standard BCE (= SASRec).
-        Petrov & Macdonald recommend beta=0.2.
+    t:
+        gBCE temperature in [0, 1].  t=0 → standard BCE (= SASRec).
+        t=1 → fully sampling-corrected logits.
+        Reference default (Petrov & Macdonald, RecSys 2023): t=0.5.
     num_neg:
-        Number of negatives per positive expected during training.
-        Used only for documentation; actual K is inferred from neg_items shape.
+        Number of negatives per positive sampled during training.
+        Reference default: 32.  The effective beta is computed as:
+          alpha = num_neg / (n_items - 1)
+          beta  = alpha * ((1 - 1/alpha) * t + 1/alpha)
     """
 
     def __init__(
@@ -97,8 +99,8 @@ class GSASRec(nn.Module):
         num_heads: int = 2,
         num_layers: int = 2,
         dropout: float = 0.2,
-        beta: float = 0.2,
-        num_neg: int = 1,
+        t: float = 0.5,
+        num_neg: int = 32,
     ) -> None:
         super().__init__()
         if emb_dim is not None:
@@ -108,16 +110,17 @@ class GSASRec(nn.Module):
         self.max_len    = max_len
         self.hidden_dim = hidden_dim
         self.pad_token  = 0
-        self.beta       = beta
+        self.t          = t
         self.num_neg    = num_neg
 
         self.item_emb    = nn.Embedding(n_items + 1, hidden_dim, padding_idx=0)
-        self.pos_emb     = nn.Embedding(max_len, hidden_dim)
+        # 1-indexed positions; index 0 (padding_idx=0) → zero vector for padding tokens.
+        self.pos_emb     = nn.Embedding(max_len + 1, hidden_dim, padding_idx=0)
         self.emb_dropout = nn.Dropout(dropout)
         self.blocks      = nn.ModuleList(
             [GSASRecBlock(hidden_dim, num_heads, dropout) for _ in range(num_layers)]
         )
-        self.final_ln = nn.LayerNorm(hidden_dim)
+        self.final_ln = nn.LayerNorm(hidden_dim, eps=1e-8)
 
         nn.init.normal_(self.item_emb.weight, std=0.01)
         nn.init.normal_(self.pos_emb.weight,  std=0.01)
@@ -128,14 +131,19 @@ class GSASRec(nn.Module):
 
     def _encode(self, input_seq: torch.Tensor) -> torch.Tensor:
         B, L = input_seq.shape
-        pos_ids = torch.arange(L, device=input_seq.device).unsqueeze(0).expand(B, L)
-        x = self.emb_dropout(self.item_emb(input_seq) + self.pos_emb(pos_ids))
+        # 1-indexed positions; padding tokens get pos_id = 0 → zero pos embedding.
+        pos_ids = torch.arange(1, L + 1, device=input_seq.device).unsqueeze(0).expand(B, L)
+        pos_ids = pos_ids * (input_seq != self.pad_token).long()
+
+        x = self.item_emb(input_seq) * (self.hidden_dim ** 0.5) + self.pos_emb(pos_ids)
+        x = self.emb_dropout(x)
+
         causal_mask = torch.triu(
             torch.ones(L, L, device=input_seq.device, dtype=torch.bool), diagonal=1
         )
-        kpm = input_seq == self.pad_token
+        padding_mask = input_seq == self.pad_token
         for block in self.blocks:
-            x = block(x, attn_mask=causal_mask, key_padding_mask=kpm)
+            x = block(x, attn_mask=causal_mask, padding_mask=padding_mask)
         return self.final_ln(x)
 
     def _last_hidden(self, input_seq: torch.Tensor) -> torch.Tensor:
@@ -151,6 +159,25 @@ class GSASRec(nn.Module):
     # ------------------------------------------------------------------
     # Training: gBCE with multiple negatives + confidence weighting
     # ------------------------------------------------------------------
+
+    def _gbce_transform_pos(self, pos_score: torch.Tensor, K: int) -> torch.Tensor:
+        """Apply gBCE logit transformation to positive scores.
+
+        Reference: Petrov & Macdonald, RecSys 2023.
+          alpha = K / (n_items - 1)
+          beta  = alpha * ((1 - 1/alpha) * t + 1/alpha)
+          pos_score_t = log(1 / (sigmoid(pos_score)^{-beta} - 1))
+
+        At t=0  → beta=1 → pos_score_t == pos_score (standard BCE).
+        At t=0.5 and K=32, n_items=2300 → beta ≈ 0.51.
+        """
+        alpha = K / max(self.n_items - 1, 1)
+        beta  = alpha * ((1.0 - 1.0 / alpha) * self.t + 1.0 / alpha)
+        eps   = 1e-10
+        # Use float64 for numerical stability (same as reference implementation)
+        p     = torch.sigmoid(pos_score.double())
+        p_adj = p.pow(-beta).clamp(min=1.0 + eps)
+        return torch.log((1.0 / (p_adj - 1.0)).clamp(min=eps)).float()
 
     def loss(
         self,
@@ -183,27 +210,29 @@ class GSASRec(nn.Module):
         elif neg_items.dim() == 1:
             neg_items = neg_items.unsqueeze(1)                   # (B,) -> (B, 1)
 
-        h = self._last_hidden(input_seq)             # (B, D)
+        h = self._last_hidden(input_seq)                                      # (B, D)
+        pos_emb   = self.item_emb(pos_items)                                  # (B, D)
+        neg_emb   = self.item_emb(neg_items)                                  # (B, K, D)
+        pos_score = (h * pos_emb).sum(dim=-1)                                 # (B,)
+        neg_score = torch.bmm(neg_emb, h.unsqueeze(-1)).squeeze(-1)           # (B, K)
 
-        pos_emb   = self.item_emb(pos_items)         # (B, D)
-        neg_emb   = self.item_emb(neg_items)         # (B, K, D)
+        K = neg_items.size(1)
+        pos_score_t = self._gbce_transform_pos(pos_score, K)                  # (B,)
 
-        pos_score = (h * pos_emb).sum(dim=-1)        # (B,)
-        neg_score = torch.bmm(neg_emb, h.unsqueeze(-1)).squeeze(-1)  # (B, K)
+        # Concatenate transformed positive + negatives → (B, 1+K)
+        all_scores = torch.cat([pos_score_t.unsqueeze(1), neg_score], dim=1)
+        all_labels = torch.zeros_like(all_scores)
+        all_labels[:, 0] = 1.0
 
-        pos_loss = F.binary_cross_entropy_with_logits(
-            pos_score, torch.ones_like(pos_score), reduction="none"
-        )
-        neg_loss = F.binary_cross_entropy_with_logits(
-            neg_score, torch.zeros_like(neg_score), reduction="none"
-        ).mean(dim=1)
-
-        gbce = self.beta * pos_loss + (1.0 - self.beta) * neg_loss  # (B,)
+        # Loss per sample (B,) — mean over 1+K logits per sample
+        loss_per_sample = F.binary_cross_entropy_with_logits(
+            all_scores, all_labels, reduction="none"
+        ).mean(dim=1)                                                          # (B,)
 
         if confidence is not None:
-            gbce = gbce * torch.clamp(confidence.float(), min=0.0)
+            loss_per_sample = loss_per_sample * torch.clamp(confidence.float(), min=0.0)
 
-        return gbce.mean()
+        return loss_per_sample.mean()
 
     # ------------------------------------------------------------------
     # Inference

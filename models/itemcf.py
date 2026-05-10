@@ -17,9 +17,6 @@ import scipy.sparse as sp
 from pathlib import Path
 from tqdm import tqdm
 
-from evaluate import compute_metrics
-
-
 class ItemCFRecommender:
     def __init__(self, top_k_sim=20):
         self.top_k_sim = top_k_sim
@@ -90,35 +87,10 @@ class ItemCFRecommender:
             scores.append(sc)
         return np.array(scores, dtype=np.float32)
 
-    def evaluate(self, eval_csv, k_list=(10, 20), num_neg=99):
-        df = pd.read_csv(eval_csv)
-        all_scores = []
-        all_items = list(range(1, self.n_items + 1))
-
-        eval_history = {}
-        for _, row in df.iterrows():
-            uid = int(row["user_idx"])
-            seq = _parse_seq(row["train_seq"])
-            tgt = int(row["target"])
-            eval_history[uid] = set(seq) | {tgt}
-
-        for _, row in df.iterrows():
-            uid = int(row["user_idx"])
-            tgt = int(row["target"])
-            seen = eval_history.get(uid, set())
-
-            neg_pool = [i for i in all_items if i not in seen]
-            neg_items = np.random.choice(
-                neg_pool,
-                size=min(num_neg, len(neg_pool)),
-                replace=False
-            ).tolist()
-
-            candidates = [tgt] + neg_items
-            scores = self.score_candidates(uid, candidates)
-            all_scores.append(scores)
-
-        return compute_metrics(all_scores, k_list)
+    def evaluate(self, *args, **kwargs):
+        raise NotImplementedError(
+            "Use pipeline.metrics.evaluate_itemcf() for full-sort evaluation."
+        )
 
     def recommend(self, user_idx, top_k=10):
         history = set(self.user_history.get(user_idx, []))
