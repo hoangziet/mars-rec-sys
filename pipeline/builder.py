@@ -85,11 +85,26 @@ def build_criterion_fn(model_name: str, train_kwargs: dict):
         return fn
 
     if model_name == "gru4rec":
+        loss_type = train_kwargs.get("loss_type", "ce")
         def fn(model, batch, device):
-            return model.loss(
-                batch["input_seq"].to(device),
-                batch["pos_items"].to(device),
-            )
+            if loss_type == "ce":
+                return model.loss(
+                    batch["input_seq"].to(device),
+                    batch["pos_items"].to(device),
+                )
+            else:
+                if not hasattr(model, "_loss_fn"):
+                    if loss_type == "top1":
+                        model._loss_fn = model.top1_loss
+                    elif loss_type == "bpr_max":
+                        model._loss_fn = model.bpr_max_loss
+                    else:
+                        raise ValueError(f"Unknown GRU4Rec loss_type: {loss_type}")
+                return model.loss(
+                    batch["input_seq"].to(device),
+                    batch["pos_items"].to(device),
+                    batch["neg_items"].to(device),
+                )
         return fn
 
     if model_name == "bert4rec":

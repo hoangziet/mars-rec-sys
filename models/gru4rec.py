@@ -114,20 +114,54 @@ class GRU4Rec(nn.Module):
         self,
         input_seq: torch.Tensor,
         pos_items: torch.Tensor,
+        neg_items: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """Cross-Entropy loss over the full item catalog.
+        """Cross-Entropy loss over the full item catalog (default).
 
-        Scores the hidden state against ALL item embeddings and trains with
-        softmax CE — no negative sampling required.  Matches RecBole GRU4Rec.
-
-        Parameters
-        ----------
-        input_seq : (B, L) — left-padded input.
-        pos_items : (B,)   — ground-truth next item index.
+        When neg_items is provided and _loss_fn is set, delegates to pairwise loss.
         """
-        h = self._encode(input_seq)              # (B, emb_dim)
-        logits = h @ self.item_emb.weight.T      # (B, n_items+1)
+        if neg_items is not None and hasattr(self, "_loss_fn"):
+            return self._loss_fn(input_seq, pos_items, neg_items)
+        h = self._encode(input_seq)
+        logits = h @ self.item_emb.weight.T
         return F.cross_entropy(logits, pos_items)
+
+    def top1_loss(
+        self,
+        input_seq: torch.Tensor,
+        pos_items: torch.Tensor,
+        neg_items: torch.Tensor,
+    ) -> torch.Tensor:
+        """TOP1 pairwise loss from Hidasi et al. ICLR 2016.
+
+        L = (1/K) * Σ [σ(s_j - s_i) + σ(s_j²)]
+        where i=positive, j=negatives.
+        """
+        h = self._encode(input_seq)
+        pos_score = (h * self.item_emb(pos_items)).sum(dim=-1, keepdim=True)  # (B, 1)
+        neg_score = (h.unsqueeze(1) * self.item_emb(neg_items)).sum(dim=-1)   # (B, K)
+        diff = neg_score - pos_score                                           # (B, K)
+        loss = torch.sigmoid(diff).mean() + torch.sigmoid(neg_score.pow(2)).mean()
+        return loss
+
+    def bpr_max_loss(
+        self,
+        input_seq: torch.Tensor,
+        pos_items: torch.Tensor,
+        neg_items: torch.Tensor,
+    ) -> torch.Tensor:
+        """BPR-max pairwise loss from Hidasi & Karatzoglou, DLRS 2016.
+
+        L = -log( Σ softmax_neg(s_j) * σ(s_i - s_j) ) + λ * Σ softmax_neg(s_j) * s_j²
+        """
+        h = self._encode(input_seq)
+        pos_score = (h * self.item_emb(pos_items)).sum(dim=-1, keepdim=True)  # (B, 1)
+        neg_score = (h.unsqueeze(1) * self.item_emb(neg_items)).sum(dim=-1)   # (B, K)
+        neg_softmax = torch.softmax(neg_score, dim=1)                          # (B, K)
+        bpr_term = torch.sigmoid(pos_score - neg_score)                        # (B, K)
+        loss_bpr = -torch.log((neg_softmax * bpr_term).sum(dim=1) + 1e-24).mean()
+        loss_reg = (neg_softmax * neg_score.pow(2)).sum(dim=1).mean()
+        return loss_bpr + 0.5 * loss_reg
 
     def predict(self, input_seq: torch.Tensor) -> torch.Tensor:
         """Return scores (B, n_items+1) via dot-product with item_emb."""
