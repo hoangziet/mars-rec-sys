@@ -1,0 +1,142 @@
+[
+  {
+    "exp_id": "sasrec_seed42",
+    "model": "sasrec",
+    "model_variant": "default",
+    "seed": 42,
+    "eval_protocol": "full_sort",
+    "metrics": {
+      "HR@10": 0.3561,
+      "NDCG@10": 0.2209,
+      "HR@20": 0.4423,
+      "NDCG@20": 0.2426
+    },
+    "train_summary": {
+      "best_val_ndcg10": 0.2523,
+      "best_epoch": 10
+    },
+    "git": {
+      "commit": "42a37a6e9e163df58d728cde44d6b4040ed5b563"
+    }
+  },
+  {
+    "exp_id": "gsasrec_seed42",
+    "model": "gsasrec",
+    "model_variant": "confidence_weighted_sasrec",
+    "seed": 42,
+    "eval_protocol": "full_sort",
+    "metrics": {
+      "HR@10": 0.3513,
+      "NDCG@10": 0.2394,
+      "HR@20": 0.4148,
+      "NDCG@20": 0.2554
+    },
+    "train_summary": {
+      "best_val_ndcg10": 0.2719,
+      "best_epoch": 19
+    },
+    "git": {
+      "commit": "42a37a6e9e163df58d728cde44d6b4040ed5b563"
+    }
+  },
+  {
+    "exp_id": "gru4rec_seed42",
+    "model": "gru4rec",
+    "model_variant": "default",
+    "seed": 42,
+    "eval_protocol": "full_sort",
+    "metrics": {
+      "HR@10": 0.4115,
+      "NDCG@10": 0.2991,
+      "HR@20": 0.4865,
+      "NDCG@20": 0.318
+    },
+    "train_summary": {
+      "best_val_ndcg10": 0.3388,
+      "best_epoch": 20
+    },
+    "git": {
+      "commit": "42a37a6e9e163df58d728cde44d6b4040ed5b563"
+    }
+  },
+  {
+    "exp_id": "bprmf_seed42",
+    "model": "bprmf",
+    "model_variant": "default",
+    "seed": 42,
+    "eval_protocol": "full_sort",
+    "metrics": {
+      "HR@10": 0.1846,
+      "NDCG@10": 0.1063,
+      "HR@20": 0.2576,
+      "NDCG@20": 0.1246
+    },
+    "train_summary": {
+      "best_val_ndcg10": 0.1502,
+      "best_epoch": 20
+    },
+    "git": {
+      "commit": "42a37a6e9e163df58d728cde44d6b4040ed5b563"
+    }
+  },
+  {
+    "exp_id": "bert4rec_seed42",
+    "model": "bert4rec",
+    "model_variant": "default",
+    "seed": 42,
+    "eval_protocol": "full_sort",
+    "metrics": {
+      "HR@10": 0.3206,
+      "NDCG@10": 0.2064,
+      "HR@20": 0.4028,
+      "NDCG@20": 0.2272
+    },
+    "train_summary": {
+      "best_val_ndcg10": 0.2434,
+      "best_epoch": 20
+    },
+    "git": {
+      "commit": "42a37a6e9e163df58d728cde44d6b4040ed5b563"
+    }
+  },
+  {
+    "exp_id": "itemcf_seed42",
+    "model": "itemcf",
+    "model_variant": "default",
+    "seed": 42,
+    "eval_protocol": "full_sort",
+    "metrics": {
+      "HR@10": 0.2494,
+      "NDCG@10": 0.1323,
+      "HR@20": 0.3545,
+      "NDCG@20": 0.1588
+    },
+    "train_summary": {
+      "best_val_ndcg10": 0.1788,
+      "best_epoch": 0
+    },
+    "git": {
+      "commit": "42a37a6e9e163df58d728cde44d6b4040ed5b563"
+    }
+  },
+  {
+    "exp_id": "popularity_seed42",
+    "model": "popularity",
+    "model_variant": "default",
+    "seed": 42,
+    "eval_protocol": "full_sort",
+    "metrics": {
+      "HR@10": 0.0673,
+      "NDCG@10": 0.0328,
+      "HR@20": 0.1117,
+      "NDCG@20": 0.0439
+    },
+    "train_summary": {
+      "best_val_ndcg10": 0.0398,
+      "best_epoch": 0
+    },
+    "git": {
+      "commit": "42a37a6e9e163df58d728cde44d6b4040ed5b563"
+    }
+  }
+]
