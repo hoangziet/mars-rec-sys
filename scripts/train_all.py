@@ -76,7 +76,12 @@ def run_neural_model(
         seed=seed,
     )
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=train_kwargs.get("lr", 1e-3), weight_decay=train_kwargs.get("weight_decay", 0.0))
+    optimizer = torch.optim.Adam(
+        model.parameters(),
+        lr=train_kwargs.get("lr", 1e-3),
+        betas=(0.9, train_kwargs.get("beta2", 0.999)),
+        weight_decay=train_kwargs.get("weight_decay", 0.0),
+    )
     trainer   = Trainer(model_name, device, output_dir)
     tracker   = trainer.train(
         model=model,
@@ -89,6 +94,8 @@ def run_neural_model(
         eval_fn=eval_fn,
         gradient_clip=train_kwargs.get("gradient_clip", 5.0),
         val_loss_loader=val_loss_loader,
+        early_stop_patience=train_kwargs.get("early_stop_patience", 0),
+        early_stop_min_delta=train_kwargs.get("early_stop_min_delta", 1e-4),
     )
     return tracker.summary()
 

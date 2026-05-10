@@ -130,7 +130,9 @@ class Trainer:
               optimizer, epochs: int,
               criterion_fn, eval_fn,
               gradient_clip: float = 5.0,
-              val_loss_loader=None):
+              val_loss_loader=None,
+              early_stop_patience: int = 0,
+              early_stop_min_delta: float = 1e-4):
         """
         Full training pipeline.
 
@@ -157,6 +159,7 @@ class Trainer:
 
         best_val_ndcg = -1.0
         best_state = None
+        patience_counter = 0
 
         for epoch in range(1, epochs + 1):
             # Train
@@ -196,11 +199,28 @@ class Trainer:
                 f"NDCG@10={ndcg10:.4f}"
             )
 
+            # Capture best before tracking — needed for correct early-stopping delta
+            prev_best = best_val_ndcg
+
             # Best model tracking — guard against NaN/Inf metrics (e.g. from NaN
             # embeddings) which would otherwise overwrite a valid checkpoint.
             if math.isfinite(ndcg10) and ndcg10 > best_val_ndcg:
                 best_val_ndcg = ndcg10
                 best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+
+            # Early stopping — coexists with NaN early-stop above
+            if early_stop_patience > 0:
+                if math.isfinite(ndcg10) and ndcg10 > prev_best + early_stop_min_delta:
+                    patience_counter = 0
+                else:
+                    patience_counter += 1
+                    if patience_counter >= early_stop_patience:
+                        print(
+                            f"  Early stopping triggered at epoch {epoch} "
+                            f"(no NDCG@10 improvement > {early_stop_min_delta} "
+                            f"for {early_stop_patience} epochs)"
+                        )
+                        break
 
         # Load best model
         if best_state is not None:
