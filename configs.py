@@ -87,6 +87,8 @@ MODEL_CONFIGS = {
             "lr": 1e-3,
             "max_len": 50,
             "gradient_clip": 5.0,
+            "mask_ratio": 0.2,
+            "warmup_steps": 1000,
         },
     },
     "itemcf": {

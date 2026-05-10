@@ -350,6 +350,7 @@ def get_train_loader(
     num_workers: int = 0,
     use_confidence: bool = False,
     num_neg: int = 1,
+    **kwargs,
 ) -> DataLoader | None:
     n_items = stats["n_items"]
 
@@ -363,8 +364,10 @@ def get_train_loader(
             num_neg=num_neg,
         )
     elif model_type == "bert4rec":
+        mask_prob = kwargs.pop("mask_prob", 0.15)
         dataset = MaskedSequenceDataset(
-            train_csv, n_items=n_items, max_len=max_len, is_train=True
+            train_csv, n_items=n_items, max_len=max_len, is_train=True,
+            mask_prob=mask_prob,
         )
     elif model_type == "bprmf":
         dataset = BPRDataset(train_csv, n_items=n_items)
