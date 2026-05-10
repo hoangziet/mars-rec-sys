@@ -15,27 +15,27 @@ from pipeline.metrics import compute_metrics_from_ranks, _ranks_from_logits
 
 class TestComputeMetricsFromRanks:
     def test_perfect_rank_hr(self):
-        assert compute_metrics_from_ranks([1] * 50)["HR@10"] == 1.0
+        assert compute_metrics_from_ranks([1] * 50)["Recall@10"] == 1.0
 
     def test_perfect_rank_ndcg(self):
         assert compute_metrics_from_ranks([1] * 50)["NDCG@10"] == 1.0
 
     def test_worst_rank_hr(self):
-        assert compute_metrics_from_ranks([9999] * 50)["HR@10"] == 0.0
+        assert compute_metrics_from_ranks([9999] * 50)["Recall@10"] == 0.0
 
     def test_worst_rank_ndcg(self):
         assert compute_metrics_from_ranks([9999] * 50)["NDCG@10"] == 0.0
 
     def test_rank_at_k_boundary_hr(self):
-        # Rank 10 = exactly at boundary → should hit HR@10
+        # Rank 10 = exactly at boundary → should hit Recall@10
         r = compute_metrics_from_ranks([10])
-        assert r["HR@10"] == 1.0
-        assert r["HR@20"] == 1.0
+        assert r["Recall@10"] == 1.0
+        assert r["Recall@20"] == 1.0
 
     def test_rank_just_outside_k_hr(self):
         r = compute_metrics_from_ranks([11])
-        assert r["HR@10"] == 0.0
-        assert r["HR@20"] == 1.0
+        assert r["Recall@10"] == 0.0
+        assert r["Recall@20"] == 1.0
 
     def test_ndcg_formula(self):
         rank = 3
@@ -45,18 +45,18 @@ class TestComputeMetricsFromRanks:
 
     def test_both_k_values_present(self):
         r = compute_metrics_from_ranks([5])
-        assert "HR@10" in r and "HR@20" in r
+        assert "Recall@10" in r and "Recall@20" in r
         assert "NDCG@10" in r and "NDCG@20" in r
 
     def test_average_over_users(self):
         # 50% hit at rank 1, 50% miss at rank 9999
         r = compute_metrics_from_ranks([1, 9999])
-        assert r["HR@10"] == pytest.approx(0.5)
+        assert r["Recall@10"] == pytest.approx(0.5)
 
     def test_custom_k_list(self):
         r = compute_metrics_from_ranks([5], k_list=(5, 50))
-        assert "HR@5" in r and "HR@50" in r
-        assert r["HR@5"] == 1.0
+        assert "Recall@5" in r and "Recall@50" in r
+        assert r["Recall@5"] == 1.0
 
 
 class TestRanksFromLogits:

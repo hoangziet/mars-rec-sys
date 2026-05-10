@@ -29,4 +29,5 @@ __pycache__/
 .serena/
 docs/
 AGENTS.md 
+CLAUDE.md
 .sisyphus/

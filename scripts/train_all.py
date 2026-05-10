@@ -205,7 +205,7 @@ def get_git_commit() -> str:
 
 
 def plot_comparison(results: dict, output_dir: str) -> None:
-    metrics     = ["HR@10", "NDCG@10", "HR@20", "NDCG@20"]
+    metrics     = ["Recall@10", "NDCG@10", "Recall@20", "NDCG@20"]
     model_names = list(results.keys())
     x, width    = np.arange(len(model_names)), 0.2
 

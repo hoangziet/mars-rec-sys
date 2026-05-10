@@ -88,7 +88,7 @@ class ExperimentTracker:
     def plot_metrics(self, path: str | Path):
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         epochs = [e["epoch"] for e in self.epochs]
-        metrics = ["HR@10", "NDCG@10", "HR@20", "NDCG@20"]
+        metrics = ["Recall@10", "NDCG@10", "Recall@20", "NDCG@20"]
         colors = ["#2196F3", "#4CAF50", "#FF9800", "#F44336"]
 
         plt.figure(figsize=(8, 5))
@@ -190,14 +190,14 @@ class Trainer:
             self.tracker.log_epoch(epoch, train_loss, val_loss, val_metrics)
 
             # Print
-            hr10 = val_metrics.get("HR@10", 0)
+            hr10 = val_metrics.get("Recall@10", 0)
             ndcg10 = val_metrics.get("NDCG@10", 0)
             val_loss_str = "NA" if val_loss is None else f"{val_loss:.4f}"
             print(
                 f"  Epoch {epoch:02d}/{epochs:02d} | "
                 f"train_loss={train_loss:.4f} | "
                 f"val_loss={val_loss_str} | "
-                f"HR@10={hr10:.4f} | "
+                f"Recall@10={hr10:.4f} | "
                 f"NDCG@10={ndcg10:.4f}"
             )
 
