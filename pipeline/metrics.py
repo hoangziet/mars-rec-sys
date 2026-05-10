@@ -6,7 +6,7 @@ Full-sort evaluation metrics shared for all 7 models.
 Protocol:
     - Rank target item against the full item catalog.
     - Items in the user's training history are masked to -inf before ranking.
-    - Report HR@K and NDCG@K for K in {10, 20}.
+    - Report Recall@K and NDCG@K for K in {10, 20}.
 """
 
 import numpy as np
@@ -19,7 +19,7 @@ from tqdm import tqdm
 
 
 def compute_metrics_from_ranks(ranks: list[int], k_list: tuple = (10, 20)) -> dict:
-    """Compute HR@K and NDCG@K from a list of 1-indexed target ranks.
+    """Compute Recall@K and NDCG@K from a list of 1-indexed target ranks.
 
     Parameters
     ----------
@@ -32,7 +32,7 @@ def compute_metrics_from_ranks(ranks: list[int], k_list: tuple = (10, 20)) -> di
     for k in k_list:
         hrs = [1.0 if r <= k else 0.0 for r in ranks]
         ndcgs = [1.0 / np.log2(r + 1) if r <= k else 0.0 for r in ranks]
-        results[f"HR@{k}"] = round(float(np.mean(hrs)), 4)
+        results[f"Recall@{k}"] = round(float(np.mean(hrs)), 4)
         results[f"NDCG@{k}"] = round(float(np.mean(ndcgs)), 4)
     return results
 
@@ -242,7 +242,7 @@ def print_results(model_name: str, results: dict, phase: str = "Test") -> None:
 
 def compare_models(results_dict: dict, k_list: tuple = (10, 20)) -> None:
     """Print a comparison table for all models."""
-    metrics = [f"HR@{k}" for k in k_list] + [f"NDCG@{k}" for k in k_list]
+    metrics = [f"Recall@{k}" for k in k_list] + [f"NDCG@{k}" for k in k_list]
     col_w   = 12
     header  = f"{'Model':<20}" + "".join(f"{m:>{col_w}}" for m in metrics)
 
