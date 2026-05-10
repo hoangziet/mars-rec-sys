@@ -14,11 +14,14 @@ MODEL_CONFIGS = {
         },
         "train_kwargs": {
             "batch_size": 256,
-            "epochs": 20,
+            "epochs": 50,
             "lr": 1e-3,
             "weight_decay": 1e-4,
+            "beta2": 0.98,
             "max_len": 50,
             "gradient_clip": 5.0,
+            "early_stop_patience": 10,
+            "early_stop_min_delta": 1e-4,
         },
     },
     "gsasrec": {
@@ -32,12 +35,15 @@ MODEL_CONFIGS = {
         },
         "train_kwargs": {
             "batch_size": 256,
-            "epochs": 20,
+            "epochs": 50,
             "lr": 1e-3,
-            "weight_decay": 1e-4,
+            "weight_decay": 0.0,
+            "beta2": 0.98,
             "max_len": 50,
             "num_neg": 32,  # passed to TrainSequenceDataset
             "gradient_clip": 5.0,
+            "early_stop_patience": 10,
+            "early_stop_min_delta": 1e-4,
         },
     },
     "gru4rec": {
