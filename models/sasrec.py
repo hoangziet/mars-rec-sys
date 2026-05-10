@@ -51,12 +51,14 @@ class PointWiseFeedForward(nn.Module):
 class SASRecBlock(nn.Module):
     """One transformer block: causal multi-head self-attention + FFN.
 
-    Pre-LN formulation (LayerNorm applied before each sublayer).
-    Residual connections wrap both sublayers.
+    Supports both Pre-LN (norm_first=True) and Post-LN (norm_first=False).
+    Pre-LN applies LayerNorm before each sublayer; Post-LN applies it after.
     """
 
-    def __init__(self, hidden_dim: int, num_heads: int, dropout: float = 0.2) -> None:
+    def __init__(self, hidden_dim: int, num_heads: int, dropout: float = 0.2,
+                 norm_first: bool = True) -> None:
         super().__init__()
+        self.norm_first = norm_first
         self.ln1 = nn.LayerNorm(hidden_dim, eps=1e-8)
         self.attn = nn.MultiheadAttention(
             embed_dim=hidden_dim,
@@ -85,20 +87,19 @@ class SASRecBlock(nn.Module):
         The ``padding_mask`` argument is accepted but unused; ``_last_hidden``
         correctly extracts the last non-padding position for prediction.
         """
-        residual = x
-        z = self.ln1(x)
-        attn_out, _ = self.attn(
-            z,
-            z,
-            z,
-            attn_mask=attn_mask,
-        )
-        x = residual + self.dropout1(attn_out)
-
-        # Feed-forward sublayer
-        residual = x
-        x = residual + self.dropout2(self.ffn(self.ln2(x)))
-
+        if self.norm_first:
+            # Pre-LN
+            residual = x
+            z = self.ln1(x)
+            attn_out, _ = self.attn(z, z, z, attn_mask=attn_mask)
+            x = residual + self.dropout1(attn_out)
+            residual = x
+            x = residual + self.dropout2(self.ffn(self.ln2(x)))
+        else:
+            # Post-LN
+            attn_out, _ = self.attn(x, x, x, attn_mask=attn_mask)
+            x = self.ln1(x + self.dropout1(attn_out))
+            x = self.ln2(x + self.dropout2(self.ffn(x)))
         return x
 
 
@@ -121,6 +122,8 @@ class SASRec(nn.Module):
         Number of stacked SASRec blocks.
     dropout:
         Dropout probability applied throughout.
+    norm_first:
+        If True, use Pre-LN (LayerNorm before sublayers); if False, Post-LN.
     """
 
     def __init__(
@@ -132,6 +135,7 @@ class SASRec(nn.Module):
         num_heads: int = 2,
         num_layers: int = 2,
         dropout: float = 0.2,
+        norm_first: bool = True,
     ) -> None:
         super().__init__()
         if emb_dim is not None:
@@ -149,7 +153,8 @@ class SASRec(nn.Module):
         self.pos_emb = nn.Embedding(max_len + 1, hidden_dim, padding_idx=0)
         self.emb_dropout = nn.Dropout(dropout)
         self.blocks = nn.ModuleList(
-            [SASRecBlock(hidden_dim, num_heads, dropout) for _ in range(num_layers)]
+            [SASRecBlock(hidden_dim, num_heads, dropout, norm_first)
+             for _ in range(num_layers)]
         )
         self.final_ln = nn.LayerNorm(hidden_dim, eps=1e-8)
 
