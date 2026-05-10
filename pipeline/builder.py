@@ -96,13 +96,15 @@ def build_criterion_fn(model_name: str, train_kwargs: dict):
         import torch.nn.functional as F
 
         def fn(model, batch, device):
-            logits = model(batch["input_seq"].to(device))
+            input_seq = batch["input_seq"].to(device)
             labels = batch["labels"].to(device)
-            return F.cross_entropy(
-                logits.view(-1, logits.size(-1)),
-                labels.view(-1),
-                ignore_index=0,
-            )
+            logits = model(input_seq)
+            mask = (labels != 0)
+            if mask.sum() == 0:
+                return torch.tensor(0.0, device=device, requires_grad=True)
+            logits_masked = logits[mask]
+            labels_masked = labels[mask]
+            return F.cross_entropy(logits_masked, labels_masked)
         return fn
 
     if model_name == "bprmf":
@@ -156,6 +158,9 @@ def build_train_loader(
     num_neg    = train_kwargs.get("num_neg", 1)
 
     if model_name in ("sasrec", "gsasrec", "gru4rec", "bert4rec"):
+        extra = {}
+        if model_name == "bert4rec":
+            extra["mask_prob"] = train_kwargs.get("mask_ratio", 0.15)
         return get_train_loader(
             model_name,
             data_dir / "train.csv",
@@ -164,6 +169,7 @@ def build_train_loader(
             max_len=max_len,
             use_confidence=(model_name == "gsasrec"),
             num_neg=num_neg,
+            **extra,
         )
 
     if model_name == "bprmf":
