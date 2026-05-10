@@ -148,6 +148,9 @@ class GSASRec(nn.Module):
 
         if self.training and self.pos_smoothing > 0:
             noise = torch.randn(B, L, device=input_seq.device) * self.pos_smoothing
+            # Only add noise at non-padding positions (pos_ids > 0).
+            # Padding has pos_ids=0 and pos_emb(0)=0 — keep it that way.
+            noise = noise * (pos_ids > 0).float()
             pos_ids = (pos_ids.float() + noise).clamp(min=0.0).long()
 
         x = self.item_emb(input_seq) * (self.hidden_dim ** 0.5) + self.pos_emb(pos_ids)

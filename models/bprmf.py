@@ -22,8 +22,8 @@ class BPRMF(nn.Module):
         self.item_embedding = nn.Embedding(n_items + 1, emb_dim, padding_idx=0)
         self.user_emb = self.user_embedding
         self.item_emb = self.item_embedding
-        nn.init.xavier_uniform_(self.user_embedding.weight, gain=nn.init.calculate_gain('relu'))
-        nn.init.xavier_uniform_(self.item_embedding.weight, gain=nn.init.calculate_gain('relu'))
+        nn.init.xavier_uniform_(self.user_embedding.weight)
+        nn.init.xavier_uniform_(self.item_embedding.weight)
         # Keep padding row zeroed out after Xavier fills it.
         with torch.no_grad():
             self.user_embedding.weight[0].zero_()
@@ -54,8 +54,9 @@ def bpr_loss(pos_scores, neg_scores, reg_lambda=1e-4, model=None,
              u_emb=None, p_emb=None, n_emb=None):
     loss = -F.logsigmoid(pos_scores - neg_scores).mean()
     if reg_lambda > 0 and u_emb is not None:
-        # Reference formula: sum over batch of (||e_i||² / 2) for each embedding.
-        reg = (u_emb.pow(2).sum() + p_emb.pow(2).sum() + n_emb.pow(2).sum()) / 2.0
+        # L2 regularization on batch embeddings, normalized by batch_size
+        # to keep lambda independent of batch size.
+        reg = (u_emb.pow(2).sum() + p_emb.pow(2).sum() + n_emb.pow(2).sum()) / (2.0 * u_emb.size(0))
         loss = loss + reg_lambda * reg
     return loss
 
