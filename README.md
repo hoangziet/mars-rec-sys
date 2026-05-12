@@ -16,7 +16,7 @@ Implements and compares 7 models — from simple heuristics to state-of-the-art 
 | Sparsity | 99.3% |
 | Split | Leave-one-out (val = second-last item, test = last item per user) |
 
-Raw data: `data/raw/` — requires `implicit_ratings.csv`, `explicit_ratings.csv`, `items.csv`.
+Raw data: `data/raw/` — requires `implicit_ratings.csv` and `items.csv`.
 
 ---
 
@@ -25,7 +25,7 @@ Raw data: `data/raw/` — requires `implicit_ratings.csv`, `explicit_ratings.csv
 | Model | Type | Loss | Key feature |
 |-------|------|------|-------------|
 | **SASRec** | Sequential / Transformer | BCE | Causal self-attention, Pre-LN, `sqrt(d)` embedding scaling |
-| **gSASRec** | Sequential / Transformer | gBCE | Sampling-bias corrected BCE, confidence-weighted, 32 negatives |
+| **gSASRec** | Sequential / Transformer | gBCE | Sampling-bias corrected BCE, 32 negatives |
 | **GRU4Rec** | Sequential / RNN | Cross-Entropy | GRU with full-catalog CE loss, embedding dropout, `bias=False` |
 | **BERT4Rec** | Sequential / Transformer | Cross-Entropy | Bidirectional encoder, masked item modelling, weight-tied head |
 | **BPR-MF** | Matrix Factorization | BPR | Classic user-item embedding with L2 regularization |
@@ -215,7 +215,7 @@ uv run pytest tests/ -v
 Pre-LN transformer with causal (unidirectional) self-attention. `sqrt(d)` scaling on item embeddings. 1-indexed positional embeddings (`padding_idx=0`). Padding positions are zeroed out after each sublayer to prevent NaN propagation. BCE loss with 1 random negative per positive.
 
 ### gSASRec
-Architecturally identical to SASRec. Uses **gBCE loss** (generalised Binary Cross-Entropy) with logit transformation to correct for sampling bias in sparse data. `num_neg=32`, temperature `t=0.5` (paper defaults). Each positive is weighted by `watch_percentage / 100` as a confidence signal.
+Architecturally identical to SASRec. Uses **gBCE loss** (generalised Binary Cross-Entropy) with logit transformation to correct for sampling bias in sparse data. `num_neg=32`, temperature `t=0.5` (paper defaults).
 
 ### GRU4Rec
 GRU encoder with `bias=False`, embedding dropout, and Xavier initialisation (matching RecBole). Uses **Cross-Entropy loss over the full item catalog** — no negative sampling required. This is the correct setting for **user-based** sequential recommendation (as opposed to the original session-based BPR-max paper setting).
