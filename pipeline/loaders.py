@@ -69,40 +69,20 @@ class TrainSequenceDataset(Dataset):
         csv_path: str,
         max_len: int = 50,
         pad_token: int = 0,
-        use_confidence: bool = False,
         n_items: int | None = None,
         num_neg: int = 1,
     ) -> None:
         df = pd.read_csv(csv_path)
         self.max_len = max_len
         self.pad_token = pad_token
-        self.use_confidence = use_confidence
         self.num_neg = num_neg
-
-        if use_confidence and (
-            "confidence_sequence" not in df.columns and "confidence" not in df.columns
-        ):
-            raise ValueError(
-                "TrainSequenceDataset: neither 'confidence_sequence' nor 'confidence' "
-                "column found. Set use_confidence=False or provide the column."
-            )
 
         all_items: set[int] = set()
         self.samples: list[dict] = []
 
-        has_conf_seq = "confidence_sequence" in df.columns
-
         for row in df.itertuples(index=False):
             seq = parse_seq(row.item_sequence)
             all_items.update(seq)
-            if not use_confidence:
-                confs = [1.0] * len(seq)
-            elif has_conf_seq:
-                confs = [float(c) for c in parse_seq(row.confidence_sequence)]
-                if len(confs) != len(seq):
-                    confs = confs[:len(seq)] + [1.0] * max(0, len(seq) - len(confs))
-            else:
-                confs = [float(row.confidence)] * len(seq)
 
             if len(seq) < 2:
                 continue
@@ -114,7 +94,6 @@ class TrainSequenceDataset(Dataset):
                     "input": pad_sequence(inp, max_len, pad_token),
                     "pos": tgt,
                     "seen": seen,
-                    "conf": confs[i],
                 })
 
         self._n_items = n_items if n_items is not None else max(all_items)
@@ -146,7 +125,6 @@ class TrainSequenceDataset(Dataset):
             "pos_items": torch.tensor(pos, dtype=torch.long),
             "neg_items": neg_tensor,
             "mask": torch.tensor(mask, dtype=torch.bool),
-            "confidence": torch.tensor(s["conf"], dtype=torch.float),
         }
 
 
@@ -172,6 +150,9 @@ class MaskedSequenceDataset(Dataset):
         pad_token: int = 0,
         mask_prob: float = 0.15,
         is_train: bool = True,
+        dupe_factor: int = 1,
+        prop_sliding_window: float = -1.0,
+        force_last_item_mask: bool = False,
     ) -> None:
         df = pd.read_csv(csv_path)
         self.max_len = max_len
@@ -179,34 +160,66 @@ class MaskedSequenceDataset(Dataset):
         self.mask_token = n_items + 1
         self.mask_prob = mask_prob
         self.is_train = is_train
+        self.dupe_factor = max(1, int(dupe_factor))
+        self.prop_sliding_window = prop_sliding_window
+        self.force_last_item_mask = force_last_item_mask
 
         if is_train:
-            self.seqs = [parse_seq(s) for s in df["item_sequence"]]
+            raw_seqs = [parse_seq(s) for s in df["item_sequence"]]
+            self.instances: list[tuple[list[int], str]] = []
+            for seq in raw_seqs:
+                for window in self._build_train_windows(seq):
+                    for _ in range(self.dupe_factor):
+                        self.instances.append((window, "random"))
+                    if self.force_last_item_mask and window:
+                        self.instances.append((window, "last"))
+            self.seqs = None
             self.targets = None
         else:
             self.seqs = [parse_seq(s) for s in df["train_seq"]]
             self.targets = df["target"].tolist()
+            self.instances = []
+
+    def _build_train_windows(self, seq: list[int]) -> list[list[int]]:
+        """Expand long sequences using the sliding-window strategy from BERT4Rec."""
+        if not seq:
+            return []
+        if len(seq) <= self.max_len:
+            return [seq]
+
+        if self.prop_sliding_window == -1.0:
+            sliding_step = self.max_len
+        else:
+            sliding_step = max(1, int(self.prop_sliding_window * self.max_len))
+
+        begin_indices = list(range(len(seq) - self.max_len, 0, -sliding_step))
+        begin_indices.append(0)
+        return [seq[i:i + self.max_len] for i in begin_indices[::-1]]
 
     def __len__(self) -> int:
-        return len(self.seqs)
+        return len(self.instances) if self.is_train else len(self.seqs)
 
     def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
-        seq = self.seqs[idx]
-
         if self.is_train:
+            seq, mode = self.instances[idx]
             masked_seq = seq.copy()
             labels = [0] * len(seq)
-            for i, item in enumerate(seq):
-                if np.random.random() < self.mask_prob:
-                    masked_seq[i] = self.mask_token
-                    labels[i] = item
-            if seq and not any(labels):
-                force = np.random.randint(len(seq))
-                masked_seq[force] = self.mask_token
-                labels[force] = seq[force]
+            if mode == "last":
+                masked_seq[-1] = self.mask_token
+                labels[-1] = seq[-1]
+            else:
+                for i, item in enumerate(seq):
+                    if np.random.random() < self.mask_prob:
+                        masked_seq[i] = self.mask_token
+                        labels[i] = item
+                if seq and not any(labels):
+                    force = np.random.randint(len(seq))
+                    masked_seq[force] = self.mask_token
+                    labels[force] = seq[force]
             padded_seq = pad_sequence(masked_seq, self.max_len, self.pad_token)
             padded_lbl = pad_sequence(labels, self.max_len, 0)
         else:
+            seq = self.seqs[idx]
             masked_seq = seq + [self.mask_token]
             labels = [0] * len(masked_seq)
             labels[-1] = self.targets[idx]
@@ -339,7 +352,6 @@ def get_train_loader(
     batch_size: int = 256,
     max_len: int = 50,
     num_workers: int = 0,
-    use_confidence: bool = False,
     num_neg: int = 1,
     **kwargs,
 ) -> DataLoader | None:
@@ -350,15 +362,20 @@ def get_train_loader(
             train_csv,
             max_len=max_len,
             pad_token=0,
-            use_confidence=(use_confidence or model_type == "gsasrec"),
             n_items=n_items,
             num_neg=num_neg,
         )
     elif model_type == "bert4rec":
         mask_prob = kwargs.pop("mask_prob", 0.15)
+        dupe_factor = kwargs.pop("dupe_factor", 1)
+        prop_sliding_window = kwargs.pop("prop_sliding_window", -1.0)
+        force_last_item_mask = kwargs.pop("force_last_item_mask", False)
         dataset = MaskedSequenceDataset(
             train_csv, n_items=n_items, max_len=max_len, is_train=True,
             mask_prob=mask_prob,
+            dupe_factor=dupe_factor,
+            prop_sliding_window=prop_sliding_window,
+            force_last_item_mask=force_last_item_mask,
         )
     elif model_type == "bprmf":
         dataset = BPRDataset(train_csv, n_items=n_items)
@@ -383,14 +400,12 @@ class _ValLossDataset(Dataset):
         pos_items_t: torch.Tensor,
         neg_items_t: torch.Tensor,
         user_t: torch.Tensor,
-        conf_t: torch.Tensor,
         num_neg: int = 1,
     ) -> None:
         self._input_seqs = input_seqs_t
         self._pos_items  = pos_items_t
         self._neg_items  = neg_items_t
         self._user       = user_t
-        self._conf       = conf_t
         self._num_neg    = num_neg
 
     def __len__(self) -> int:
@@ -401,7 +416,6 @@ class _ValLossDataset(Dataset):
             "input_seq":  self._input_seqs[idx],
             "pos_items":  self._pos_items[idx],
             "neg_items":  self._neg_items[idx],
-            "confidence": self._conf[idx],
             "user":       self._user[idx],
             "pos_item":   self._pos_items[idx],
             "neg_item":   self._neg_items[idx] if self._num_neg == 1 else self._neg_items[idx, 0],
@@ -462,10 +476,9 @@ def get_val_loss_loader(
     pos_items_t  = torch.tensor(pos_items_list, dtype=torch.long)
     neg_items_t  = torch.tensor(neg_items_list, dtype=torch.long)
     user_t       = torch.tensor(user_list, dtype=torch.long)
-    conf_t       = torch.ones(len(pos_items_list))
 
     dataset = _ValLossDataset(
-        input_seqs_t, pos_items_t, neg_items_t, user_t, conf_t, num_neg=num_neg
+        input_seqs_t, pos_items_t, neg_items_t, user_t, num_neg=num_neg
     )
     return DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
 

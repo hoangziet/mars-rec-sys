@@ -10,6 +10,7 @@ Usage:
 """
 
 import argparse
+import random
 import sys
 from pathlib import Path
 
@@ -25,6 +26,17 @@ from pipeline.loaders import get_eval_loader, get_val_loss_loader, load_stats
 from trainer import Trainer
 
 
+def seed_everything(seed: int) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    if hasattr(torch.backends, "cudnn"):
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("model", choices=list(MODEL_CONFIGS.keys()))
@@ -36,8 +48,7 @@ def main():
     parser.add_argument("--seed",       type=int, default=DEFAULT_SEED)
     args = parser.parse_args()
 
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
+    seed_everything(args.seed)
 
     data_dir = Path(args.data_dir)
     stats    = load_stats(data_dir / "dataset_stats.json")

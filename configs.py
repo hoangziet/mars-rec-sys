@@ -87,11 +87,15 @@ MODEL_CONFIGS = {
         "train_kwargs": {
             "batch_size": 256,
             "epochs": 20,
-            "lr": 1e-3,
+            "lr": 1e-4,
+            "weight_decay": 1e-2,
             "max_len": 50,
             "gradient_clip": 5.0,
             "mask_ratio": 0.2,
-            "warmup_steps": 1000,
+            "warmup_steps": 100,
+            "dupe_factor": 10,
+            "prop_sliding_window": 0.1,
+            "force_last_item_mask": True,
         },
     },
     "itemcf": {

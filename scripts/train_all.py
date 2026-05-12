@@ -13,6 +13,7 @@ Supported models:
 
 import argparse
 import json
+import random
 import subprocess
 import sys
 from pathlib import Path
@@ -38,6 +39,17 @@ from pipeline.metrics import (
 from trainer import Trainer
 
 
+def seed_everything(seed: int) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    if hasattr(torch.backends, "cudnn"):
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+
+
 # ---------------------------------------------------------------------------
 # Neural model runner
 # ---------------------------------------------------------------------------
@@ -53,8 +65,7 @@ def run_neural_model(
     train_kwargs: dict,
     seed: int,
 ) -> dict:
-    np.random.seed(seed)
-    torch.manual_seed(seed)
+    seed_everything(seed)
 
     max_len    = train_kwargs.get("max_len", 50)
     batch_size = train_kwargs.get("batch_size", 256)
@@ -127,7 +138,7 @@ def run_heuristic_model(
     train_kwargs: dict,
     seed: int,
 ) -> dict:
-    np.random.seed(seed)
+    seed_everything(seed)
 
     max_len    = train_kwargs.get("max_len", 50)
     batch_size = train_kwargs.get("batch_size", 256)
@@ -167,7 +178,7 @@ def build_run_record(model_name: str, seed: int, summary: dict, commit_sha: str 
     return {
         "exp_id": f"{model_name}_seed{seed}",
         "model": model_name,
-        "model_variant": "confidence_weighted_sasrec" if model_name == "gsasrec" else "default",
+        "model_variant": "default",
         "seed": seed,
         "eval_protocol": "full_sort",
         "metrics": summary["test_results"],

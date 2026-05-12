@@ -7,17 +7,15 @@ Reference: Petrov & Macdonald, ACM RecSys 2023.
 Key differences from vanilla SASRec:
     1. Loss: Generalised BCE (gBCE) with temperature beta.
        gBCE = -beta * log(sigmoid(pos)) - (1-beta) * mean_k[log(1-sigmoid(neg_k))]
-    2. Confidence weighting: each sample scaled by watch_percentage / 100.
-    3. Architecture: identical to SASRec (no structural change).
+    2. Architecture: identical to SASRec (no structural change).
 
 Training interface
 ------------------
-    loss = model.loss(input_seq, pos_items, neg_items, confidence=None)
+    loss = model.loss(input_seq, pos_items, neg_items)
 
     - input_seq  : (B, L)         left-padded item indices
     - pos_items  : (B,)           ground-truth next item
     - neg_items  : (B, num_neg)   pre-sampled negatives
-    - confidence : (B,) optional  watch_percentage / 100
 
 Inference interface
 -------------------
@@ -175,7 +173,7 @@ class GSASRec(nn.Module):
         return hidden[torch.arange(hidden.size(0), device=hidden.device), last_idx]
 
     # ------------------------------------------------------------------
-    # Training: gBCE with multiple negatives + confidence weighting
+    # Training: gBCE with multiple negatives
     # ------------------------------------------------------------------
 
     def _gbce_transform_pos(self, pos_score: torch.Tensor, K: int) -> torch.Tensor:
@@ -202,7 +200,6 @@ class GSASRec(nn.Module):
         input_seq: torch.Tensor,
         pos_items: torch.Tensor,
         neg_items: torch.Tensor,
-        confidence: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Generalised BCE loss at the last valid sequence position.
 
@@ -211,7 +208,6 @@ class GSASRec(nn.Module):
         input_seq  : (B, L)
         pos_items  : (B,) or (B, L) — if 2-D, last valid position is extracted.
         neg_items  : (B,), (B, K), or (B, L) — reshaped accordingly.
-        confidence : (B,) optional watch_percentage / 100.
         """
         # Normalise pos/neg to (B,) and (B, K)
         if pos_items.dim() == 2 and pos_items.size(1) > 1:
@@ -246,9 +242,6 @@ class GSASRec(nn.Module):
         loss_per_sample = F.binary_cross_entropy_with_logits(
             all_scores, all_labels, reduction="none"
         ).mean(dim=1)                                                          # (B,)
-
-        if confidence is not None:
-            loss_per_sample = loss_per_sample * torch.clamp(confidence.float(), min=0.0)
 
         return loss_per_sample.mean()
 
