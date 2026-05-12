@@ -6,37 +6,37 @@
     "seed": 42,
     "eval_protocol": "full_sort",
     "metrics": {
-      "Recall@10": 0.374,
+      "Recall@10": 0.3744,
       "NDCG@10": 0.2349,
-      "Recall@20": 0.4686,
-      "NDCG@20": 0.2587
+      "Recall@20": 0.4681,
+      "NDCG@20": 0.2585
     },
     "train_summary": {
-      "best_val_ndcg10": 0.2693,
+      "best_val_ndcg10": 0.2694,
       "best_epoch": 24
     },
     "git": {
-      "commit": "945a51cbe4f1a661f7a475fdf3aa0059426f2fe3"
+      "commit": "0abbf434c9e7292c20685cf5210bb665a3b67875"
     }
   },
   {
     "exp_id": "gsasrec_seed42",
     "model": "gsasrec",
-    "model_variant": "confidence_weighted_sasrec",
+    "model_variant": "default",
     "seed": 42,
     "eval_protocol": "full_sort",
     "metrics": {
-      "Recall@10": 0.3585,
-      "NDCG@10": 0.2491,
-      "Recall@20": 0.4205,
-      "NDCG@20": 0.2648
+      "Recall@10": 0.4402,
+      "NDCG@10": 0.3119,
+      "Recall@20": 0.5203,
+      "NDCG@20": 0.3321
     },
     "train_summary": {
-      "best_val_ndcg10": 0.2837,
-      "best_epoch": 35
+      "best_val_ndcg10": 0.3502,
+      "best_epoch": 43
     },
     "git": {
-      "commit": "945a51cbe4f1a661f7a475fdf3aa0059426f2fe3"
+      "commit": "0abbf434c9e7292c20685cf5210bb665a3b67875"
     }
   },
   {
@@ -56,7 +56,7 @@
       "best_epoch": 20
     },
     "git": {
-      "commit": "945a51cbe4f1a661f7a475fdf3aa0059426f2fe3"
+      "commit": "0abbf434c9e7292c20685cf5210bb665a3b67875"
     }
   },
   {
@@ -76,7 +76,7 @@
       "best_epoch": 20
     },
     "git": {
-      "commit": "945a51cbe4f1a661f7a475fdf3aa0059426f2fe3"
+      "commit": "0abbf434c9e7292c20685cf5210bb665a3b67875"
     }
   },
   {
@@ -86,17 +86,17 @@
     "seed": 42,
     "eval_protocol": "full_sort",
     "metrics": {
-      "Recall@10": 0.2462,
-      "NDCG@10": 0.1505,
-      "Recall@20": 0.3258,
-      "NDCG@20": 0.1705
+      "Recall@10": 0.053,
+      "NDCG@10": 0.0263,
+      "Recall@20": 0.1103,
+      "NDCG@20": 0.0402
     },
     "train_summary": {
-      "best_val_ndcg10": 0.1834,
-      "best_epoch": 20
+      "best_val_ndcg10": 0.0369,
+      "best_epoch": 16
     },
     "git": {
-      "commit": "945a51cbe4f1a661f7a475fdf3aa0059426f2fe3"
+      "commit": "0abbf434c9e7292c20685cf5210bb665a3b67875"
     }
   },
   {
@@ -108,15 +108,15 @@
     "metrics": {
       "Recall@10": 0.2494,
       "NDCG@10": 0.1323,
-      "Recall@20": 0.3545,
-      "NDCG@20": 0.1588
+      "Recall@20": 0.3529,
+      "NDCG@20": 0.1584
     },
     "train_summary": {
-      "best_val_ndcg10": 0.1788,
+      "best_val_ndcg10": 0.1771,
       "best_epoch": 0
     },
     "git": {
-      "commit": "945a51cbe4f1a661f7a475fdf3aa0059426f2fe3"
+      "commit": "0abbf434c9e7292c20685cf5210bb665a3b67875"
     }
   },
   {
@@ -136,7 +136,7 @@
       "best_epoch": 0
     },
     "git": {
-      "commit": "945a51cbe4f1a661f7a475fdf3aa0059426f2fe3"
+      "commit": "0abbf434c9e7292c20685cf5210bb665a3b67875"
     }
   }
 ]
