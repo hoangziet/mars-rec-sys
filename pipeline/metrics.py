@@ -9,9 +9,30 @@ Protocol:
     - Report Recall@K and NDCG@K for K in {10, 20}.
 """
 
+import os
+import sys
+
 import numpy as np
 import torch
 from tqdm import tqdm
+
+
+def _should_use_tqdm() -> bool:
+    if os.environ.get("DISABLE_TQDM") == "1":
+        return False
+    return sys.stderr.isatty()
+
+
+def _progress(iterable, desc: str):
+    return tqdm(
+        iterable,
+        desc=desc,
+        leave=False,
+        disable=not _should_use_tqdm(),
+        dynamic_ncols=True,
+        mininterval=0.5,
+        bar_format="{desc:<18} {percentage:3.0f}%|{bar:24}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]",
+    )
 
 # ---------------------------------------------------------------------------
 # Core metric functions
@@ -42,17 +63,21 @@ def _ranks_from_logits(
     history_mask: torch.Tensor,
     target: torch.Tensor,
 ) -> list[int]:
-    """Mask seen items, then compute 1-indexed rank of target for each row.
+    """Mask seen items, then compute conservative 1-indexed target ranks.
 
     Parameters
     ----------
     logits:       (B, n_items+1)
     history_mask: (B, n_items+1) bool — True = mask to -inf
     target:       (B,) item indices
+
+    Tie handling is conservative: items with the same score as the target are
+    counted ahead of it. This avoids optimistic metrics for heuristic models
+    (e.g. popularity, item-CF) where many items often share identical scores.
     """
     logits = logits.masked_fill(history_mask, float("-inf"))
     target_scores = logits.gather(1, target.unsqueeze(1))   # (B, 1)
-    ranks = (logits > target_scores).sum(dim=1) + 1         # (B,) 1-indexed
+    ranks = (logits >= target_scores).sum(dim=1)            # (B,) 1-indexed
     return ranks.cpu().tolist()
 
 
@@ -75,7 +100,7 @@ def evaluate_sequential(
     model.eval()
     all_ranks: list[int] = []
 
-    for batch in tqdm(eval_loader, desc="Evaluating", leave=False):
+    for batch in _progress(eval_loader, desc="eval sequential"):
         input_seq    = batch["input_seq"].to(device)     # (B, L)
         history_mask = batch["history_mask"].to(device)  # (B, n_items+1)
         target       = batch["target"].to(device)        # (B,)
@@ -102,7 +127,7 @@ def evaluate_bert4rec(
     all_ranks: list[int] = []
     mask_token = model.mask_token
 
-    for batch in tqdm(eval_loader, desc="Evaluating BERT4Rec", leave=False):
+    for batch in _progress(eval_loader, desc="eval bert4rec"):
         input_seq    = batch["input_seq"].to(device)     # (B, L)
         history_mask = batch["history_mask"].to(device)  # (B, n_items+1)
         target       = batch["target"].to(device)        # (B,)
@@ -141,7 +166,7 @@ def evaluate_bprmf(
     all_item_ids = torch.arange(n_items + 1, device=device)
     all_item_emb = model.item_embedding(all_item_ids)  # (n_items+1, D)
 
-    for batch in tqdm(eval_loader, desc="Evaluating BPR-MF", leave=False):
+    for batch in _progress(eval_loader, desc="eval bprmf"):
         users        = batch["user"].to(device)          # (B,)
         history_mask = batch["history_mask"].to(device)  # (B, n_items+1)
         target       = batch["target"].to(device)        # (B,)
@@ -185,7 +210,7 @@ def evaluate_popularity(
             scores = scores_base.copy()
             scores[history_mask[i]] = -np.inf
             tgt_score = scores[target[i]]
-            rank = int((scores > tgt_score).sum()) + 1
+            rank = int((scores >= tgt_score).sum())
             all_ranks.append(rank)
 
     return compute_metrics_from_ranks(all_ranks, k_list)
@@ -220,7 +245,7 @@ def evaluate_itemcf(
             )
             scores[history_mask[i]] = -np.inf
             tgt_score = scores[target[i]]
-            rank = int((scores > tgt_score).sum()) + 1
+            rank = int((scores >= tgt_score).sum())
             all_ranks.append(rank)
 
     return compute_metrics_from_ranks(all_ranks, k_list)
@@ -262,4 +287,3 @@ def compare_models(results_dict: dict, k_list: tuple = (10, 20)) -> None:
         best_model = max(results_dict, key=lambda x: results_dict[x].get(m, 0))
         best_val   = results_dict[best_model].get(m, 0)
         print(f"    {m:<12}: {best_model} ({best_val:.4f})")
-

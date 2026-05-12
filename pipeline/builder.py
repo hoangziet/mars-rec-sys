@@ -80,7 +80,6 @@ def build_criterion_fn(model_name: str, train_kwargs: dict):
                 batch["input_seq"].to(device),
                 batch["pos_items"].to(device),
                 batch["neg_items"].to(device),
-                confidence=batch["confidence"].to(device),
             )
         return fn
 
@@ -176,13 +175,15 @@ def build_train_loader(
         extra = {}
         if model_name == "bert4rec":
             extra["mask_prob"] = train_kwargs.get("mask_ratio", 0.15)
+            extra["dupe_factor"] = train_kwargs.get("dupe_factor", 1)
+            extra["prop_sliding_window"] = train_kwargs.get("prop_sliding_window", -1.0)
+            extra["force_last_item_mask"] = train_kwargs.get("force_last_item_mask", False)
         return get_train_loader(
             model_name,
             data_dir / "train.csv",
             stats,
             batch_size=batch_size,
             max_len=max_len,
-            use_confidence=(model_name == "gsasrec"),
             num_neg=num_neg,
             **extra,
         )

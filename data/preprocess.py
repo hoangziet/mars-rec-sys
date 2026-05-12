@@ -32,15 +32,9 @@ def main():
         parse_dates=["created_at"],
         dtype={"user_id": str, "item_id": str},
     )
-    explicit = pd.read_csv(
-        RAW_DIR / "explicit_ratings.csv",
-        parse_dates=["created_at"],
-        dtype={"user_id": str, "item_id": str},
-    )
     items = pd.read_csv(RAW_DIR / "items.csv", dtype={"item_id": str})
 
     print(f"Implicit: {len(implicit):,} rows | {implicit['user_id'].nunique():,} users | {implicit['item_id'].nunique():,} items")
-    print(f"Explicit: {len(explicit):,} rows | {explicit['user_id'].nunique():,} users")
     print(f"Items:    {len(items):,} rows")
 
     # Step 2: Dedup implicit — keep first occurrence per user-item pair
@@ -76,21 +70,8 @@ def main():
     print(f"Users remaining: {after:,} / {before:,} ({after / before:.1%})")
     print(f"Seq len — min: {user_sequences.seq_len.min()}, max: {user_sequences.seq_len.max()}, mean: {user_sequences.seq_len.mean():.1f}")
 
-    # Step 6: Merge watch_percentage from explicit
-    print("\nStep 6: Merge watch_percentage from explicit data")
-    watch_df = (
-        explicit.groupby(["user_id", "item_id"])["watch_percentage"]
-        .mean()
-        .reset_index()
-        .rename(columns={"watch_percentage": "watch_pct"})
-    )
-    implicit_dedup = implicit_dedup.merge(watch_df, on=["user_id", "item_id"], how="left")
-    implicit_dedup["confidence"] = implicit_dedup["watch_pct"].fillna(1.0).clip(0, 100) / 100.0
-    merged_count = implicit_dedup["watch_pct"].notna().sum()
-    print(f"Interactions with watch_pct: {merged_count:,} / {len(implicit_dedup):,} ({merged_count / len(implicit_dedup):.1%})")
-
-    # Step 7: ID remapping (1-indexed; 0 reserved for padding)
-    print("\nStep 7: Remap IDs -> integer index")
+    # Step 6: ID remapping (1-indexed; 0 reserved for padding)
+    print("\nStep 6: Remap IDs -> integer index")
     all_users = sorted(user_sequences["user_id"].unique())
     all_items = sorted(implicit_dedup[implicit_dedup["user_id"].isin(all_users)]["item_id"].unique())
     user2idx  = {u: i + 1 for i, u in enumerate(all_users)}
@@ -110,18 +91,8 @@ def main():
     implicit_dedup["user_idx"]     = implicit_dedup["user_id"].map(user2idx)
     implicit_dedup["item_idx"]     = implicit_dedup["item_id"].map(item2idx)
 
-    confidence_by_user_item = (
-        implicit_dedup.dropna(subset=["user_idx", "item_idx"])
-        .groupby(["user_idx", "item_idx"])["confidence"]
-        .max()
-    )
-
-    def get_conf(uid: int, item_idx: int) -> float:
-        key = (uid, item_idx)
-        return float(confidence_by_user_item.loc[key]) if key in confidence_by_user_item.index else 1.0
-
-    # Step 8: Leave-one-out train/val/test split
-    print("\nStep 8: Leave-one-out train/val/test split")
+    # Step 7: Leave-one-out train/val/test split
+    print("\nStep 7: Leave-one-out train/val/test split")
     train_data, val_data, test_data = [], [], []
 
     for _, row in user_sequences.iterrows():
@@ -132,18 +103,11 @@ def main():
         validation_target  = seq[-2]
         test_target        = seq[-1]
 
-        if (uid, validation_target) not in confidence_by_user_item.index:
-            raise KeyError(f"Missing confidence: user_idx={uid}, item_idx={validation_target}")
-
-        conf_seq = [get_conf(uid, item) for item in train_history]
-
         train_data.append({
-            "user_idx":            uid,
-            "item_sequence":       train_history,
-            "seq_len":             n - 2,
-            "target":              validation_target,
-            "confidence":          get_conf(uid, validation_target),
-            "confidence_sequence": conf_seq,
+            "user_idx":      uid,
+            "item_sequence": train_history,
+            "seq_len":       n - 2,
+            "target":        validation_target,
         })
         val_data.append({"user_idx": uid, "train_seq": train_history, "target": validation_target})
         test_data.append({"user_idx": uid, "train_seq": seq[:-1],     "target": test_target})
@@ -156,10 +120,10 @@ def main():
     print(f"Val:   {len(val_df):,} users")
     print(f"Test:  {len(test_df):,} users")
 
-    # Step 9: Save
-    print("\nStep 9: Save files to data/processed/")
+    # Step 8: Save
+    print("\nStep 8: Save files to data/processed/")
     implicit_out = implicit_dedup.dropna(subset=["user_idx", "item_idx"])
-    implicit_out[["user_idx", "item_idx", "created_at", "confidence"]].to_csv(PROCESSED_DIR / "interactions.csv", index=False)
+    implicit_out[["user_idx", "item_idx", "created_at"]].to_csv(PROCESSED_DIR / "interactions.csv", index=False)
     train_df.to_csv(PROCESSED_DIR / "train.csv", index=False)
     val_df.to_csv(PROCESSED_DIR / "val.csv",     index=False)
     test_df.to_csv(PROCESSED_DIR / "test.csv",   index=False)

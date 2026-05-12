@@ -11,6 +11,7 @@ Classes:
 import json
 import math
 import os
+import sys
 from pathlib import Path
 
 import matplotlib
@@ -19,6 +20,26 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from tqdm import tqdm
+
+
+def _should_use_tqdm() -> bool:
+    """Enable live progress bars only when stderr looks like an interactive TTY."""
+    if os.environ.get("DISABLE_TQDM") == "1":
+        return False
+    return sys.stderr.isatty()
+
+
+def _progress(iterable, desc: str):
+    """Create a tqdm iterator with a stable, compact console format."""
+    return tqdm(
+        iterable,
+        desc=desc,
+        leave=False,
+        disable=not _should_use_tqdm(),
+        dynamic_ncols=True,
+        mininterval=0.5,
+        bar_format="{desc:<18} {percentage:3.0f}%|{bar:24}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]",
+    )
 
 
 # Experiment Tracker 
@@ -274,7 +295,7 @@ class Trainer:
 
         nan_batches = 0
         total_batches = 0
-        for batch in tqdm(loader, desc=f"  [{self.model_name}] Train", leave=False):
+        for batch in _progress(loader, desc=f"{self.model_name} train"):
             total_batches += 1
             optimizer.zero_grad()
             loss = criterion_fn(model, batch, self.device)
