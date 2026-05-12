@@ -81,8 +81,7 @@ class TestGSASRec:
         seq  = make_input_seq()
         pos  = torch.randint(1, N_ITEMS + 1, (BATCH,))
         negs = torch.randint(1, N_ITEMS + 1, (BATCH, NUM_NEG))
-        conf = torch.rand(BATCH).clamp(0.1, 1.0)
-        assert_valid_loss(model.loss(seq, pos, negs, confidence=conf))
+        assert_valid_loss(model.loss(seq, pos, negs))
 
     def test_loss_t0_equivalent_to_bce(self, model):
         from models.gsasrec import GSASRec
@@ -91,8 +90,7 @@ class TestGSASRec:
         seq  = make_input_seq()
         pos  = torch.randint(1, N_ITEMS + 1, (BATCH,))
         neg  = torch.randint(1, N_ITEMS + 1, (BATCH, 1))
-        conf = torch.ones(BATCH)
-        loss = model_t0.loss(seq, pos, neg, confidence=conf)
+        loss = model_t0.loss(seq, pos, neg)
         assert_valid_loss(loss)
 
 

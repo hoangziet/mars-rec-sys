@@ -13,6 +13,7 @@ import torch
 
 from pipeline.loaders import (
     FullSortEvalDataset,
+    MaskedSequenceDataset,
     TrainSequenceDataset,
     pad_sequence,
     parse_seq,
@@ -100,7 +101,7 @@ class TestTrainSequenceDataset:
         assert "input_seq" in batch
         assert "pos_items" in batch
         assert "neg_items" in batch
-        assert "confidence" in batch
+        assert "confidence" not in batch
 
     def test_neg_tensor_scalar_when_num_neg_1(self):
         ds    = self._make_dataset([[1, 2, 3]], num_neg=1)
@@ -178,3 +179,46 @@ class TestFullSortEvalDataset:
         rows = [self._row(uid=1, target=4), self._row(uid=2, target=5)]
         ds   = self._make_dataset(rows)
         assert len(ds) == 2
+
+
+# ---------------------------------------------------------------------------
+# MaskedSequenceDataset
+# ---------------------------------------------------------------------------
+
+
+class TestMaskedSequenceDataset:
+    def _make_dataset(self, seqs, n_items=20, max_len=5, **kwargs):
+        rows = [{"item_sequence": str(seq)} for seq in seqs]
+        path = make_train_csv(rows)
+        ds = MaskedSequenceDataset(
+            path,
+            n_items=n_items,
+            max_len=max_len,
+            is_train=True,
+            **kwargs,
+        )
+        os.unlink(path)
+        return ds
+
+    def test_sliding_window_expands_long_sequences(self):
+        ds = self._make_dataset(
+            [[1, 2, 3, 4, 5, 6, 7, 8]],
+            max_len=4,
+            dupe_factor=1,
+            prop_sliding_window=0.5,
+            force_last_item_mask=False,
+        )
+        assert len(ds) == 3
+
+    def test_force_last_item_mask_adds_extra_training_instance(self):
+        ds = self._make_dataset(
+            [[1, 2, 3, 4]],
+            max_len=4,
+            dupe_factor=1,
+            force_last_item_mask=True,
+        )
+        assert len(ds) == 2
+
+        last_item_batch = ds[1]
+        assert last_item_batch["input_seq"][-1].item() == ds.mask_token
+        assert last_item_batch["labels"][-1].item() == 4

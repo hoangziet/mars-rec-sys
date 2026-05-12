@@ -120,6 +120,7 @@ class TestConfigVerification:
         assert tk["weight_decay"] == 0.0
         assert tk["early_stop_patience"] == 10
         assert tk["early_stop_min_delta"] == 1e-4
+        assert "use_confidence_weighting" not in tk
 
     def test_other_models_unchanged(self):
         from configs import MODEL_CONFIGS

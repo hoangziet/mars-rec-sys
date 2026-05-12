@@ -100,3 +100,11 @@ class TestRanksFromLogits:
         # Only item 3 (score=30) and item 4 (score=0) are unmasked.
         # target (item 4) rank = 2.
         assert ranks == [2]
+
+    def test_ties_are_ranked_conservatively(self):
+        logits = torch.tensor([[0.0, 5.0, 5.0, 1.0]])
+        history_mask = torch.zeros(1, 4, dtype=torch.bool)
+        target = torch.tensor([1])
+
+        ranks = _ranks_from_logits(logits, history_mask, target)
+        assert ranks == [2]
