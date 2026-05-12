@@ -23,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from configs import DEFAULT_DATA_DIR, DEFAULT_OUTPUT_DIR, DEFAULT_SEED, MODEL_CONFIGS
 from pipeline.builder import build_criterion_fn, build_eval_fn, build_model, build_train_loader
 from pipeline.loaders import get_eval_loader, get_val_loss_loader, load_stats
+from pipeline.optim import build_optimizer, build_scheduler
 from trainer import Trainer
 
 
@@ -77,23 +78,8 @@ def main():
         print(f"\nModel '{args.model}' not found.")
         sys.exit(1)
 
-    optimizer      = torch.optim.Adam(
-        model.parameters(),
-        lr=train_kwargs.get("lr", 1e-3),
-        betas=(0.9, train_kwargs.get("beta2", 0.999)),
-        weight_decay=train_kwargs.get("weight_decay", 0.0),
-    )
-
-    warmup_steps = train_kwargs.get("warmup_steps", 0)
-    scheduler = None
-    if warmup_steps > 0:
-        total_steps = train_kwargs["epochs"] * len(train_loader)
-        def lr_lambda(step):
-            if step < warmup_steps:
-                return step / max(warmup_steps, 1)
-            progress = (step - warmup_steps) / max(total_steps - warmup_steps, 1)
-            return max(0.0, 1.0 - progress)
-        scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+    optimizer = build_optimizer(args.model, model, train_kwargs)
+    scheduler = build_scheduler(optimizer, train_kwargs, len(train_loader))
 
     criterion_fn   = build_criterion_fn(args.model, train_kwargs)
     eval_fn        = build_eval_fn(args.model)

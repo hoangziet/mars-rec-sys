@@ -36,6 +36,7 @@ from pipeline.metrics import (
     evaluate_popularity,
     print_results,
 )
+from pipeline.optim import build_optimizer, build_scheduler
 from trainer import Trainer
 
 
@@ -87,23 +88,8 @@ def run_neural_model(
         seed=seed,
     )
 
-    optimizer = torch.optim.Adam(
-        model.parameters(),
-        lr=train_kwargs.get("lr", 1e-3),
-        betas=(0.9, train_kwargs.get("beta2", 0.999)),
-        weight_decay=train_kwargs.get("weight_decay", 0.0),
-    )
-
-    warmup_steps = train_kwargs.get("warmup_steps", 0)
-    scheduler = None
-    if warmup_steps > 0:
-        total_steps = train_kwargs["epochs"] * len(train_loader)
-        def lr_lambda(step):
-            if step < warmup_steps:
-                return step / max(warmup_steps, 1)
-            progress = (step - warmup_steps) / max(total_steps - warmup_steps, 1)
-            return max(0.0, 1.0 - progress)
-        scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+    optimizer = build_optimizer(model_name, model, train_kwargs)
+    scheduler = build_scheduler(optimizer, train_kwargs, len(train_loader))
 
     trainer   = Trainer(model_name, device, output_dir)
     tracker   = trainer.train(
