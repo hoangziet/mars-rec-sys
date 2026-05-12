@@ -26,6 +26,8 @@ __pycache__/
 
 # others
 .claude/
+.codex/
+.agents/
 .serena/
 docs/
 AGENTS.md 
