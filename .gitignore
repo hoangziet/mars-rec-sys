@@ -32,4 +32,5 @@ __pycache__/
 docs/
 AGENTS.md 
 CLAUDE.md
+.opencode/
 .sisyphus/
