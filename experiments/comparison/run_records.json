@@ -1,0 +1,142 @@
+[
+  {
+    "exp_id": "sasrec_seed42",
+    "model": "sasrec",
+    "model_variant": "default",
+    "seed": 42,
+    "eval_protocol": "full_sort",
+    "metrics": {
+      "Recall@10": 0.3748,
+      "NDCG@10": 0.2397,
+      "Recall@20": 0.4723,
+      "NDCG@20": 0.2643
+    },
+    "train_summary": {
+      "best_val_ndcg10": 0.2749,
+      "best_epoch": 39
+    },
+    "git": {
+      "commit": "3e53b71396993bd1aa23965ab81d0d1710e5d0db"
+    }
+  },
+  {
+    "exp_id": "gsasrec_seed42",
+    "model": "gsasrec",
+    "model_variant": "default",
+    "seed": 42,
+    "eval_protocol": "full_sort",
+    "metrics": {
+      "Recall@10": 0.4382,
+      "NDCG@10": 0.3103,
+      "Recall@20": 0.5201,
+      "NDCG@20": 0.3309
+    },
+    "train_summary": {
+      "best_val_ndcg10": 0.3498,
+      "best_epoch": 41
+    },
+    "git": {
+      "commit": "3e53b71396993bd1aa23965ab81d0d1710e5d0db"
+    }
+  },
+  {
+    "exp_id": "gru4rec_seed42",
+    "model": "gru4rec",
+    "model_variant": "default",
+    "seed": 42,
+    "eval_protocol": "full_sort",
+    "metrics": {
+      "Recall@10": 0.4087,
+      "NDCG@10": 0.2975,
+      "Recall@20": 0.487,
+      "NDCG@20": 0.3172
+    },
+    "train_summary": {
+      "best_val_ndcg10": 0.3379,
+      "best_epoch": 20
+    },
+    "git": {
+      "commit": "3e53b71396993bd1aa23965ab81d0d1710e5d0db"
+    }
+  },
+  {
+    "exp_id": "bprmf_seed42",
+    "model": "bprmf",
+    "model_variant": "default",
+    "seed": 42,
+    "eval_protocol": "full_sort",
+    "metrics": {
+      "Recall@10": 0.1846,
+      "NDCG@10": 0.1063,
+      "Recall@20": 0.2576,
+      "NDCG@20": 0.1246
+    },
+    "train_summary": {
+      "best_val_ndcg10": 0.1502,
+      "best_epoch": 20
+    },
+    "git": {
+      "commit": "3e53b71396993bd1aa23965ab81d0d1710e5d0db"
+    }
+  },
+  {
+    "exp_id": "bert4rec_seed42",
+    "model": "bert4rec",
+    "model_variant": "default",
+    "seed": 42,
+    "eval_protocol": "full_sort",
+    "metrics": {
+      "Recall@10": 0.3554,
+      "NDCG@10": 0.2461,
+      "Recall@20": 0.4323,
+      "NDCG@20": 0.2655
+    },
+    "train_summary": {
+      "best_val_ndcg10": 0.2876,
+      "best_epoch": 20
+    },
+    "git": {
+      "commit": "3e53b71396993bd1aa23965ab81d0d1710e5d0db"
+    }
+  },
+  {
+    "exp_id": "itemcf_seed42",
+    "model": "itemcf",
+    "model_variant": "default",
+    "seed": 42,
+    "eval_protocol": "full_sort",
+    "metrics": {
+      "Recall@10": 0.2495,
+      "NDCG@10": 0.1323,
+      "Recall@20": 0.3529,
+      "NDCG@20": 0.1584
+    },
+    "train_summary": {
+      "best_val_ndcg10": 0.177,
+      "best_epoch": 0
+    },
+    "git": {
+      "commit": "3e53b71396993bd1aa23965ab81d0d1710e5d0db"
+    }
+  },
+  {
+    "exp_id": "popularity_seed42",
+    "model": "popularity",
+    "model_variant": "default",
+    "seed": 42,
+    "eval_protocol": "full_sort",
+    "metrics": {
+      "Recall@10": 0.0673,
+      "NDCG@10": 0.0328,
+      "Recall@20": 0.1117,
+      "NDCG@20": 0.0439
+    },
+    "train_summary": {
+      "best_val_ndcg10": 0.0398,
+      "best_epoch": 0
+    },
+    "git": {
+      "commit": "3e53b71396993bd1aa23965ab81d0d1710e5d0db"
+    }
+  }
+]

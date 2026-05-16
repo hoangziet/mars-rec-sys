@@ -1,0 +1,128 @@
+{
+  "sasrec": {
+    "Recall@10": {
+      "mean": 0.3748,
+      "std": 0.0
+    },
+    "NDCG@10": {
+      "mean": 0.2397,
+      "std": 0.0
+    },
+    "Recall@20": {
+      "mean": 0.4723,
+      "std": 0.0
+    },
+    "NDCG@20": {
+      "mean": 0.2643,
+      "std": 0.0
+    }
+  },
+  "gsasrec": {
+    "Recall@10": {
+      "mean": 0.4382,
+      "std": 0.0
+    },
+    "NDCG@10": {
+      "mean": 0.3103,
+      "std": 0.0
+    },
+    "Recall@20": {
+      "mean": 0.5201,
+      "std": 0.0
+    },
+    "NDCG@20": {
+      "mean": 0.3309,
+      "std": 0.0
+    }
+  },
+  "gru4rec": {
+    "Recall@10": {
+      "mean": 0.4087,
+      "std": 0.0
+    },
+    "NDCG@10": {
+      "mean": 0.2975,
+      "std": 0.0
+    },
+    "Recall@20": {
+      "mean": 0.487,
+      "std": 0.0
+    },
+    "NDCG@20": {
+      "mean": 0.3172,
+      "std": 0.0
+    }
+  },
+  "bprmf": {
+    "Recall@10": {
+      "mean": 0.1846,
+      "std": 0.0
+    },
+    "NDCG@10": {
+      "mean": 0.1063,
+      "std": 0.0
+    },
+    "Recall@20": {
+      "mean": 0.2576,
+      "std": 0.0
+    },
+    "NDCG@20": {
+      "mean": 0.1246,
+      "std": 0.0
+    }
+  },
+  "bert4rec": {
+    "Recall@10": {
+      "mean": 0.3554,
+      "std": 0.0
+    },
+    "NDCG@10": {
+      "mean": 0.2461,
+      "std": 0.0
+    },
+    "Recall@20": {
+      "mean": 0.4323,
+      "std": 0.0
+    },
+    "NDCG@20": {
+      "mean": 0.2655,
+      "std": 0.0
+    }
+  },
+  "itemcf": {
+    "Recall@10": {
+      "mean": 0.2495,
+      "std": 0.0
+    },
+    "NDCG@10": {
+      "mean": 0.1323,
+      "std": 0.0
+    },
+    "Recall@20": {
+      "mean": 0.3529,
+      "std": 0.0
+    },
+    "NDCG@20": {
+      "mean": 0.1584,
+      "std": 0.0
+    }
+  },
+  "popularity": {
+    "Recall@10": {
+      "mean": 0.0673,
+      "std": 0.0
+    },
+    "NDCG@10": {
+      "mean": 0.0328,
+      "std": 0.0
+    },
+    "Recall@20": {
+      "mean": 0.1117,
+      "std": 0.0
+    },
+    "NDCG@20": {
+      "mean": 0.0439,
+      "std": 0.0
+    }
+  }
+}

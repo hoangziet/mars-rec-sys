@@ -1,0 +1,193 @@
+{
+  "model_name": "gru4rec",
+  "epochs": [
+    {
+      "epoch": 1,
+      "train_loss": 6.936879,
+      "val_loss": 6.302741,
+      "Recall@10": 0.1544,
+      "NDCG@10": 0.0908,
+      "Recall@20": 0.2255,
+      "NDCG@20": 0.1087
+    },
+    {
+      "epoch": 2,
+      "train_loss": 5.783727,
+      "val_loss": 5.616672,
+      "Recall@10": 0.3222,
+      "NDCG@10": 0.2154,
+      "Recall@20": 0.4011,
+      "NDCG@20": 0.2353
+    },
+    {
+      "epoch": 3,
+      "train_loss": 5.170705,
+      "val_loss": 5.33838,
+      "Recall@10": 0.3704,
+      "NDCG@10": 0.2615,
+      "Recall@20": 0.4503,
+      "NDCG@20": 0.2817
+    },
+    {
+      "epoch": 4,
+      "train_loss": 4.858771,
+      "val_loss": 5.180237,
+      "Recall@10": 0.395,
+      "NDCG@10": 0.2866,
+      "Recall@20": 0.4733,
+      "NDCG@20": 0.3063
+    },
+    {
+      "epoch": 5,
+      "train_loss": 4.65548,
+      "val_loss": 5.083028,
+      "Recall@10": 0.4113,
+      "NDCG@10": 0.3009,
+      "Recall@20": 0.4861,
+      "NDCG@20": 0.3198
+    },
+    {
+      "epoch": 6,
+      "train_loss": 4.510075,
+      "val_loss": 5.022944,
+      "Recall@10": 0.4207,
+      "NDCG@10": 0.3083,
+      "Recall@20": 0.5,
+      "NDCG@20": 0.3284
+    },
+    {
+      "epoch": 7,
+      "train_loss": 4.40881,
+      "val_loss": 4.959622,
+      "Recall@10": 0.4292,
+      "NDCG@10": 0.3159,
+      "Recall@20": 0.5079,
+      "NDCG@20": 0.3358
+    },
+    {
+      "epoch": 8,
+      "train_loss": 4.33508,
+      "val_loss": 4.93247,
+      "Recall@10": 0.4337,
+      "NDCG@10": 0.3202,
+      "Recall@20": 0.5127,
+      "NDCG@20": 0.3402
+    },
+    {
+      "epoch": 9,
+      "train_loss": 4.279238,
+      "val_loss": 4.919085,
+      "Recall@10": 0.4345,
+      "NDCG@10": 0.3202,
+      "Recall@20": 0.5102,
+      "NDCG@20": 0.3393
+    },
+    {
+      "epoch": 10,
+      "train_loss": 4.236152,
+      "val_loss": 4.886082,
+      "Recall@10": 0.4369,
+      "NDCG@10": 0.3235,
+      "Recall@20": 0.5175,
+      "NDCG@20": 0.3438
+    },
+    {
+      "epoch": 11,
+      "train_loss": 4.202381,
+      "val_loss": 4.879024,
+      "Recall@10": 0.4412,
+      "NDCG@10": 0.3268,
+      "Recall@20": 0.519,
+      "NDCG@20": 0.3464
+    },
+    {
+      "epoch": 12,
+      "train_loss": 4.167114,
+      "val_loss": 4.853873,
+      "Recall@10": 0.4454,
+      "NDCG@10": 0.3285,
+      "Recall@20": 0.5195,
+      "NDCG@20": 0.3472
+    },
+    {
+      "epoch": 13,
+      "train_loss": 4.140355,
+      "val_loss": 4.856186,
+      "Recall@10": 0.4444,
+      "NDCG@10": 0.3281,
+      "Recall@20": 0.5214,
+      "NDCG@20": 0.3476
+    },
+    {
+      "epoch": 14,
+      "train_loss": 4.115577,
+      "val_loss": 4.845383,
+      "Recall@10": 0.4451,
+      "NDCG@10": 0.3304,
+      "Recall@20": 0.5211,
+      "NDCG@20": 0.3496
+    },
+    {
+      "epoch": 15,
+      "train_loss": 4.092629,
+      "val_loss": 4.835384,
+      "Recall@10": 0.4461,
+      "NDCG@10": 0.3312,
+      "Recall@20": 0.5253,
+      "NDCG@20": 0.3513
+    },
+    {
+      "epoch": 16,
+      "train_loss": 4.071141,
+      "val_loss": 4.823628,
+      "Recall@10": 0.4486,
+      "NDCG@10": 0.3329,
+      "Recall@20": 0.5268,
+      "NDCG@20": 0.3527
+    },
+    {
+      "epoch": 17,
+      "train_loss": 4.049385,
+      "val_loss": 4.814771,
+      "Recall@10": 0.4516,
+      "NDCG@10": 0.3346,
+      "Recall@20": 0.5284,
+      "NDCG@20": 0.354
+    },
+    {
+      "epoch": 18,
+      "train_loss": 4.034778,
+      "val_loss": 4.810322,
+      "Recall@10": 0.4492,
+      "NDCG@10": 0.3336,
+      "Recall@20": 0.5279,
+      "NDCG@20": 0.3535
+    },
+    {
+      "epoch": 19,
+      "train_loss": 4.019596,
+      "val_loss": 4.804348,
+      "Recall@10": 0.4511,
+      "NDCG@10": 0.3351,
+      "Recall@20": 0.5286,
+      "NDCG@20": 0.3547
+    },
+    {
+      "epoch": 20,
+      "train_loss": 4.002516,
+      "val_loss": 4.796636,
+      "Recall@10": 0.4559,
+      "NDCG@10": 0.3379,
+      "Recall@20": 0.5302,
+      "NDCG@20": 0.3567
+    }
+  ],
+  "best_epoch": 20,
+  "best_val_ndcg": 0.3379,
+  "test_results": {
+    "Recall@10": 0.4087,
+    "NDCG@10": 0.2975,
+    "Recall@20": 0.487,
+    "NDCG@20": 0.3172
+  }
+}
