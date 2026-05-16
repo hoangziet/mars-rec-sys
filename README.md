@@ -150,7 +150,7 @@ experiments/
 | BERT4Rec | 64 | 2 | 2 | 0.2 | 256 | 20 | 1e-3 |
 | BPR-MF | 64 | — | — | — | 1024 | 20 | 1e-3 |
 
-All configs live in `configs.py` — edit there to change defaults.
+All configs live in `training/configs.py` — edit there to change defaults.
 
 ---
 
@@ -158,8 +158,9 @@ All configs live in `configs.py` — edit there to change defaults.
 
 ```
 mars-rec-sys/
-├── configs.py              # Centralised hyperparameter configs for all models
-├── trainer.py              # Unified training loop, checkpointing, experiment tracking
+├── training/
+│   ├── configs.py          # Centralised hyperparameter configs for all models
+│   └── trainer.py          # Unified training loop, checkpointing, experiment tracking
 │
 ├── pipeline/
 │   ├── loaders.py          # Dataset classes + DataLoader factories

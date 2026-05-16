@@ -1,6 +1,6 @@
 """
-trainer.py
-==========
+training/trainer.py
+===================
 Unified training framework for all recommendation models.
 
 Classes:

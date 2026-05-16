@@ -22,7 +22,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from configs import DEFAULT_DATA_DIR, MODEL_CONFIGS
+from training.configs import DEFAULT_DATA_DIR, MODEL_CONFIGS
 from pipeline.builder import build_model
 from pipeline.loaders import load_stats, parse_seq, pad_sequence
 
