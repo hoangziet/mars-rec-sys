@@ -1,0 +1,52 @@
+% ==================================================
+% MAIN LATEX FILE
+% ==================================================
+% This file serves as the entry point for the entire thesis.
+% It loads the preamble (packages and settings) and inputs
+% all chapter files in the correct order.
+% ==================================================
+
+\input{preamble}
+
+\begin{document}
+
+% ==================================================
+% FRONT MATTER
+% ==================================================
+
+% Cover page
+\input{chapters/00_cover}
+
+% Statement of Originality
+\input{chapters/01_statement}
+
+% Abstract
+\input{chapters/02_abstract}
+
+% Table of contents
+\tableofcontents
+\newpage
+
+% ==================================================
+% MAIN MATTER
+% ==================================================
+
+% Introduction
+\input{chapters/03_introduction}
+
+% Background
+\input{chapters/04_background}
+
+% Related Work
+\input{chapters/05_related_work}
+
+% Methodology
+\input{chapters/06_methodology}
+
+% Experiments & Results
+\input{chapters/07_experiments}
+
+% Conclusion
+\input{chapters/08_conclusion}
+
+\end{document}

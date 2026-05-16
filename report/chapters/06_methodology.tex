@@ -1,0 +1,128 @@
+% ==================================================
+% METHODOLOGY
+% ==================================================
+
+\section{Methodology}
+
+\subsection{Methodology Overview}
+
+The methodology is designed around an offline sequential recommendation pipeline. The system transforms raw MARS interaction logs into chronological user sequences, trains baseline and neural recommendation models, evaluates them with leave-one-out ranking metrics, and exposes the final model through a prototype recommendation interface.
+
+The planned pipeline consists of five components:
+
+\begin{enumerate}
+    \item \textbf{Data preprocessing:} Load, validate, merge, clean, and filter interaction data.
+    \item \textbf{Exploratory data analysis:} Quantify sparsity, sequence length, popularity skew, temporal patterns, and metadata coverage.
+    \item \textbf{Model training:} Train popularity, CF, BPR-MF, SASRec, and gSASRec-oriented models.
+    \item \textbf{Evaluation:} Apply leave-one-out evaluation with top-$K$ metrics and ablation studies.
+    \item \textbf{Prototype output:} Serve recommendations through a lightweight demo interface.
+\end{enumerate}
+
+\subsection{Data Preprocessing}
+
+\subsubsection{Data Loading}
+
+The MARS dataset is loaded from four source files:
+
+\begin{itemize}
+    \item Implicit interaction logs.
+    \item Explicit ratings and watch-completion signals.
+    \item Item metadata, including theme, software, duration, type, difficulty, and text description.
+    \item User profile information.
+\end{itemize}
+
+The EDA code validates the required columns for implicit interactions, explicit interactions, and item metadata before downstream processing.
+
+\subsubsection{Interaction Construction}
+
+Implicit and explicit events are merged into a unified interaction table. Duplicate events with the same user, item, and timestamp are dropped. Explicit interactions with watch percentage greater than or equal to 50 are treated as active positive feedback; implicit interactions are treated as active by default. The resulting active interaction table is the main input for sequence construction.
+
+\subsubsection{Sequence Handling}
+
+For each learner, interactions are sorted chronologically to construct a resource sequence. Users with fewer than three interactions are excluded from leave-one-out train/validation/test splitting because they cannot provide at least one training item, one validation item, and one test item. According to the current EDA, 1,676 users satisfy this criterion.
+
+\subsubsection{Filtering Strategy}
+
+The EDA pipeline reports both the unfiltered active dataset and $k$-core filtering experiments:
+
+\begin{itemize}
+    \item Active dataset: 3,007 users, 958 items, and 24,622 interactions.
+    \item 3-core dataset: 1,673 users, 802 items, and 22,557 interactions.
+    \item 5-core dataset: 1,116 users, 658 items, and 20,150 interactions.
+\end{itemize}
+
+The final training configuration will choose the filtering level based on validation performance and the trade-off between interaction density and catalogue/user coverage.
+
+\subsubsection{Evaluation Split}
+
+The planned evaluation protocol is leave-one-out. For each eligible user, the last item is held out for testing, the second-to-last item is held out for validation, and the remaining earlier interactions are used for training. This protocol preserves chronological order and avoids using future interactions to predict past behavior.
+
+\subsection{Model Direction}
+
+\subsubsection{Baselines}
+
+The project evaluates the proposed direction against several baselines:
+
+\begin{enumerate}
+    \item \textbf{Popularity:} Recommends globally popular learning resources.
+    \item \textbf{Item-based collaborative filtering:} Recommends resources similar to those in the learner's history.
+    \item \textbf{BPR-MF:} Learns static user--item affinity from implicit feedback.
+    \item \textbf{SASRec:} Uses self-attention to model ordered user histories.
+\end{enumerate}
+
+\subsubsection{SASRec Backbone}
+
+SASRec represents each item in the sequence with item and positional embeddings, then applies stacked self-attention blocks to model dependencies between historical interactions. The attention operation is:
+
+$$\text{Attention}(Q, K, V) = \text{softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right)V$$
+
+The final hidden representation is compared against candidate item embeddings to produce a ranked recommendation list.
+
+\subsubsection{gSASRec Direction}
+
+The primary model direction is gSASRec, which addresses overconfidence in sequential recommendation by replacing standard BCE training with Generalised BCE and by using multiple negative samples per positive interaction. This is especially relevant to MARS because the dataset is highly sparse and has a moderately large item catalogue relative to the number of observed interactions.
+
+The planned loss direction can be summarized as:
+
+\[
+\mathcal{L}_{gBCE} = -w^+ \log \sigma(s^+ / \tau) - \sum_{j=1}^{m} w_j^- \log \left(1 - \sigma(s_j^- / \tau)\right),
+\]
+
+where $s^+$ is the positive item score, $s_j^-$ is the score of the $j$-th negative item, $m$ is the number of negative samples, $\tau$ is the temperature parameter, and $w^+$ and $w_j^-$ are optional confidence weights.
+
+\subsubsection{Metadata and Confidence Extensions}
+
+Item metadata will be used where it is reliable enough to support cold-start mitigation and candidate analysis. Since software, theme, duration, and type have 100\% coverage, these features are suitable for metadata-aware item representations. Difficulty has only 40.70\% coverage and will be handled carefully to avoid introducing missing-value bias. Watch-completion percentage can be used as a soft confidence signal for explicit positive interactions.
+
+\subsection{Model Training}
+
+\subsubsection{Hyperparameters}
+
+The planned hyperparameter search includes:
+
+\begin{itemize}
+    \item Embedding dimensions: 32, 64, and 128.
+    \item Number of attention heads: 1, 2, 4, and 8.
+    \item Number of attention layers: 1, 2, and 3.
+    \item Learning rates: 0.001, 0.0005, and 0.0001.
+    \item Negative sample counts and temperature values for the gSASRec loss.
+    \item Sequence length cutoff and $k$-core threshold.
+\end{itemize}
+
+[TBD: The final selected hyperparameters will be inserted after validation experiments.]
+
+\subsection{Evaluation Methodology}
+
+The main evaluation metrics are:
+
+\begin{itemize}
+    \item \textbf{Recall@K:} Whether the held-out item is retrieved in the top-$K$ list.
+    \item \textbf{nDCG@K:} Ranking quality with higher weight for correct items near the top.
+    \item \textbf{HitRate@K:} Whether at least one ground-truth item appears in the top-$K$ list.
+    \item \textbf{Diversity:} Variety among recommended resources.
+    \item \textbf{Novelty:} Ability to recommend useful resources beyond the most popular items.
+\end{itemize}
+
+The ablation study will isolate the effect of Generalised BCE, number of negative samples, temperature, metadata initialization, confidence weighting, and reranking.
+
+\newpage

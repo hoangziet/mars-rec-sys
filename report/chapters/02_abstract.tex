@@ -1,0 +1,42 @@
+% ==================================================
+% ABSTRACT
+% ==================================================
+
+\section*{Abstract}
+
+Online learning platforms provide learners with large catalogues of videos, courses, and instructional documents. In this setting, the main challenge is not only whether a learner may like a resource, but also which resource should be recommended next according to the learner's recent learning sequence. This thesis studies next learning resource prediction on the MARS (Mandarine Academy Recommender System) e-learning dataset.
+
+The current exploratory data analysis shows that the active interaction set contains 3,007 users, 958 learning resources, and 24,622 interactions, with 99.1453\% sparsity. User sequences are short and unevenly distributed: the average user has 8.19 interactions, while only 1,676 users have at least three interactions and are therefore eligible for leave-one-out train/validation/test evaluation. The item metadata is also heterogeneous: software, theme, duration, and type fields have complete coverage, while difficulty is available for 40.70\% of items and descriptions for 86.46\%.
+
+\subsection*{Objectives}
+
+The main objectives of this research are:
+\begin{itemize}
+    \item To formalize the MARS recommendation task as a top-$K$ next-item prediction problem.
+    \item To build a reproducible preprocessing and evaluation pipeline for sparse e-learning interaction data.
+    \item To compare simple and neural baselines against a gSASRec direction using Generalised BCE loss and multiple negative sampling.
+    \item To analyze whether metadata-aware initialization, confidence weighting, and reranking can improve practical recommendation quality.
+\end{itemize}
+
+\subsection*{Methodology}
+
+Implicit and explicit interactions are merged into a unified active-interaction table. Explicit events with watch percentage greater than or equal to 50 are treated as active, implicit events are treated as active by default, and duplicate events by user, item, and timestamp are removed. The planned evaluation follows leave-one-out splitting: the last item in each eligible user sequence is used for testing, the second-to-last item for validation, and earlier items for training.
+
+\subsection*{Results}
+
+[TBD: This subsection will report the final Recall@K, nDCG@K, HitRate@K, diversity, and novelty results after model training and evaluation are completed.]
+
+\subsection*{Contributions}
+
+The key contributions of this work include:
+\begin{enumerate}
+    \item A data-driven problem formulation for next learning resource recommendation on MARS.
+    \item An EDA summary identifying sparsity, sequence-length, popularity-skew, and metadata-coverage constraints.
+    \item A planned experimental pipeline covering baselines, gSASRec, ablations, and a lightweight demo-oriented output.
+\end{enumerate}
+
+\vspace{1cm}
+
+\noindent \textbf{Keywords:} Sequential recommendation, gSASRec, e-learning, MARS dataset, personalized learning
+
+\newpage
