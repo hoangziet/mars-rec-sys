@@ -20,11 +20,11 @@ import torch
 # Ensure project root is on path when run as a script
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from configs import DEFAULT_DATA_DIR, DEFAULT_OUTPUT_DIR, DEFAULT_SEED, MODEL_CONFIGS
+from training.configs import DEFAULT_DATA_DIR, DEFAULT_OUTPUT_DIR, DEFAULT_SEED, MODEL_CONFIGS
 from pipeline.builder import build_criterion_fn, build_eval_fn, build_model, build_train_loader
 from pipeline.loaders import get_eval_loader, get_val_loss_loader, load_stats
 from pipeline.optim import build_optimizer, build_scheduler
-from trainer import Trainer
+from training.trainer import Trainer
 
 
 def seed_everything(seed: int) -> None:

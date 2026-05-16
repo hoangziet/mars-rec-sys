@@ -1,6 +1,6 @@
 """
-configs.py
-==========
+training/configs.py
+===================
 Centralised hyperparameter configurations for all models.
 """
 

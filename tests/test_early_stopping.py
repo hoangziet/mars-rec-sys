@@ -8,7 +8,7 @@ import math
 import torch
 import torch.nn as nn
 
-from trainer import Trainer
+from training.trainer import Trainer
 
 
 class DummyModel(nn.Module):
@@ -104,7 +104,7 @@ class TestConfigVerification:
     """Verify configs.py has correct hyperparameter values."""
 
     def test_sasrec_config_values(self):
-        from configs import MODEL_CONFIGS
+        from training.configs import MODEL_CONFIGS
         tk = MODEL_CONFIGS["sasrec"]["train_kwargs"]
         assert tk["epochs"] == 50
         assert tk["beta2"] == 0.98
@@ -113,7 +113,7 @@ class TestConfigVerification:
         assert tk["early_stop_min_delta"] == 1e-4
 
     def test_gsasrec_config_values(self):
-        from configs import MODEL_CONFIGS
+        from training.configs import MODEL_CONFIGS
         tk = MODEL_CONFIGS["gsasrec"]["train_kwargs"]
         assert tk["epochs"] == 50
         assert tk["beta2"] == 0.98
@@ -123,14 +123,14 @@ class TestConfigVerification:
         assert "use_confidence_weighting" not in tk
 
     def test_other_models_unchanged(self):
-        from configs import MODEL_CONFIGS
+        from training.configs import MODEL_CONFIGS
         for m in ["gru4rec", "bert4rec", "bprmf"]:
             tk = MODEL_CONFIGS[m]["train_kwargs"]
             assert "beta2" not in tk, f"{m} should not have beta2"
             assert "early_stop_patience" not in tk, f"{m} should not have early_stop"
 
     def test_gsasrec_model_kwargs_unchanged(self):
-        from configs import MODEL_CONFIGS
+        from training.configs import MODEL_CONFIGS
         mk = MODEL_CONFIGS["gsasrec"]["model_kwargs"]
         assert mk["t"] == 0.5
         assert mk["num_neg"] == 32
