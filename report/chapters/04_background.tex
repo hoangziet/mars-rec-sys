@@ -1,0 +1,63 @@
+% ==================================================
+% BACKGROUND
+% ==================================================
+
+\section{Background}
+
+\subsection{Recommendation Systems Fundamentals}
+
+Recommendation systems are computational methods that predict user preferences or ratings for items they have not yet interacted with. They are widely used in e-commerce, streaming platforms, social media, and increasingly in educational settings.
+
+\subsubsection{Collaborative Filtering}
+
+Collaborative filtering is based on the assumption that users with similar preferences in the past will have similar preferences in the future. It includes:
+
+\begin{itemize}
+    \item \textbf{User-based:} Find similar users and recommend items they liked
+    \item \textbf{Item-based:} Find similar items and recommend based on user history
+\end{itemize}
+
+\subsubsection{Content-Based Filtering}
+
+Content-based approaches recommend items similar to those the user has liked before, using item features and user profiles.
+
+\subsection{Sequential Recommendation Models}
+
+Sequential models consider the temporal ordering and dependencies in user interactions, which is crucial for domains like e-learning.
+
+\subsubsection{Recurrent Neural Networks (RNNs)}
+
+RNNs, including variants like LSTM and GRU, naturally capture sequential dependencies through their recurrent connections.
+
+\subsubsection{Self-Attention Mechanisms}
+
+Self-attention allows models to weigh the importance of different historical items when making recommendations, providing better interpretability than traditional RNNs.
+
+\subsection{Graph-Based Sequential Recommendation}
+
+Graph structures can represent relationships between users, items, and sequences. Graph neural networks (GNNs) combined with sequential models like gSASRec provide a powerful framework.
+
+\subsubsection{The gSASRec Model}
+
+The gSASRec (Graph Self-Attentive Sequential Recommendation) model combines:
+
+\begin{enumerate}
+    \item Graph neural network layers to capture item relationships
+    \item Self-attention mechanisms to model temporal dependencies
+    \item Sequence modeling to leverage historical interactions
+\end{enumerate}
+
+\subsection{The MARS E-Learning Dataset}
+
+The MARS (Massive Open Online Courses) e-learning dataset contains:
+
+\begin{itemize}
+    \item Real student interaction logs from online courses
+    \item Learning resource metadata and relationships
+    \item Temporal information about when students access resources
+    \item Multiple resource types (videos, quizzes, documents, etc.)
+\end{itemize}
+
+This dataset presents a realistic testbed for sequential recommendation research with domain-specific characteristics.
+
+\newpage

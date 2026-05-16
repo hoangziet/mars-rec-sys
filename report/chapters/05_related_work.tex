@@ -1,0 +1,84 @@
+% ==================================================
+% RELATED WORK
+% ==================================================
+
+\section{Related Work}
+
+\subsection{Sequential Recommendation Systems}
+
+Sequential recommendation has become increasingly important as researchers recognize that user behavior is inherently temporal and sequential in nature.
+
+\subsubsection{RNN-Based Approaches}
+
+Early works used RNNs to capture sequential patterns:
+
+\begin{itemize}
+    \item Hidasi et al. introduced GRU4REC, using gated recurrent units for session-based recommendations
+    \item Extensions like improved GRU4REC added data augmentation and techniques to address data sparsity
+\end{itemize}
+
+\subsubsection{Attention-Based Methods}
+
+The introduction of self-attention in sequential recommendation improved performance and interpretability:
+
+\begin{itemize}
+    \item SASRec (Self-Attentive Sequential Recommendation) proposed by Kang et al. uses multi-head self-attention
+    \item Subsequent works extended this with graph structures and improved architectures
+\end{itemize}
+
+\subsubsection{Graph-Enhanced Approaches}
+
+Recent methods combine graphs with sequential models:
+
+\begin{itemize}
+    \item gSASRec augments SASRec with item relationships through graph embeddings
+    \item Other works explore heterogeneous graphs for multi-type interactions
+\end{itemize}
+
+\subsection{Sequential Recommendation in E-Learning}
+
+E-learning systems have unique characteristics that affect recommendation design:
+
+\begin{itemize}
+    \item Learning outcomes depend on prerequisites and learning sequences
+    \item Pedagogical constraints must be considered (prerequisites, difficulty progression)
+    \item Students have diverse learning goals and backgrounds
+    \item Course structures impose constraints on valid recommendation sequences
+\end{itemize}
+
+Few works specifically target sequential recommendation for e-learning platforms, making this an important research direction.
+
+\subsection{Dataset Studies}
+
+Research on the MARS dataset and similar e-learning datasets:
+
+\begin{itemize}
+    \item MARS provides opportunities to study real student behavior patterns
+    \item Prior analysis has identified key characteristics like resource popularity skew
+    \item Temporal patterns in student access reveal learning rhythm variations
+\end{itemize}
+
+\subsection{Performance Metrics}
+
+Common metrics for evaluating sequential recommendation systems include:
+
+\begin{enumerate}
+    \item \textbf{Recall@K:} Proportion of relevant items in top-K recommendations
+    \item \textbf{NDCG@K:} Normalized discounted cumulative gain considering ranking quality
+    \item \textbf{MRR:} Mean reciprocal rank of the first relevant item
+    \item \textbf{Hit Rate:} Frequency with which correct item appears in top-K
+\end{enumerate}
+
+\subsection{Gap Analysis}
+
+Despite the growing attention to sequential recommendation and e-learning systems, there remains a gap in:
+
+\begin{itemize}
+    \item Specialized models for educational domain constraints
+    \item Comprehensive evaluation on real e-learning datasets like MARS
+    \item Practical deployment considerations for production systems
+\end{itemize}
+
+This thesis addresses these gaps by proposing and evaluating a gSASRec-based system specifically for the MARS e-learning context.
+
+\newpage
