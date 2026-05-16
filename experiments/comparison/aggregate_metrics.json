@@ -1,55 +1,55 @@
 {
   "sasrec": {
     "Recall@10": {
-      "mean": 0.3744,
+      "mean": 0.3748,
       "std": 0.0
     },
     "NDCG@10": {
-      "mean": 0.2349,
+      "mean": 0.2397,
       "std": 0.0
     },
     "Recall@20": {
-      "mean": 0.4681,
+      "mean": 0.4723,
       "std": 0.0
     },
     "NDCG@20": {
-      "mean": 0.2585,
+      "mean": 0.2643,
       "std": 0.0
     }
   },
   "gsasrec": {
     "Recall@10": {
-      "mean": 0.4402,
+      "mean": 0.4382,
       "std": 0.0
     },
     "NDCG@10": {
-      "mean": 0.3119,
+      "mean": 0.3103,
       "std": 0.0
     },
     "Recall@20": {
-      "mean": 0.5203,
+      "mean": 0.5201,
       "std": 0.0
     },
     "NDCG@20": {
-      "mean": 0.3321,
+      "mean": 0.3309,
       "std": 0.0
     }
   },
   "gru4rec": {
     "Recall@10": {
-      "mean": 0.4115,
+      "mean": 0.4087,
       "std": 0.0
     },
     "NDCG@10": {
-      "mean": 0.2991,
+      "mean": 0.2975,
       "std": 0.0
     },
     "Recall@20": {
-      "mean": 0.4865,
+      "mean": 0.487,
       "std": 0.0
     },
     "NDCG@20": {
-      "mean": 0.318,
+      "mean": 0.3172,
       "std": 0.0
     }
   },
@@ -73,25 +73,25 @@
   },
   "bert4rec": {
     "Recall@10": {
-      "mean": 0.053,
+      "mean": 0.3554,
       "std": 0.0
     },
     "NDCG@10": {
-      "mean": 0.0263,
+      "mean": 0.2461,
       "std": 0.0
     },
     "Recall@20": {
-      "mean": 0.1103,
+      "mean": 0.4323,
       "std": 0.0
     },
     "NDCG@20": {
-      "mean": 0.0402,
+      "mean": 0.2655,
       "std": 0.0
     }
   },
   "itemcf": {
     "Recall@10": {
-      "mean": 0.2494,
+      "mean": 0.2495,
       "std": 0.0
     },
     "NDCG@10": {
