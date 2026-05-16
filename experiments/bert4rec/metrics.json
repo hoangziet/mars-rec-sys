@@ -1,0 +1,193 @@
+{
+  "model_name": "bert4rec",
+  "epochs": [
+    {
+      "epoch": 1,
+      "train_loss": 7.210942,
+      "val_loss": null,
+      "Recall@10": 0.101,
+      "NDCG@10": 0.0486,
+      "Recall@20": 0.1586,
+      "NDCG@20": 0.0632
+    },
+    {
+      "epoch": 2,
+      "train_loss": 6.390028,
+      "val_loss": null,
+      "Recall@10": 0.1629,
+      "NDCG@10": 0.0976,
+      "Recall@20": 0.234,
+      "NDCG@20": 0.1153
+    },
+    {
+      "epoch": 3,
+      "train_loss": 5.914844,
+      "val_loss": null,
+      "Recall@10": 0.2236,
+      "NDCG@10": 0.1391,
+      "Recall@20": 0.3122,
+      "NDCG@20": 0.1613
+    },
+    {
+      "epoch": 4,
+      "train_loss": 5.564191,
+      "val_loss": null,
+      "Recall@10": 0.2851,
+      "NDCG@10": 0.1774,
+      "Recall@20": 0.3723,
+      "NDCG@20": 0.1994
+    },
+    {
+      "epoch": 5,
+      "train_loss": 5.284158,
+      "val_loss": null,
+      "Recall@10": 0.3186,
+      "NDCG@10": 0.2064,
+      "Recall@20": 0.4047,
+      "NDCG@20": 0.2282
+    },
+    {
+      "epoch": 6,
+      "train_loss": 5.089576,
+      "val_loss": null,
+      "Recall@10": 0.3415,
+      "NDCG@10": 0.2264,
+      "Recall@20": 0.4218,
+      "NDCG@20": 0.2466
+    },
+    {
+      "epoch": 7,
+      "train_loss": 4.946117,
+      "val_loss": null,
+      "Recall@10": 0.359,
+      "NDCG@10": 0.2424,
+      "Recall@20": 0.4366,
+      "NDCG@20": 0.262
+    },
+    {
+      "epoch": 8,
+      "train_loss": 4.835108,
+      "val_loss": null,
+      "Recall@10": 0.3709,
+      "NDCG@10": 0.2546,
+      "Recall@20": 0.4491,
+      "NDCG@20": 0.2743
+    },
+    {
+      "epoch": 9,
+      "train_loss": 4.748628,
+      "val_loss": null,
+      "Recall@10": 0.3802,
+      "NDCG@10": 0.264,
+      "Recall@20": 0.4551,
+      "NDCG@20": 0.2829
+    },
+    {
+      "epoch": 10,
+      "train_loss": 4.683479,
+      "val_loss": null,
+      "Recall@10": 0.3842,
+      "NDCG@10": 0.268,
+      "Recall@20": 0.4613,
+      "NDCG@20": 0.2875
+    },
+    {
+      "epoch": 11,
+      "train_loss": 4.634794,
+      "val_loss": null,
+      "Recall@10": 0.3903,
+      "NDCG@10": 0.2727,
+      "Recall@20": 0.4656,
+      "NDCG@20": 0.2918
+    },
+    {
+      "epoch": 12,
+      "train_loss": 4.589227,
+      "val_loss": null,
+      "Recall@10": 0.3945,
+      "NDCG@10": 0.2763,
+      "Recall@20": 0.4689,
+      "NDCG@20": 0.2951
+    },
+    {
+      "epoch": 13,
+      "train_loss": 4.552499,
+      "val_loss": null,
+      "Recall@10": 0.3965,
+      "NDCG@10": 0.2784,
+      "Recall@20": 0.4732,
+      "NDCG@20": 0.2977
+    },
+    {
+      "epoch": 14,
+      "train_loss": 4.528143,
+      "val_loss": null,
+      "Recall@10": 0.3998,
+      "NDCG@10": 0.2818,
+      "Recall@20": 0.4748,
+      "NDCG@20": 0.3007
+    },
+    {
+      "epoch": 15,
+      "train_loss": 4.502296,
+      "val_loss": null,
+      "Recall@10": 0.4025,
+      "NDCG@10": 0.2836,
+      "Recall@20": 0.4775,
+      "NDCG@20": 0.3025
+    },
+    {
+      "epoch": 16,
+      "train_loss": 4.485709,
+      "val_loss": null,
+      "Recall@10": 0.4037,
+      "NDCG@10": 0.2848,
+      "Recall@20": 0.4791,
+      "NDCG@20": 0.3039
+    },
+    {
+      "epoch": 17,
+      "train_loss": 4.472918,
+      "val_loss": null,
+      "Recall@10": 0.4048,
+      "NDCG@10": 0.2863,
+      "Recall@20": 0.4807,
+      "NDCG@20": 0.3055
+    },
+    {
+      "epoch": 18,
+      "train_loss": 4.462402,
+      "val_loss": null,
+      "Recall@10": 0.4053,
+      "NDCG@10": 0.2866,
+      "Recall@20": 0.4807,
+      "NDCG@20": 0.3057
+    },
+    {
+      "epoch": 19,
+      "train_loss": 4.453924,
+      "val_loss": null,
+      "Recall@10": 0.4069,
+      "NDCG@10": 0.2873,
+      "Recall@20": 0.4819,
+      "NDCG@20": 0.3062
+    },
+    {
+      "epoch": 20,
+      "train_loss": 4.453645,
+      "val_loss": null,
+      "Recall@10": 0.4065,
+      "NDCG@10": 0.2876,
+      "Recall@20": 0.4822,
+      "NDCG@20": 0.3068
+    }
+  ],
+  "best_epoch": 20,
+  "best_val_ndcg": 0.2876,
+  "test_results": {
+    "Recall@10": 0.3554,
+    "NDCG@10": 0.2461,
+    "Recall@20": 0.4323,
+    "NDCG@20": 0.2655
+  }
+}
