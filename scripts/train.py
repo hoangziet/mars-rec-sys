@@ -26,6 +26,8 @@ from pipeline.loaders import get_eval_loader, get_val_loss_loader, load_stats
 from pipeline.optim import build_optimizer, build_scheduler
 from training.trainer import Trainer
 
+TRAINABLE_MODELS = ("sasrec", "gsasrec", "gru4rec", "bert4rec", "bprmf")
+
 
 def seed_everything(seed: int) -> None:
     random.seed(seed)
@@ -38,15 +40,20 @@ def seed_everything(seed: int) -> None:
         torch.backends.cudnn.benchmark = False
 
 
-def main():
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
-    parser.add_argument("model", choices=list(MODEL_CONFIGS.keys()))
+    parser.add_argument("model", choices=TRAINABLE_MODELS)
     parser.add_argument("--data_dir",   default=DEFAULT_DATA_DIR)
     parser.add_argument("--output_dir", default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--epochs",     type=int)
     parser.add_argument("--lr",         type=float)
     parser.add_argument("--batch_size", type=int)
     parser.add_argument("--seed",       type=int, default=DEFAULT_SEED)
+    return parser
+
+
+def main():
+    parser = build_parser()
     args = parser.parse_args()
 
     seed_everything(args.seed)

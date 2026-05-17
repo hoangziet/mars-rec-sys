@@ -21,6 +21,11 @@ import pandas as pd
 
 CONFIDENCE_ALPHA = 0.5
 BASELINE_CONFIDENCE = 1.0
+LEAVE_ONE_OUT_HOLDOUTS = 2
+MIN_TRAIN_HISTORY_LEN_FOR_NEURAL_MODELS = 2
+MIN_BENCHMARK_SAFE_SEQUENCE_LEN = (
+    MIN_TRAIN_HISTORY_LEN_FOR_NEURAL_MODELS + LEAVE_ONE_OUT_HOLDOUTS
+)
 
 
 def load_explicit_ratings(path: Path) -> pd.DataFrame:
@@ -98,12 +103,157 @@ def build_user_sequences(implicit: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _get_sequence_length(row: pd.Series) -> int:
+    if "item_seq_idx" in row and isinstance(row["item_seq_idx"], list):
+        return len(row["item_seq_idx"])
+    if "item_sequence" in row and isinstance(row["item_sequence"], list):
+        return len(row["item_sequence"])
+    return int(row["seq_len"])
+
+
+def _get_confidence_sequence_length(row: pd.Series) -> int | None:
+    if "confidence_seq" in row and isinstance(row["confidence_seq"], list):
+        return len(row["confidence_seq"])
+    if "confidence_sequence" in row and isinstance(row["confidence_sequence"], list):
+        return len(row["confidence_sequence"])
+    return None
+
+
+def _validate_row_sequence_alignment(row: pd.Series) -> None:
+    seq_len = _get_sequence_length(row)
+    confidence_len = _get_confidence_sequence_length(row)
+    if confidence_len is not None and seq_len != confidence_len:
+        user_id = row.get("user_id", "<unknown>")
+        raise ValueError(
+            "confidence sequence length mismatch "
+            f"for user_id={user_id}: items={seq_len}, confidence={confidence_len}"
+        )
+
+
+def filter_benchmark_safe_user_sequences(
+    user_sequences: pd.DataFrame,
+    min_seq_len: int = MIN_BENCHMARK_SAFE_SEQUENCE_LEN,
+) -> pd.DataFrame:
+    if user_sequences.empty:
+        return user_sequences.reset_index(drop=True)
+
+    sequence_lengths = user_sequences.apply(_get_sequence_length, axis=1)
+    confidence_lengths = user_sequences.apply(_get_confidence_sequence_length, axis=1)
+    mismatched = confidence_lengths.notna() & (sequence_lengths != confidence_lengths)
+    if mismatched.any():
+        first_bad_row = user_sequences.loc[mismatched].iloc[0]
+        _validate_row_sequence_alignment(first_bad_row)
+
+    filtered = user_sequences[sequence_lengths >= min_seq_len].copy()
+    filtered["seq_len"] = sequence_lengths[sequence_lengths >= min_seq_len].astype(int)
+    return filtered.reset_index(drop=True)
+
+
+def format_user_retention(after: int, before: int) -> str:
+    if before == 0:
+        return f"Users remaining: {after:,} / {before:,} (n/a)"
+    return f"Users remaining: {after:,} / {before:,} ({after / before:.1%})"
+
+
+def summarize_sequence_lengths(user_sequences: pd.DataFrame) -> str:
+    if user_sequences.empty:
+        return "Seq len - min: n/a, max: n/a, mean: n/a"
+    return (
+        "Seq len - min: "
+        f"{user_sequences.seq_len.min()}, max: {user_sequences.seq_len.max()}, "
+        f"mean: {user_sequences.seq_len.mean():.1f}"
+    )
+
+
+def split_leave_one_out(
+    user_sequences: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    train_columns = [
+        "user_idx",
+        "item_sequence",
+        "seq_len",
+        "target",
+        "confidence",
+        "confidence_sequence",
+    ]
+    eval_columns = ["user_idx", "train_seq", "target"]
+
+    train_data, val_data, test_data = [], [], []
+
+    for _, row in user_sequences.iterrows():
+        _validate_row_sequence_alignment(row)
+        seq = row["item_seq_idx"]
+        uid = row["user_idx"]
+        confidence_seq = row["confidence_seq"]
+        n = len(seq)
+        if n < MIN_BENCHMARK_SAFE_SEQUENCE_LEN:
+            user_id = row.get("user_id", "<unknown>")
+            raise ValueError(
+                "sequence shorter than benchmark-safe minimum "
+                f"for user_id={user_id}: length={n}, "
+                f"minimum={MIN_BENCHMARK_SAFE_SEQUENCE_LEN}"
+            )
+        train_history = seq[:-2]
+        train_confidence_history = confidence_seq[:-2]
+        validation_target = seq[-2]
+        validation_confidence = confidence_seq[-2]
+        test_target = seq[-1]
+
+        train_data.append(
+            {
+                "user_idx": uid,
+                "item_sequence": train_history,
+                "seq_len": n - 2,
+                "target": validation_target,
+                "confidence": validation_confidence,
+                "confidence_sequence": train_confidence_history,
+            }
+        )
+        val_data.append(
+            {
+                "user_idx": uid,
+                "train_seq": train_history,
+                "target": validation_target,
+            }
+        )
+        test_data.append(
+            {"user_idx": uid, "train_seq": seq[:-1], "target": test_target}
+        )
+
+    return (
+        pd.DataFrame(train_data, columns=train_columns),
+        pd.DataFrame(val_data, columns=eval_columns),
+        pd.DataFrame(test_data, columns=eval_columns),
+    )
+
+
+def build_dataset_stats(
+    n_users: int,
+    n_items: int,
+    n_interactions: int,
+    min_seq_len: int,
+    min_item_freq: int,
+) -> dict:
+    total_slots = n_users * n_items
+    sparsity = 0.0 if total_slots == 0 else round(1 - n_interactions / total_slots, 6)
+    return {
+        "n_users": n_users,
+        "n_items": n_items,
+        "n_interactions": n_interactions,
+        "min_seq_len": int(min_seq_len),
+        "min_item_freq": int(min_item_freq),
+        "sparsity": sparsity,
+        "pad_token": 0,
+        "max_item_idx": n_items,
+    }
+
+
 def main():
     RAW_DIR       = Path("data/raw")
     PROCESSED_DIR = Path("data/processed")
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
 
-    MIN_SEQ_LEN   = 3   # Minimum unique items per user
+    MIN_SEQ_LEN   = MIN_BENCHMARK_SAFE_SEQUENCE_LEN
     MIN_ITEM_FREQ = 3   # Minimum interactions per item (after dedup)
 
     # Step 1: Load raw data
@@ -140,13 +290,18 @@ def main():
     print("\nStep 4: Build user sequences")
     user_sequences = build_user_sequences(implicit_dedup)
 
-    # Step 5: Filter users with fewer than MIN_SEQ_LEN items
-    print(f"Step 5: Filter users with seq_len < {MIN_SEQ_LEN}")
+    # Step 5: Enforce benchmark-safe user histories so leave-one-out keeps
+    # train history length >= 2 for all neural models.
+    print(
+        "Step 5: Filter users with "
+        f"seq_len < {MIN_SEQ_LEN} to ensure train history length >= "
+        f"{MIN_TRAIN_HISTORY_LEN_FOR_NEURAL_MODELS} for all neural models"
+    )
     before         = len(user_sequences)
-    user_sequences = user_sequences[user_sequences["seq_len"] >= MIN_SEQ_LEN].reset_index(drop=True)
+    user_sequences = filter_benchmark_safe_user_sequences(user_sequences, MIN_SEQ_LEN)
     after          = len(user_sequences)
-    print(f"Users remaining: {after:,} / {before:,} ({after / before:.1%})")
-    print(f"Seq len — min: {user_sequences.seq_len.min()}, max: {user_sequences.seq_len.max()}, mean: {user_sequences.seq_len.mean():.1f}")
+    print(format_user_retention(after, before))
+    print(summarize_sequence_lengths(user_sequences))
 
     # Step 6: ID remapping (1-indexed; 0 reserved for padding)
     print("\nStep 6: Remap IDs -> integer index")
@@ -184,35 +339,12 @@ def main():
 
     # Step 7: Leave-one-out train/val/test split
     print("\nStep 7: Leave-one-out train/val/test split")
-    train_data, val_data, test_data = [], [], []
+    train_df, val_df, test_df = split_leave_one_out(user_sequences)
 
-    for _, row in user_sequences.iterrows():
-        seq  = row["item_seq_idx"]
-        uid  = row["user_idx"]
-        confidence_seq = row["confidence_seq"]
-        n    = len(seq)
-        train_history      = seq[:-2]
-        train_confidence_history = confidence_seq[:-2]
-        validation_target  = seq[-2]
-        validation_confidence = confidence_seq[-2]
-        test_target        = seq[-1]
-
-        train_data.append({
-            "user_idx":             uid,
-            "item_sequence":        train_history,
-            "seq_len":              n - 2,
-            "target":               validation_target,
-            "confidence":           validation_confidence,
-            "confidence_sequence":  train_confidence_history,
-        })
-        val_data.append({"user_idx": uid, "train_seq": train_history, "target": validation_target})
-        test_data.append({"user_idx": uid, "train_seq": seq[:-1],     "target": test_target})
-
-    train_df = pd.DataFrame(train_data)
-    val_df   = pd.DataFrame(val_data)
-    test_df  = pd.DataFrame(test_data)
-
-    print(f"Train: {len(train_df):,} users | avg seq_len = {train_df.seq_len.mean():.1f}")
+    avg_train_seq_len = (
+        f"{train_df.seq_len.mean():.1f}" if not train_df.empty else "n/a"
+    )
+    print(f"Train: {len(train_df):,} users | avg seq_len = {avg_train_seq_len}")
     print(f"Val:   {len(val_df):,} users")
     print(f"Test:  {len(test_df):,} users")
 
@@ -231,16 +363,13 @@ def main():
     items["item_idx"] = items["item_id"].map(item2idx)
     items[items["item_idx"].notna()].to_csv(PROCESSED_DIR / "item_meta.csv", index=False)
 
-    stats = {
-        "n_users":        len(user2idx),
-        "n_items":        len(item2idx),
-        "n_interactions": len(implicit_out),
-        "min_seq_len":    int(MIN_SEQ_LEN),
-        "min_item_freq":  int(MIN_ITEM_FREQ),
-        "sparsity":       round(1 - len(implicit_out) / (len(user2idx) * len(item2idx)), 6),
-        "pad_token":      0,
-        "max_item_idx":   len(item2idx),
-    }
+    stats = build_dataset_stats(
+        n_users=len(user2idx),
+        n_items=len(item2idx),
+        n_interactions=len(implicit_out),
+        min_seq_len=MIN_SEQ_LEN,
+        min_item_freq=MIN_ITEM_FREQ,
+    )
     with open(PROCESSED_DIR / "dataset_stats.json", "w") as f:
         json.dump(stats, f, indent=2)
 
