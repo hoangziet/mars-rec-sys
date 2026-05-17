@@ -1,0 +1,12 @@
+{
+  "model_name": "popularity",
+  "epochs": [],
+  "best_epoch": 0,
+  "best_val_ndcg": 0.0305,
+  "test_results": {
+    "Recall@10": 0.0508,
+    "NDCG@10": 0.0269,
+    "Recall@20": 0.0892,
+    "NDCG@20": 0.0367
+  }
+}

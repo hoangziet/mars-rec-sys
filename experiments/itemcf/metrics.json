@@ -1,0 +1,12 @@
+{
+  "model_name": "itemcf",
+  "epochs": [],
+  "best_epoch": 0,
+  "best_val_ndcg": 0.1675,
+  "test_results": {
+    "Recall@10": 0.2271,
+    "NDCG@10": 0.117,
+    "Recall@20": 0.3278,
+    "NDCG@20": 0.1424
+  }
+}
