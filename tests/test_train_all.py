@@ -40,7 +40,7 @@ def test_run_heuristic_model_popularity_writes_experiment_artifact(tmp_path):
     output_dir = tmp_path / "experiments"
     stats = _write_processed_fixture(data_dir)
 
-    run_heuristic_model(
+    summary = run_heuristic_model(
         "popularity",
         data_dir,
         stats,
@@ -52,13 +52,27 @@ def test_run_heuristic_model_popularity_writes_experiment_artifact(tmp_path):
 
     assert (output_dir / "popularity" / "popularity_model.json").exists()
 
+    metrics_path = output_dir / "popularity" / "metrics.json"
+    assert metrics_path.exists()
+
+    metrics = json.loads(metrics_path.read_text())
+    assert metrics == {
+        "model_name": "popularity",
+        "epochs": [],
+        "best_epoch": 0,
+        "best_val_ndcg": summary["best_val_ndcg"],
+        "test_results": summary["test_results"],
+    }
+    assert metrics["best_val_ndcg"] > 0
+    assert metrics["test_results"]["NDCG@10"] > 0
+
 
 def test_run_heuristic_model_itemcf_writes_experiment_artifacts(tmp_path):
     data_dir = tmp_path / "processed"
     output_dir = tmp_path / "experiments"
     stats = _write_processed_fixture(data_dir)
 
-    run_heuristic_model(
+    summary = run_heuristic_model(
         "itemcf",
         data_dir,
         stats,
@@ -70,3 +84,17 @@ def test_run_heuristic_model_itemcf_writes_experiment_artifacts(tmp_path):
 
     assert (output_dir / "itemcf" / "itemcf_sim.json").exists()
     assert (output_dir / "itemcf" / "itemcf_history.json").exists()
+
+    metrics_path = output_dir / "itemcf" / "metrics.json"
+    assert metrics_path.exists()
+
+    metrics = json.loads(metrics_path.read_text())
+    assert metrics == {
+        "model_name": "itemcf",
+        "epochs": [],
+        "best_epoch": 0,
+        "best_val_ndcg": summary["best_val_ndcg"],
+        "test_results": summary["test_results"],
+    }
+    assert metrics["best_val_ndcg"] > 0
+    assert metrics["test_results"]["NDCG@10"] > 0

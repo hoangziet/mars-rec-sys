@@ -143,7 +143,14 @@ def run_heuristic_model(
         print_results("Popularity", test_results, phase="Test")
         model.save(data_dir / "popularity_model.json")
         model.save(model_output_dir / "popularity_model.json")
-        return {"test_results": test_results, "best_val_ndcg": float(val_results.get("NDCG@10", 0.0))}
+        summary = {
+            "model_name": model_name,
+            "best_epoch": 0,
+            "best_val_ndcg": float(val_results.get("NDCG@10", 0.0)),
+            "test_results": test_results,
+        }
+        save_heuristic_metrics(model_name, model_output_dir, summary)
+        return summary
 
     if model_name == "itemcf":
         from models.itemcf import ItemCFRecommender
@@ -154,7 +161,14 @@ def run_heuristic_model(
         print_results("Item-CF", test_results, phase="Test")
         model.save(data_dir)
         model.save(model_output_dir)
-        return {"test_results": test_results, "best_val_ndcg": float(val_results.get("NDCG@10", 0.0))}
+        summary = {
+            "model_name": model_name,
+            "best_epoch": 0,
+            "best_val_ndcg": float(val_results.get("NDCG@10", 0.0)),
+            "test_results": test_results,
+        }
+        save_heuristic_metrics(model_name, model_output_dir, summary)
+        return summary
 
     raise ValueError(f"Unknown heuristic model: {model_name}")
 
@@ -162,6 +176,18 @@ def run_heuristic_model(
 # ---------------------------------------------------------------------------
 # Reporting helpers
 # ---------------------------------------------------------------------------
+
+
+def save_heuristic_metrics(model_name: str, output_dir: Path, summary: dict) -> None:
+    metrics_payload = {
+        "model_name": summary.get("model_name", model_name),
+        "epochs": [],
+        "best_epoch": summary.get("best_epoch", 0),
+        "best_val_ndcg": summary.get("best_val_ndcg", 0.0),
+        "test_results": summary["test_results"],
+    }
+    with open(output_dir / "metrics.json", "w") as f:
+        json.dump(metrics_payload, f, indent=2)
 
 
 def build_run_record(model_name: str, seed: int, summary: dict, commit_sha: str | None = None) -> dict:

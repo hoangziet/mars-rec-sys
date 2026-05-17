@@ -1,10 +1,15 @@
+import pytest
 import pandas as pd
 
 from data.preprocess import (
     attach_confidence,
     build_confidence_lookup,
+    build_dataset_stats,
     build_user_sequences,
+    filter_benchmark_safe_user_sequences,
     load_explicit_ratings,
+    split_leave_one_out,
+    summarize_sequence_lengths,
 )
 
 
@@ -119,16 +124,151 @@ def test_build_user_sequences_keeps_items_and_confidence_aligned_by_time():
     assert sequences.loc[0, "seq_len"] == 3
 
 
-def test_train_confidence_sequence_should_match_train_history_convention():
-    item_seq = [101, 102, 103, 104]
-    confidence_seq = [1.0, 1.2, 1.5, 1.0]
+def test_filter_benchmark_safe_user_sequences_requires_min_original_len_four():
+    implicit = pd.DataFrame(
+        [
+            {"user_id": "u1", "item_id": "i1", "created_at": pd.Timestamp("2024-01-01"), "confidence": 1.0},
+            {"user_id": "u1", "item_id": "i2", "created_at": pd.Timestamp("2024-01-02"), "confidence": 1.0},
+            {"user_id": "u1", "item_id": "i3", "created_at": pd.Timestamp("2024-01-03"), "confidence": 1.0},
+            {"user_id": "u2", "item_id": "i1", "created_at": pd.Timestamp("2024-01-01"), "confidence": 1.0},
+            {"user_id": "u2", "item_id": "i2", "created_at": pd.Timestamp("2024-01-02"), "confidence": 1.0},
+            {"user_id": "u2", "item_id": "i3", "created_at": pd.Timestamp("2024-01-03"), "confidence": 1.0},
+            {"user_id": "u2", "item_id": "i4", "created_at": pd.Timestamp("2024-01-04"), "confidence": 1.0},
+        ]
+    )
 
-    train_history = item_seq[:-2]
-    validation_target = item_seq[-2]
-    train_confidence_history = confidence_seq[:-2]
-    validation_confidence = confidence_seq[-2]
+    user_sequences = build_user_sequences(implicit)
+    eligible = filter_benchmark_safe_user_sequences(user_sequences)
 
-    assert train_history == [101, 102]
-    assert validation_target == 103
-    assert train_confidence_history == [1.0, 1.2]
-    assert validation_confidence == 1.5
+    assert eligible["user_id"].tolist() == ["u2"]
+    assert eligible.loc[0, "item_sequence"] == ["i1", "i2", "i3", "i4"]
+    assert eligible.loc[0, "confidence_sequence"] == [1.0, 1.0, 1.0, 1.0]
+
+
+def test_split_leave_one_out_preserves_train_history_and_confidence_alignment():
+    user_sequences = pd.DataFrame(
+        [
+            {
+                "user_id": "u2",
+                "item_seq_idx": [101, 102, 103, 104],
+                "confidence_seq": [1.0, 1.2, 1.5, 1.0],
+                "user_idx": 7,
+            }
+        ]
+    )
+
+    train_df, val_df, test_df = split_leave_one_out(user_sequences)
+
+    assert train_df.loc[0, "user_idx"] == 7
+    assert train_df.loc[0, "item_sequence"] == [101, 102]
+    assert train_df.loc[0, "seq_len"] == 2
+    assert train_df.loc[0, "target"] == 103
+    assert train_df.loc[0, "confidence"] == 1.5
+    assert train_df.loc[0, "confidence_sequence"] == [1.0, 1.2]
+    assert val_df.loc[0, "train_seq"] == [101, 102]
+    assert val_df.loc[0, "target"] == 103
+    assert test_df.loc[0, "train_seq"] == [101, 102, 103]
+    assert test_df.loc[0, "target"] == 104
+
+
+def test_empty_benchmark_safe_user_set_has_robust_summary_and_stats():
+    user_sequences = pd.DataFrame(
+        [
+            {
+                "user_id": "u1",
+                "item_sequence": ["i1", "i2", "i3"],
+                "confidence_sequence": [1.0, 1.0, 1.0],
+                "seq_len": 3,
+            }
+        ]
+    )
+
+    eligible = filter_benchmark_safe_user_sequences(user_sequences)
+
+    assert eligible.empty
+    assert summarize_sequence_lengths(eligible) == "Seq len - min: n/a, max: n/a, mean: n/a"
+
+    stats = build_dataset_stats(
+        n_users=0,
+        n_items=0,
+        n_interactions=0,
+        min_seq_len=4,
+        min_item_freq=3,
+    )
+
+    assert stats["min_seq_len"] == 4
+    assert stats["sparsity"] == 0.0
+
+
+def test_filter_benchmark_safe_user_sequences_uses_actual_sequence_length_not_stale_seq_len():
+    user_sequences = pd.DataFrame(
+        [
+            {
+                "user_id": "u1",
+                "item_sequence": ["i1", "i2", "i3"],
+                "confidence_sequence": [1.0, 1.0, 1.0],
+                "seq_len": 99,
+            },
+            {
+                "user_id": "u2",
+                "item_sequence": ["i1", "i2", "i3", "i4"],
+                "confidence_sequence": [1.0, 1.1, 1.2, 1.3],
+                "seq_len": 1,
+            },
+        ]
+    )
+
+    eligible = filter_benchmark_safe_user_sequences(user_sequences)
+
+    assert eligible["user_id"].tolist() == ["u2"]
+    assert eligible.loc[0, "seq_len"] == 4
+
+
+def test_split_leave_one_out_raises_on_item_and_confidence_length_mismatch():
+    user_sequences = pd.DataFrame(
+        [
+            {
+                "user_id": "u2",
+                "item_seq_idx": [101, 102, 103, 104],
+                "confidence_seq": [1.0, 1.2, 1.5],
+                "user_idx": 7,
+            }
+        ]
+    )
+
+    with pytest.raises(ValueError, match="confidence sequence length mismatch"):
+        split_leave_one_out(user_sequences)
+
+
+def test_split_leave_one_out_raises_on_sequence_shorter_than_benchmark_safe_minimum():
+    user_sequences = pd.DataFrame(
+        [
+            {
+                "user_id": "u2",
+                "item_seq_idx": [101, 102, 103],
+                "confidence_seq": [1.0, 1.2, 1.5],
+                "user_idx": 7,
+            }
+        ]
+    )
+
+    with pytest.raises(ValueError, match="benchmark-safe minimum"):
+        split_leave_one_out(user_sequences)
+
+
+def test_split_leave_one_out_returns_empty_dataframes_with_expected_schema():
+    train_df, val_df, test_df = split_leave_one_out(pd.DataFrame())
+
+    assert train_df.empty
+    assert val_df.empty
+    assert test_df.empty
+    assert train_df.columns.tolist() == [
+        "user_idx",
+        "item_sequence",
+        "seq_len",
+        "target",
+        "confidence",
+        "confidence_sequence",
+    ]
+    assert val_df.columns.tolist() == ["user_idx", "train_seq", "target"]
+    assert test_df.columns.tolist() == ["user_idx", "train_seq", "target"]

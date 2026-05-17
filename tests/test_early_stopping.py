@@ -104,30 +104,60 @@ class TestConfigVerification:
     """Verify configs.py has correct hyperparameter values."""
 
     def test_sasrec_config_values(self):
-        from training.configs import MODEL_CONFIGS
+        from training.configs import (
+            COMMON_EARLY_STOP_MIN_DELTA,
+            COMMON_EARLY_STOP_PATIENCE,
+            COMMON_NEURAL_EPOCHS,
+            MODEL_CONFIGS,
+        )
         tk = MODEL_CONFIGS["sasrec"]["train_kwargs"]
-        assert tk["epochs"] == 50
+        assert tk["epochs"] == COMMON_NEURAL_EPOCHS
         assert tk["beta2"] == 0.98
         assert tk["weight_decay"] == 1e-4
-        assert tk["early_stop_patience"] == 10
-        assert tk["early_stop_min_delta"] == 1e-4
+        assert tk["early_stop_patience"] == COMMON_EARLY_STOP_PATIENCE
+        assert tk["early_stop_min_delta"] == COMMON_EARLY_STOP_MIN_DELTA
 
     def test_gsasrec_config_values(self):
-        from training.configs import MODEL_CONFIGS
+        from training.configs import (
+            COMMON_EARLY_STOP_MIN_DELTA,
+            COMMON_EARLY_STOP_PATIENCE,
+            COMMON_NEURAL_EPOCHS,
+            MODEL_CONFIGS,
+        )
         tk = MODEL_CONFIGS["gsasrec"]["train_kwargs"]
-        assert tk["epochs"] == 50
+        assert tk["epochs"] == COMMON_NEURAL_EPOCHS
         assert tk["beta2"] == 0.98
         assert tk["weight_decay"] == 0.0
-        assert tk["early_stop_patience"] == 10
-        assert tk["early_stop_min_delta"] == 1e-4
+        assert tk["early_stop_patience"] == COMMON_EARLY_STOP_PATIENCE
+        assert tk["early_stop_min_delta"] == COMMON_EARLY_STOP_MIN_DELTA
         assert "use_confidence_weighting" not in tk
 
-    def test_other_models_unchanged(self):
-        from training.configs import MODEL_CONFIGS
-        for m in ["gru4rec", "bert4rec", "bprmf"]:
+    def test_all_neural_models_share_training_budget_and_early_stopping(self):
+        from training.configs import (
+            COMMON_EARLY_STOP_MIN_DELTA,
+            COMMON_EARLY_STOP_PATIENCE,
+            COMMON_NEURAL_EPOCHS,
+            MODEL_CONFIGS,
+        )
+
+        for m in ["sasrec", "gsasrec", "gru4rec", "bert4rec", "bprmf"]:
             tk = MODEL_CONFIGS[m]["train_kwargs"]
-            assert "beta2" not in tk, f"{m} should not have beta2"
-            assert "early_stop_patience" not in tk, f"{m} should not have early_stop"
+            assert tk["epochs"] == COMMON_NEURAL_EPOCHS, f"{m} should use the common epoch budget"
+            assert tk["early_stop_patience"] == COMMON_EARLY_STOP_PATIENCE, (
+                f"{m} should use the common early-stop patience"
+            )
+            assert tk["early_stop_min_delta"] == COMMON_EARLY_STOP_MIN_DELTA, (
+                f"{m} should use the common early-stop min_delta"
+            )
+
+    def test_heuristic_baselines_remain_outside_neural_early_stopping_policy(self):
+        from training.configs import MODEL_CONFIGS
+
+        for m in ["itemcf", "popularity"]:
+            tk = MODEL_CONFIGS[m]["train_kwargs"]
+            assert "epochs" not in tk, f"{m} should not use the neural epoch budget"
+            assert "early_stop_patience" not in tk, f"{m} should not use neural early stopping"
+            assert "early_stop_min_delta" not in tk, f"{m} should not use neural early stopping"
 
     def test_gsasrec_model_kwargs_unchanged(self):
         from training.configs import MODEL_CONFIGS
