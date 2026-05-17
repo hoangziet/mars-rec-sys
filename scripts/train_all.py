@@ -128,6 +128,8 @@ def run_heuristic_model(
 
     max_len    = train_kwargs.get("max_len", 50)
     batch_size = train_kwargs.get("batch_size", 256)
+    model_output_dir = Path(output_dir) / model_name
+    model_output_dir.mkdir(parents=True, exist_ok=True)
 
     val_loader  = get_eval_loader(data_dir / "val.csv",  stats, batch_size=batch_size, max_len=max_len)
     test_loader = get_eval_loader(data_dir / "test.csv", stats, batch_size=batch_size, max_len=max_len)
@@ -140,6 +142,7 @@ def run_heuristic_model(
         test_results = evaluate_popularity(model.item_counts, test_loader)
         print_results("Popularity", test_results, phase="Test")
         model.save(data_dir / "popularity_model.json")
+        model.save(model_output_dir / "popularity_model.json")
         return {"test_results": test_results, "best_val_ndcg": float(val_results.get("NDCG@10", 0.0))}
 
     if model_name == "itemcf":
@@ -150,6 +153,7 @@ def run_heuristic_model(
         test_results = evaluate_itemcf(model.sim_matrix, model.user_history, test_loader)
         print_results("Item-CF", test_results, phase="Test")
         model.save(data_dir)
+        model.save(model_output_dir)
         return {"test_results": test_results, "best_val_ndcg": float(val_results.get("NDCG@10", 0.0))}
 
     raise ValueError(f"Unknown heuristic model: {model_name}")
