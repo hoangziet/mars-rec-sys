@@ -12,6 +12,7 @@ Classes:
 
 import ast
 import json
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -23,16 +24,35 @@ from torch.utils.data import DataLoader, Dataset
 # ---------------------------------------------------------------------------
 
 
+def processed_path(data_dir: str | Path, *parts: str) -> str:
+    return str(Path(data_dir).joinpath(*parts))
+
+
 def load_stats(stats_path: str = "data/processed/dataset_stats.json") -> dict:
     with open(stats_path) as f:
         return json.load(f)
 
 
 def parse_seq(s) -> list[int]:
-    """Parse a stringified list '"[1, 2, 3]"' or a Python list to list[int]."""
     if isinstance(s, list):
         return s
-    return ast.literal_eval(s)
+    if pd.isna(s) or s == "":
+        return []
+    text = str(s).strip()
+    if text.startswith("["):
+        return [int(x) for x in ast.literal_eval(text)]
+    return [int(token) for token in text.split()]
+
+
+def parse_float_seq(s) -> list[float]:
+    if isinstance(s, list):
+        return [float(x) for x in s]
+    if pd.isna(s) or s == "":
+        return []
+    text = str(s).strip()
+    if text.startswith("["):
+        return [float(x) for x in ast.literal_eval(text)]
+    return [float(token) for token in text.split()]
 
 
 def pad_sequence(seq: list[int], max_len: int, pad_token: int = 0) -> list[int]:
@@ -77,6 +97,8 @@ class TrainSequenceDataset(Dataset):
         self.pad_token = pad_token
         self.num_neg = num_neg
 
+        has_engagement = "engagement_sequence" in df.columns
+
         all_items: set[int] = set()
         self.samples: list[dict] = []
 
@@ -87,12 +109,20 @@ class TrainSequenceDataset(Dataset):
             if len(seq) < 2:
                 continue
             seen = set(seq)
+
+            if has_engagement:
+                engagement_seq = parse_float_seq(row.engagement_sequence)
+            else:
+                engagement_seq = [0.0] * len(seq)
+
             for i in range(1, len(seq)):
                 inp = seq[:i]
                 tgt = seq[i]
+                eng = engagement_seq[i]
                 self.samples.append({
                     "input": pad_sequence(inp, max_len, pad_token),
                     "pos": tgt,
+                    "engagement": float(eng),
                     "seen": seen,
                 })
 
@@ -124,6 +154,7 @@ class TrainSequenceDataset(Dataset):
             "input_seq": torch.tensor(inp, dtype=torch.long),
             "pos_items": torch.tensor(pos, dtype=torch.long),
             "neg_items": neg_tensor,
+            "engagement": torch.tensor(s["engagement"], dtype=torch.float32),
             "mask": torch.tensor(mask, dtype=torch.bool),
         }
 
@@ -176,8 +207,10 @@ class MaskedSequenceDataset(Dataset):
             self.seqs = None
             self.targets = None
         else:
-            self.seqs = [parse_seq(s) for s in df["train_seq"]]
-            self.targets = df["target"].tolist()
+            seq_col = "item_sequence" if "item_sequence" in df.columns else "train_seq"
+            tgt_col = "target_item" if "target_item" in df.columns else "target"
+            self.seqs = [parse_seq(s) for s in df[seq_col]]
+            self.targets = df[tgt_col].tolist()
             self.instances = []
 
     def _build_train_windows(self, seq: list[int]) -> list[list[int]]:
@@ -307,8 +340,12 @@ class FullSortEvalDataset(Dataset):
         self.n_items = n_items
 
         self.users = df["user_idx"].tolist()
-        self.seqs = [parse_seq(s) for s in df["train_seq"]]
-        self.targets = df["target"].tolist()
+
+        seq_col = "item_sequence" if "item_sequence" in df.columns else "train_seq"
+        tgt_col = "target_item" if "target_item" in df.columns else "target"
+
+        self.seqs = [parse_seq(s) for s in df[seq_col]]
+        self.targets = df[tgt_col].tolist()
 
         self._padded_seqs = [
             pad_sequence(seq, max_len, pad_token) for seq in self.seqs
@@ -432,12 +469,11 @@ def get_val_loss_loader(
     num_neg: int = 1,
     seed: int = 0,
 ) -> DataLoader | None:
-    """Build a val-loss DataLoader in training format from val.csv.
+    """Build a val-loss DataLoader in training format from val split.
 
-    val.csv columns: user_idx, train_seq, target
-    Produces one sample per user: pad(train_seq) → predict target.
+    Produces one sample per user: pad(sequence) -> predict target.
     Supports sequential models and BPR-MF.  Returns None for bert4rec
-    (MLM val-loss requires masking logic not present in val.csv).
+    (MLM val-loss requires masking logic not present in val CSV).
     """
     if model_type == "bert4rec":
         return None
@@ -446,11 +482,14 @@ def get_val_loss_loader(
     df = pd.read_csv(val_csv)
     rng = np.random.default_rng(seed)
 
+    seq_col = "item_sequence" if "item_sequence" in df.columns else "train_seq"
+    tgt_col = "target_item" if "target_item" in df.columns else "target"
+
     input_seqs, pos_items_list, neg_items_list, user_list = [], [], [], []
 
     for _, row in df.iterrows():
-        seq = parse_seq(row["train_seq"])
-        target = int(row["target"])
+        seq = parse_seq(row[seq_col])
+        target = int(row[tgt_col])
         user_idx = int(row["user_idx"])
         seen = set(seq) | {target, 0}
 

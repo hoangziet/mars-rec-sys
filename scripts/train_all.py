@@ -37,6 +37,7 @@ from pipeline.metrics import (
     print_results,
 )
 from pipeline.optim import build_optimizer, build_scheduler
+from scripts.train import validate_processed_layout
 from training.trainer import Trainer
 
 
@@ -73,14 +74,14 @@ def run_neural_model(
 
     model        = build_model(model_name, stats["n_items"], stats["n_users"], model_kwargs, max_len).to(device)
     train_loader = build_train_loader(model_name, data_dir, stats, train_kwargs)
-    val_loader   = get_eval_loader(data_dir / "val.csv",  stats, batch_size=batch_size, max_len=max_len)
-    test_loader  = get_eval_loader(data_dir / "test.csv", stats, batch_size=batch_size, max_len=max_len)
+    val_loader   = get_eval_loader(data_dir / "splits" / "val_sequences.csv",  stats, batch_size=batch_size, max_len=max_len)
+    test_loader  = get_eval_loader(data_dir / "splits" / "test_sequences.csv", stats, batch_size=batch_size, max_len=max_len)
 
     criterion_fn    = build_criterion_fn(model_name, train_kwargs)
     eval_fn         = build_eval_fn(model_name)
     val_loss_loader = get_val_loss_loader(
         model_name,
-        data_dir / "val.csv",
+        data_dir / "splits" / "val_sequences.csv",
         stats,
         batch_size=batch_size,
         max_len=max_len,
@@ -131,13 +132,13 @@ def run_heuristic_model(
     model_output_dir = Path(output_dir) / model_name
     model_output_dir.mkdir(parents=True, exist_ok=True)
 
-    val_loader  = get_eval_loader(data_dir / "val.csv",  stats, batch_size=batch_size, max_len=max_len)
-    test_loader = get_eval_loader(data_dir / "test.csv", stats, batch_size=batch_size, max_len=max_len)
+    val_loader  = get_eval_loader(data_dir / "splits" / "val_sequences.csv",  stats, batch_size=batch_size, max_len=max_len)
+    test_loader = get_eval_loader(data_dir / "splits" / "test_sequences.csv", stats, batch_size=batch_size, max_len=max_len)
 
     if model_name == "popularity":
         from models.popularity import PopularityRecommender
         model = PopularityRecommender()
-        model.fit(data_dir / "interactions.csv")
+        model.fit(data_dir / "interactions" / "interactions.csv")
         val_results  = evaluate_popularity(model.item_counts, val_loader)
         test_results = evaluate_popularity(model.item_counts, test_loader)
         print_results("Popularity", test_results, phase="Test")
@@ -155,7 +156,7 @@ def run_heuristic_model(
     if model_name == "itemcf":
         from models.itemcf import ItemCFRecommender
         model = ItemCFRecommender(top_k_sim=model_kwargs.get("top_k_sim", 20))
-        model.fit(data_dir / "interactions.csv", stats_path=data_dir / "dataset_stats.json")
+        model.fit(data_dir / "interactions" / "interactions.csv", stats_path=data_dir / "reports" / "dataset_stats.json")
         val_results  = evaluate_itemcf(model.sim_matrix, model.user_history, val_loader)
         test_results = evaluate_itemcf(model.sim_matrix, model.user_history, test_loader)
         print_results("Item-CF", test_results, phase="Test")
@@ -271,7 +272,8 @@ def main() -> None:
         args.models = list(MODEL_CONFIGS.keys())
 
     data_dir   = Path(args.data_dir)
-    stats      = load_stats(data_dir / "dataset_stats.json")
+    validate_processed_layout(data_dir)
+    stats      = load_stats(data_dir / "reports" / "dataset_stats.json")
     device     = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     commit_sha = get_git_commit()
 
