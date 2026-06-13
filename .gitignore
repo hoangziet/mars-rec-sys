@@ -18,6 +18,15 @@ __pycache__/
 # notebook
 .ipynb_checkpoints/
 
+# experiments
+experiments/
+
+# mlruns
+mlruns/
+
+# output
+outputs/
+
 # IDE
 .vscode/
 
