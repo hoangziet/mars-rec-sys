@@ -24,6 +24,9 @@ __pycache__/
 # models
 *.pt
 
+# Tests
+tests/
+
 # others
 .claude/
 .codex/

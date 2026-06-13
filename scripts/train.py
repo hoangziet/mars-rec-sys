@@ -52,6 +52,18 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def validate_processed_layout(data_dir: Path) -> None:
+    required = [
+        data_dir / "reports" / "dataset_stats.json",
+        data_dir / "splits" / "train_sequences.csv",
+        data_dir / "splits" / "val_sequences.csv",
+        data_dir / "splits" / "test_sequences.csv",
+    ]
+    missing = [str(path) for path in required if not path.exists()]
+    if missing:
+        raise FileNotFoundError(f"Missing processed artifacts: {missing}")
+
+
 def main():
     parser = build_parser()
     args = parser.parse_args()
@@ -59,7 +71,8 @@ def main():
     seed_everything(args.seed)
 
     data_dir = Path(args.data_dir)
-    stats    = load_stats(data_dir / "dataset_stats.json")
+    validate_processed_layout(data_dir)
+    stats    = load_stats(data_dir / "reports" / "dataset_stats.json")
     device   = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     cfg          = MODEL_CONFIGS[args.model]
@@ -78,8 +91,8 @@ def main():
 
     model        = build_model(args.model, stats["n_items"], stats["n_users"], model_kwargs, max_len).to(device)
     train_loader = build_train_loader(args.model, data_dir, stats, train_kwargs)
-    val_loader   = get_eval_loader(data_dir / "val.csv",  stats, batch_size=batch_size, max_len=max_len)
-    test_loader  = get_eval_loader(data_dir / "test.csv", stats, batch_size=batch_size, max_len=max_len)
+    val_loader   = get_eval_loader(data_dir / "splits" / "val_sequences.csv",  stats, batch_size=batch_size, max_len=max_len)
+    test_loader  = get_eval_loader(data_dir / "splits" / "test_sequences.csv", stats, batch_size=batch_size, max_len=max_len)
 
     if args.model not in MODEL_CONFIGS:
         print(f"\nModel '{args.model}' not found.")
@@ -92,7 +105,7 @@ def main():
     eval_fn        = build_eval_fn(args.model)
     val_loss_loader = get_val_loss_loader(
         args.model,
-        data_dir / "val.csv",
+        data_dir / "splits" / "val_sequences.csv",
         stats,
         batch_size=batch_size,
         max_len=max_len,
