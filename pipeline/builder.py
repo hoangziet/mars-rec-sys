@@ -180,7 +180,7 @@ def build_train_loader(
             extra["force_last_item_mask"] = train_kwargs.get("force_last_item_mask", False)
         return get_train_loader(
             model_name,
-            data_dir / "train.csv",
+            data_dir / "splits" / "train_sequences.csv",
             stats,
             batch_size=batch_size,
             max_len=max_len,
@@ -191,7 +191,7 @@ def build_train_loader(
     if model_name == "bprmf":
         return get_train_loader(
             "bprmf",
-            data_dir / "train.csv",
+            data_dir / "splits" / "train_sequences.csv",
             stats,
             batch_size=batch_size,
             max_len=max_len,

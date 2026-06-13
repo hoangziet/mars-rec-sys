@@ -1,15 +1,10 @@
 """
 data/preprocess.py
 ==================
-Preprocess raw interaction data into train/val/test splits.
+Preprocess raw interaction data into the canonical processed dataset layout.
 
 Usage:
     uv run python data/preprocess.py
-
-Outputs (written to data/processed/):
-    train.csv, val.csv, test.csv
-    interactions.csv, item_meta.csv
-    user2idx.json, item2idx.json, dataset_stats.json
 """
 
 import csv
@@ -19,21 +14,17 @@ from pathlib import Path
 import pandas as pd
 
 
-CONFIDENCE_ALPHA = 0.5
-BASELINE_CONFIDENCE = 1.0
 LEAVE_ONE_OUT_HOLDOUTS = 2
 MIN_TRAIN_HISTORY_LEN_FOR_NEURAL_MODELS = 2
 MIN_BENCHMARK_SAFE_SEQUENCE_LEN = (
     MIN_TRAIN_HISTORY_LEN_FOR_NEURAL_MODELS + LEAVE_ONE_OUT_HOLDOUTS
 )
+MIN_USER_INTERACTIONS = 5
+MIN_ITEM_INTERACTIONS = 3
 
 
 def load_explicit_ratings(path: Path) -> pd.DataFrame:
-    """Load explicit ratings and clip outlier watch/rating values.
-
-    The raw CSV can contain malformed trailing quotes in numeric fields, so
-    parse with QUOTE_NONE and normalize column/value quotes explicitly.
-    """
+    """Load explicit ratings and derive normalized engagement scores."""
     explicit = pd.read_csv(
         path,
         quoting=csv.QUOTE_NONE,
@@ -46,7 +37,8 @@ def load_explicit_ratings(path: Path) -> pd.DataFrame:
 
     numeric_cols = ["user_id", "item_id", "watch_percentage", "rating"]
     for col in numeric_cols:
-        explicit[col] = pd.to_numeric(explicit[col], errors="coerce")
+        if col in explicit.columns:
+            explicit[col] = pd.to_numeric(explicit[col], errors="coerce")
 
     explicit["created_at"] = pd.to_datetime(explicit["created_at"], errors="coerce")
     explicit = explicit.dropna(
@@ -55,78 +47,88 @@ def load_explicit_ratings(path: Path) -> pd.DataFrame:
 
     explicit["user_id"] = explicit["user_id"].astype(int).astype(str)
     explicit["item_id"] = explicit["item_id"].astype(int).astype(str)
-    explicit["watch_percentage"] = explicit["watch_percentage"].clip(upper=100)
-    explicit["rating"] = explicit["rating"].clip(upper=10)
+    explicit["watch_percentage"] = explicit["watch_percentage"].clip(lower=0, upper=100)
+    explicit["engagement_score"] = explicit["watch_percentage"] / 100.0
 
-    return explicit.reset_index(drop=True)
+    return explicit[
+        ["user_id", "item_id", "watch_percentage", "engagement_score", "created_at"]
+    ].reset_index(drop=True)
 
 
-def build_confidence_lookup(
-    explicit: pd.DataFrame,
-    alpha: float = CONFIDENCE_ALPHA,
-) -> pd.DataFrame:
+def build_engagement_lookup(explicit: pd.DataFrame) -> pd.DataFrame:
     explicit = explicit.copy()
-    explicit["confidence"] = 1.0 + alpha * (
-        explicit["watch_percentage"] / 100.0
-    )
+    if "engagement_score" not in explicit.columns:
+        explicit["engagement_score"] = (
+            explicit["watch_percentage"].astype(float).clip(lower=0, upper=100) / 100.0
+        )
     return (
-        explicit.groupby(["user_id", "item_id"], as_index=False)["confidence"]
-        .max()
+        explicit.groupby(["user_id", "item_id"], as_index=False)
+        .agg(engagement_score=("engagement_score", "max"))
     )
 
 
-def attach_confidence(
-    implicit: pd.DataFrame,
-    confidence_lookup: pd.DataFrame,
-    baseline: float = BASELINE_CONFIDENCE,
+def attach_engagement_score(
+    interactions: pd.DataFrame,
+    engagement_lookup: pd.DataFrame,
 ) -> pd.DataFrame:
-    result = implicit.merge(
-        confidence_lookup,
+    result = interactions.merge(
+        engagement_lookup,
         on=["user_id", "item_id"],
         how="left",
+        validate="one_to_one",
     )
-    result["confidence"] = result["confidence"].fillna(baseline)
+    result["engagement_score"] = (
+        result["engagement_score"].fillna(0.0).clip(lower=0.0, upper=1.0)
+    )
     return result
 
 
-def build_user_sequences(implicit: pd.DataFrame) -> pd.DataFrame:
+def build_user_sequences(interactions: pd.DataFrame) -> pd.DataFrame:
+    if interactions.empty:
+        return pd.DataFrame(
+            columns=["user_idx", "user_id", "item_seq_idx", "engagement_seq"]
+        )
+
     rows = []
-    for user_id, group in implicit.sort_values(["user_id", "created_at"]).groupby("user_id"):
+    ordered = interactions.sort_values(["user_idx", "created_at", "item_idx"], kind="stable")
+    for user_idx, group in ordered.groupby("user_idx", sort=True):
         rows.append(
             {
-                "user_id": user_id,
-                "item_sequence": group["item_id"].tolist(),
-                "confidence_sequence": group["confidence"].astype(float).tolist(),
-                "seq_len": len(group),
+                "user_idx": int(user_idx),
+                "user_id": group["user_id"].iloc[0],
+                "item_seq_idx": group["item_idx"].tolist(),
+                "engagement_seq": group["engagement_score"].astype(float).tolist(),
             }
         )
-    return pd.DataFrame(rows)
+
+    return pd.DataFrame(
+        rows,
+        columns=["user_idx", "user_id", "item_seq_idx", "engagement_seq"],
+    )
 
 
 def _get_sequence_length(row: pd.Series) -> int:
-    if "item_seq_idx" in row and isinstance(row["item_seq_idx"], list):
+    if isinstance(row.get("item_seq_idx"), list):
         return len(row["item_seq_idx"])
-    if "item_sequence" in row and isinstance(row["item_sequence"], list):
-        return len(row["item_sequence"])
+    if "sequence_length" in row and pd.notna(row["sequence_length"]):
+        return int(row["sequence_length"])
     return int(row["seq_len"])
 
 
-def _get_confidence_sequence_length(row: pd.Series) -> int | None:
-    if "confidence_seq" in row and isinstance(row["confidence_seq"], list):
-        return len(row["confidence_seq"])
-    if "confidence_sequence" in row and isinstance(row["confidence_sequence"], list):
-        return len(row["confidence_sequence"])
+def _get_engagement_sequence_length(row: pd.Series) -> int | None:
+    if isinstance(row.get("engagement_seq"), list):
+        return len(row["engagement_seq"])
     return None
 
 
 def _validate_row_sequence_alignment(row: pd.Series) -> None:
     seq_len = _get_sequence_length(row)
-    confidence_len = _get_confidence_sequence_length(row)
-    if confidence_len is not None and seq_len != confidence_len:
+    engagement_len = _get_engagement_sequence_length(row)
+    if engagement_len is not None and seq_len != engagement_len:
         user_id = row.get("user_id", "<unknown>")
         raise ValueError(
-            "confidence sequence length mismatch "
-            f"for user_id={user_id}: items={seq_len}, confidence={confidence_len}"
+            "engagement sequence length mismatch "
+            f"for user_id={user_id}: items={seq_len}, engagement={engagement_len}"
         )
 
 
@@ -138,15 +140,35 @@ def filter_benchmark_safe_user_sequences(
         return user_sequences.reset_index(drop=True)
 
     sequence_lengths = user_sequences.apply(_get_sequence_length, axis=1)
-    confidence_lengths = user_sequences.apply(_get_confidence_sequence_length, axis=1)
-    mismatched = confidence_lengths.notna() & (sequence_lengths != confidence_lengths)
+    engagement_lengths = user_sequences.apply(_get_engagement_sequence_length, axis=1)
+    mismatched = engagement_lengths.notna() & (sequence_lengths != engagement_lengths)
     if mismatched.any():
-        first_bad_row = user_sequences.loc[mismatched].iloc[0]
-        _validate_row_sequence_alignment(first_bad_row)
+        _validate_row_sequence_alignment(user_sequences.loc[mismatched].iloc[0])
 
     filtered = user_sequences[sequence_lengths >= min_seq_len].copy()
-    filtered["seq_len"] = sequence_lengths[sequence_lengths >= min_seq_len].astype(int)
+    filtered["sequence_length"] = sequence_lengths[sequence_lengths >= min_seq_len].astype(int)
     return filtered.reset_index(drop=True)
+
+
+def apply_iterative_k_core_filter(
+    interactions: pd.DataFrame,
+    min_user_interactions: int = MIN_USER_INTERACTIONS,
+    min_item_interactions: int = MIN_ITEM_INTERACTIONS,
+) -> pd.DataFrame:
+    filtered = interactions.copy()
+    while True:
+        before_len = len(filtered)
+
+        user_counts = filtered.groupby("user_id").size()
+        valid_users = user_counts[user_counts >= min_user_interactions].index
+        filtered = filtered[filtered["user_id"].isin(valid_users)].copy()
+
+        item_counts = filtered.groupby("item_id").size()
+        valid_items = item_counts[item_counts >= min_item_interactions].index
+        filtered = filtered[filtered["item_id"].isin(valid_items)].copy()
+
+        if len(filtered) == before_len:
+            return filtered.reset_index(drop=True)
 
 
 def format_user_retention(after: int, before: int) -> str:
@@ -158,10 +180,11 @@ def format_user_retention(after: int, before: int) -> str:
 def summarize_sequence_lengths(user_sequences: pd.DataFrame) -> str:
     if user_sequences.empty:
         return "Seq len - min: n/a, max: n/a, mean: n/a"
+
+    lengths = user_sequences.apply(_get_sequence_length, axis=1)
     return (
         "Seq len - min: "
-        f"{user_sequences.seq_len.min()}, max: {user_sequences.seq_len.max()}, "
-        f"mean: {user_sequences.seq_len.mean():.1f}"
+        f"{lengths.min()}, max: {lengths.max()}, mean: {lengths.mean():.1f}"
     )
 
 
@@ -171,21 +194,32 @@ def split_leave_one_out(
     train_columns = [
         "user_idx",
         "item_sequence",
-        "seq_len",
-        "target",
-        "confidence",
-        "confidence_sequence",
+        "engagement_sequence",
+        "sequence_length",
     ]
-    eval_columns = ["user_idx", "train_seq", "target"]
+    eval_columns = [
+        "user_idx",
+        "item_sequence",
+        "engagement_sequence",
+        "sequence_length",
+        "target_item",
+        "target_engagement",
+    ]
 
-    train_data, val_data, test_data = [], [], []
+    if user_sequences.empty:
+        return (
+            pd.DataFrame(columns=train_columns),
+            pd.DataFrame(columns=eval_columns),
+            pd.DataFrame(columns=eval_columns),
+        )
 
+    train_rows, val_rows, test_rows = [], [], []
     for _, row in user_sequences.iterrows():
         _validate_row_sequence_alignment(row)
         seq = row["item_seq_idx"]
-        uid = row["user_idx"]
-        confidence_seq = row["confidence_seq"]
+        engagement = row["engagement_seq"]
         n = len(seq)
+
         if n < MIN_BENCHMARK_SAFE_SEQUENCE_LEN:
             user_id = row.get("user_id", "<unknown>")
             raise ValueError(
@@ -193,38 +227,151 @@ def split_leave_one_out(
                 f"for user_id={user_id}: length={n}, "
                 f"minimum={MIN_BENCHMARK_SAFE_SEQUENCE_LEN}"
             )
-        train_history = seq[:-2]
-        train_confidence_history = confidence_seq[:-2]
-        validation_target = seq[-2]
-        validation_confidence = confidence_seq[-2]
-        test_target = seq[-1]
 
-        train_data.append(
+        train_history = seq[:-2]
+        train_engagement = engagement[:-2]
+        val_target = seq[-2]
+        val_target_engagement = engagement[-2]
+        test_history = seq[:-1]
+        test_engagement = engagement[:-1]
+        test_target = seq[-1]
+        test_target_engagement = engagement[-1]
+
+        train_rows.append(
             {
-                "user_idx": uid,
+                "user_idx": row["user_idx"],
                 "item_sequence": train_history,
-                "seq_len": n - 2,
-                "target": validation_target,
-                "confidence": validation_confidence,
-                "confidence_sequence": train_confidence_history,
+                "engagement_sequence": train_engagement,
+                "sequence_length": len(train_history),
             }
         )
-        val_data.append(
+        val_rows.append(
             {
-                "user_idx": uid,
-                "train_seq": train_history,
-                "target": validation_target,
+                "user_idx": row["user_idx"],
+                "item_sequence": train_history,
+                "engagement_sequence": train_engagement,
+                "sequence_length": len(train_history),
+                "target_item": val_target,
+                "target_engagement": val_target_engagement,
             }
         )
-        test_data.append(
-            {"user_idx": uid, "train_seq": seq[:-1], "target": test_target}
+        test_rows.append(
+            {
+                "user_idx": row["user_idx"],
+                "item_sequence": test_history,
+                "engagement_sequence": test_engagement,
+                "sequence_length": len(test_history),
+                "target_item": test_target,
+                "target_engagement": test_target_engagement,
+            }
         )
 
     return (
-        pd.DataFrame(train_data, columns=train_columns),
-        pd.DataFrame(val_data, columns=eval_columns),
-        pd.DataFrame(test_data, columns=eval_columns),
+        pd.DataFrame(train_rows, columns=train_columns),
+        pd.DataFrame(val_rows, columns=eval_columns),
+        pd.DataFrame(test_rows, columns=eval_columns),
     )
+
+
+def serialize_sequence(values: list[int] | list[float]) -> str:
+    return " ".join(str(v) for v in values)
+
+
+def serialize_legacy_sequence(values: list[int] | list[float]) -> str:
+    return str(list(values))
+
+
+def save_processed_outputs(
+    *,
+    output_dir: Path,
+    interactions: pd.DataFrame,
+    train_df: pd.DataFrame,
+    val_df: pd.DataFrame,
+    test_df: pd.DataFrame,
+    item_metadata: pd.DataFrame,
+    user_id_map: pd.DataFrame,
+    item_id_map: pd.DataFrame,
+    dataset_stats: dict,
+    preprocessing_report: dict,
+) -> None:
+    interactions_dir = output_dir / "interactions"
+    splits_dir = output_dir / "splits"
+    item_features_dir = output_dir / "item_features"
+    mappings_dir = output_dir / "mappings"
+    reports_dir = output_dir / "reports"
+
+    for path in (
+        interactions_dir,
+        splits_dir,
+        item_features_dir,
+        mappings_dir,
+        reports_dir,
+    ):
+        path.mkdir(parents=True, exist_ok=True)
+
+    def serialize_split_frame(df: pd.DataFrame) -> pd.DataFrame:
+        result = df.copy()
+        for column in ("item_sequence", "engagement_sequence"):
+            if column in result.columns:
+                result[column] = result[column].apply(
+                    lambda values: serialize_sequence(values)
+                    if isinstance(values, list)
+                    else values
+                )
+        return result
+
+    def serialize_legacy_split_frame(df: pd.DataFrame) -> pd.DataFrame:
+        result = df.copy()
+        for column in ("item_sequence", "engagement_sequence"):
+            if column in result.columns:
+                result[column] = result[column].apply(
+                    lambda values: serialize_legacy_sequence(values)
+                    if isinstance(values, list)
+                    else values
+                )
+        return result
+
+    serialized_train = serialize_split_frame(train_df)
+    serialized_val = serialize_split_frame(val_df)
+    serialized_test = serialize_split_frame(test_df)
+    legacy_train = serialize_legacy_split_frame(train_df)
+    legacy_val = serialize_legacy_split_frame(val_df)
+    legacy_test = serialize_legacy_split_frame(test_df)
+
+    interactions.to_csv(interactions_dir / "interactions.csv", index=False)
+    serialized_train.to_csv(
+        splits_dir / "train_sequences.csv",
+        index=False,
+    )
+    serialized_val.to_csv(
+        splits_dir / "val_sequences.csv",
+        index=False,
+    )
+    serialized_test.to_csv(
+        splits_dir / "test_sequences.csv",
+        index=False,
+    )
+    item_metadata.to_csv(item_features_dir / "item_metadata.csv", index=False)
+    user_id_map.to_csv(mappings_dir / "user_id_map.csv", index=False)
+    item_id_map.to_csv(mappings_dir / "item_id_map.csv", index=False)
+
+    with open(reports_dir / "dataset_stats.json", "w") as f:
+        json.dump(dataset_stats, f, indent=2)
+    with open(reports_dir / "preprocessing_report.json", "w") as f:
+        json.dump(preprocessing_report, f, indent=2)
+
+    # Transitional compatibility outputs for existing downstream readers.
+    interactions.to_csv(output_dir / "interactions.csv", index=False)
+    legacy_train.to_csv(output_dir / "train.csv", index=False)
+    legacy_val.rename(
+        columns={"item_sequence": "train_seq", "target_item": "target"}
+    )[["user_idx", "train_seq", "target"]].to_csv(output_dir / "val.csv", index=False)
+    legacy_test.rename(
+        columns={"item_sequence": "train_seq", "target_item": "target"}
+    )[["user_idx", "train_seq", "target"]].to_csv(output_dir / "test.csv", index=False)
+    item_metadata.to_csv(output_dir / "item_meta.csv", index=False)
+    with open(output_dir / "dataset_stats.json", "w") as f:
+        json.dump(dataset_stats, f, indent=2)
 
 
 def build_dataset_stats(
@@ -248,137 +395,214 @@ def build_dataset_stats(
     }
 
 
-def main():
-    RAW_DIR       = Path("data/raw")
-    PROCESSED_DIR = Path("data/processed")
-    PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
+def _build_item_metadata(items: pd.DataFrame, item_id_map: pd.DataFrame) -> pd.DataFrame:
+    metadata = items.copy()
+    metadata = metadata[metadata["item_id"].isin(item_id_map["item_id"])].copy()
+    metadata["item_idx"] = metadata["item_id"].map(
+        dict(zip(item_id_map["item_id"], item_id_map["item_idx"]))
+    )
 
-    MIN_SEQ_LEN   = MIN_BENCHMARK_SAFE_SEQUENCE_LEN
-    MIN_ITEM_FREQ = 3   # Minimum interactions per item (after dedup)
+    def map_string_column(target: str, candidates: list[str]) -> None:
+        source = next((column for column in candidates if column in metadata.columns), None)
+        if source is None:
+            metadata[target] = ""
+        else:
+            metadata[target] = metadata[source]
+        metadata[target] = metadata[target].fillna("").astype(str)
 
-    # Step 1: Load raw data
+    map_string_column("title", ["title", "name", "Name"])
+    map_string_column("description", ["description", "Description"])
+    map_string_column("language", ["language", "Language"])
+    map_string_column("difficulty", ["difficulty", "Difficulty"])
+    map_string_column("theme", ["theme", "Theme"])
+    map_string_column("software", ["software", "Software"])
+    map_string_column("job", ["job", "Job"])
+    map_string_column("type", ["type", "Type"])
+
+    duration_source = next(
+        (column for column in ["duration", "Duration"] if column in metadata.columns),
+        None,
+    )
+    if duration_source is None:
+        metadata["duration"] = ""
+    else:
+        metadata["duration"] = metadata[duration_source]
+    metadata["duration"] = metadata["duration"].fillna("")
+    metadata["text"] = metadata["title"] + " [SEP] " + metadata["description"]
+
+    ordered_columns = [
+        "item_idx",
+        "item_id",
+        "title",
+        "description",
+        "text",
+        "language",
+        "difficulty",
+        "theme",
+        "software",
+        "job",
+        "type",
+        "duration",
+    ]
+    return metadata[ordered_columns].sort_values("item_idx", kind="stable").reset_index(
+        drop=True
+    )
+
+
+def build_preprocessing_report(
+    *,
+    orphan_implicit_count: int,
+    orphan_explicit_count: int,
+    engagement_pairs: int,
+    min_user_interactions: int,
+    min_item_interactions: int,
+    repeat_events_removed: int,
+    eligible_user_count: int,
+    filtered_item_count: int,
+) -> dict:
+    return {
+        "orphan_implicit_count": orphan_implicit_count,
+        "orphan_explicit_count": orphan_explicit_count,
+        "engagement_pairs": engagement_pairs,
+        "min_user_interactions": min_user_interactions,
+        "min_item_interactions": min_item_interactions,
+        "repeat_events_removed": repeat_events_removed,
+        "eligible_user_count": eligible_user_count,
+        "filtered_item_count": filtered_item_count,
+    }
+
+
+def count_orphan_implicit_rows(
+    implicit: pd.DataFrame,
+    catalog_item_ids: set[str],
+) -> int:
+    return int((~implicit["item_id"].isin(catalog_item_ids)).sum())
+
+
+def main() -> None:
+    raw_dir = Path("data/raw")
+    processed_dir = Path("data/processed")
+    min_seq_len = MIN_BENCHMARK_SAFE_SEQUENCE_LEN
+    min_user_interactions = MIN_USER_INTERACTIONS
+    min_item_interactions = MIN_ITEM_INTERACTIONS
+
     implicit = pd.read_csv(
-        RAW_DIR / "implicit_ratings.csv",
+        raw_dir / "implicit_ratings.csv",
         parse_dates=["created_at"],
         dtype={"user_id": str, "item_id": str},
     )
-    items = pd.read_csv(RAW_DIR / "items.csv", dtype={"item_id": str})
-    explicit = load_explicit_ratings(RAW_DIR / "explicit_ratings.csv")
-    confidence_lookup = build_confidence_lookup(explicit)
+    items = pd.read_csv(raw_dir / "items.csv", dtype={"item_id": str})
+    explicit = load_explicit_ratings(raw_dir / "explicit_ratings.csv")
+    engagement_lookup = build_engagement_lookup(explicit)
+    engagement_pairs = len(engagement_lookup)
+    catalog_item_ids = set(items["item_id"].astype(str))
 
-    print(f"Implicit: {len(implicit):,} rows | {implicit['user_id'].nunique():,} users | {implicit['item_id'].nunique():,} items")
-    print(f"Explicit: {len(explicit):,} rows | {explicit['user_id'].nunique():,} users | {explicit['item_id'].nunique():,} items")
-    print(f"Confidence pairs: {len(confidence_lookup):,}")
-    print(f"Items:    {len(items):,} rows")
+    implicit_sorted = implicit.sort_values("created_at", kind="stable")
+    implicit_dedup = implicit_sorted.drop_duplicates(
+        subset=["user_id", "item_id"],
+        keep="first",
+    ).copy()
+    repeat_events_removed = len(implicit) - len(implicit_dedup)
+    orphan_implicit_count = count_orphan_implicit_rows(implicit, catalog_item_ids)
+    orphan_explicit_count = int((~explicit["item_id"].isin(catalog_item_ids)).sum())
 
-    # Step 2: Dedup implicit — keep first occurrence per user-item pair
-    print("\nStep 2: Dedup implicit (keep first occurrence per user-item pair)")
-    implicit_sorted = implicit.sort_values("created_at")
-    implicit_dedup  = implicit_sorted.drop_duplicates(subset=["user_id", "item_id"], keep="first")
-    print(f"Before dedup: {len(implicit):,} rows -> After dedup: {len(implicit_dedup):,} rows")
-
-    # Step 3: Filter items with fewer than MIN_ITEM_FREQ interactions
-    print(f"\nStep 3: Filter items with < {MIN_ITEM_FREQ} interactions")
-    item_freq   = implicit_dedup.groupby("item_id").size()
-    valid_items = item_freq[item_freq >= MIN_ITEM_FREQ].index
-    implicit_dedup = implicit_dedup[implicit_dedup["item_id"].isin(valid_items)]
-    implicit_dedup = attach_confidence(implicit_dedup, confidence_lookup)
-    print(f"Items left: {implicit_dedup['item_id'].nunique():,} / {item_freq.shape[0]:,}")
-    print(f"Interactions left: {len(implicit_dedup):,}")
-
-    # Step 4: Build user sequences (sorted by time)
-    print("\nStep 4: Build user sequences")
-    user_sequences = build_user_sequences(implicit_dedup)
-
-    # Step 5: Enforce benchmark-safe user histories so leave-one-out keeps
-    # train history length >= 2 for all neural models.
-    print(
-        "Step 5: Filter users with "
-        f"seq_len < {MIN_SEQ_LEN} to ensure train history length >= "
-        f"{MIN_TRAIN_HISTORY_LEN_FOR_NEURAL_MODELS} for all neural models"
+    interactions = implicit_dedup[implicit_dedup["item_id"].isin(catalog_item_ids)].copy()
+    interactions = attach_engagement_score(interactions, engagement_lookup)
+    interactions = apply_iterative_k_core_filter(
+        interactions,
+        min_user_interactions=min_user_interactions,
+        min_item_interactions=min_item_interactions,
     )
-    before         = len(user_sequences)
-    user_sequences = filter_benchmark_safe_user_sequences(user_sequences, MIN_SEQ_LEN)
-    after          = len(user_sequences)
-    print(format_user_retention(after, before))
-    print(summarize_sequence_lengths(user_sequences))
 
-    # Step 6: ID remapping (1-indexed; 0 reserved for padding)
-    print("\nStep 6: Remap IDs -> integer index")
-    all_users = sorted(user_sequences["user_id"].unique())
-    all_items = sorted(implicit_dedup[implicit_dedup["user_id"].isin(all_users)]["item_id"].unique())
-    user2idx  = {u: i + 1 for i, u in enumerate(all_users)}
-    item2idx  = {it: i + 1 for i, it in enumerate(all_items)}
-    print(f"Total users: {len(user2idx):,} | Total items: {len(item2idx):,}")
+    all_users = sorted(interactions["user_id"].unique())
+    all_items = sorted(interactions["item_id"].unique())
+    user_id_map = pd.DataFrame(
+        {"user_id": all_users, "user_idx": range(1, len(all_users) + 1)}
+    )
+    item_id_map = pd.DataFrame(
+        {"item_id": all_items, "item_idx": range(1, len(all_items) + 1)}
+    )
+    user_idx_lookup = dict(zip(user_id_map["user_id"], user_id_map["user_idx"]))
+    item_idx_lookup = dict(zip(item_id_map["item_id"], item_id_map["item_idx"]))
 
-    with open(PROCESSED_DIR / "user2idx.json", "w") as f:
-        json.dump({str(k): v for k, v in user2idx.items()}, f)
-    with open(PROCESSED_DIR / "item2idx.json", "w") as f:
-        json.dump({str(k): v for k, v in item2idx.items()}, f)
+    interactions["user_idx"] = interactions["user_id"].map(user_idx_lookup)
+    interactions["item_idx"] = interactions["item_id"].map(item_idx_lookup)
+    interactions = interactions.dropna(subset=["user_idx", "item_idx"]).copy()
+    interactions["user_idx"] = interactions["user_idx"].astype(int)
+    interactions["item_idx"] = interactions["item_idx"].astype(int)
+    interactions = interactions.sort_values(
+        ["user_idx", "created_at", "item_idx"],
+        kind="stable",
+    ).reset_index(drop=True)
 
-    def remap_seq(seq):
-        return [item2idx[it] for it in seq if it in item2idx]
+    user_sequences = build_user_sequences(interactions)
+    eligible_sequences = filter_benchmark_safe_user_sequences(user_sequences, min_seq_len)
+    eligible_users = set(eligible_sequences["user_id"])
+    interactions = interactions[interactions["user_id"].isin(eligible_users)].copy()
 
-    def remap_confidence_seq(row):
-        return [
-            confidence
-            for item, confidence in zip(
-                row["item_sequence"], row["confidence_sequence"]
-            )
-            if item in item2idx
+    all_users = sorted(interactions["user_id"].unique())
+    all_items = sorted(interactions["item_id"].unique())
+    user_id_map = pd.DataFrame(
+        {"user_id": all_users, "user_idx": range(1, len(all_users) + 1)}
+    )
+    item_id_map = pd.DataFrame(
+        {"item_id": all_items, "item_idx": range(1, len(all_items) + 1)}
+    )
+    user_idx_lookup = dict(zip(user_id_map["user_id"], user_id_map["user_idx"]))
+    item_idx_lookup = dict(zip(item_id_map["item_id"], item_id_map["item_idx"]))
+    interactions["user_idx"] = interactions["user_id"].map(user_idx_lookup).astype(int)
+    interactions["item_idx"] = interactions["item_id"].map(item_idx_lookup).astype(int)
+    interactions = interactions.sort_values(
+        ["user_idx", "created_at", "item_idx"],
+        kind="stable",
+    ).reset_index(drop=True)
+    interactions["sequence_order"] = interactions.groupby("user_idx").cumcount()
+    interactions = interactions[
+        [
+            "user_idx",
+            "item_idx",
+            "user_id",
+            "item_id",
+            "created_at",
+            "engagement_score",
+            "sequence_order",
         ]
+    ]
 
-    user_sequences["item_seq_idx"] = user_sequences["item_sequence"].apply(remap_seq)
-    user_sequences["confidence_seq"] = user_sequences.apply(
-        remap_confidence_seq,
-        axis=1,
+    mapped_user_sequences = build_user_sequences(interactions)
+    train_df, val_df, test_df = split_leave_one_out(mapped_user_sequences)
+
+    item_metadata = _build_item_metadata(items, item_id_map)
+    dataset_stats = build_dataset_stats(
+        n_users=len(user_id_map),
+        n_items=len(item_id_map),
+        n_interactions=len(interactions),
+        min_seq_len=min_seq_len,
+        min_item_freq=min_item_interactions,
     )
-    user_sequences["user_idx"]     = user_sequences["user_id"].map(user2idx)
-    implicit_dedup["user_idx"]     = implicit_dedup["user_id"].map(user2idx)
-    implicit_dedup["item_idx"]     = implicit_dedup["item_id"].map(item2idx)
-
-    # Step 7: Leave-one-out train/val/test split
-    print("\nStep 7: Leave-one-out train/val/test split")
-    train_df, val_df, test_df = split_leave_one_out(user_sequences)
-
-    avg_train_seq_len = (
-        f"{train_df.seq_len.mean():.1f}" if not train_df.empty else "n/a"
+    preprocessing_report = build_preprocessing_report(
+        orphan_implicit_count=orphan_implicit_count,
+        orphan_explicit_count=orphan_explicit_count,
+        engagement_pairs=engagement_pairs,
+        min_user_interactions=min_user_interactions,
+        min_item_interactions=min_item_interactions,
+        repeat_events_removed=repeat_events_removed,
+        eligible_user_count=len(user_id_map),
+        filtered_item_count=len(item_id_map),
     )
-    print(f"Train: {len(train_df):,} users | avg seq_len = {avg_train_seq_len}")
-    print(f"Val:   {len(val_df):,} users")
-    print(f"Test:  {len(test_df):,} users")
 
-    # Step 8: Save
-    print("\nStep 8: Save files to data/processed/")
-    implicit_out = implicit_dedup.dropna(subset=["user_idx", "item_idx"])
-    implicit_out[["user_idx", "item_idx", "created_at", "confidence"]].to_csv(
-        PROCESSED_DIR / "interactions.csv",
-        index=False,
+    save_processed_outputs(
+        output_dir=processed_dir,
+        interactions=interactions,
+        train_df=train_df,
+        val_df=val_df,
+        test_df=test_df,
+        item_metadata=item_metadata,
+        user_id_map=user_id_map,
+        item_id_map=item_id_map,
+        dataset_stats=dataset_stats,
+        preprocessing_report=preprocessing_report,
     )
-    explicit.to_csv(PROCESSED_DIR / "explicit.csv", index=False)
-    train_df.to_csv(PROCESSED_DIR / "train.csv", index=False)
-    val_df.to_csv(PROCESSED_DIR / "val.csv",     index=False)
-    test_df.to_csv(PROCESSED_DIR / "test.csv",   index=False)
-
-    items["item_idx"] = items["item_id"].map(item2idx)
-    items[items["item_idx"].notna()].to_csv(PROCESSED_DIR / "item_meta.csv", index=False)
-
-    stats = build_dataset_stats(
-        n_users=len(user2idx),
-        n_items=len(item2idx),
-        n_interactions=len(implicit_out),
-        min_seq_len=MIN_SEQ_LEN,
-        min_item_freq=MIN_ITEM_FREQ,
-    )
-    with open(PROCESSED_DIR / "dataset_stats.json", "w") as f:
-        json.dump(stats, f, indent=2)
-
-    print("\nDone! Files saved:")
-    for p in sorted(PROCESSED_DIR.iterdir()):
-        print(f"  {p.name}")
-    print("\nDataset stats:")
-    for k, v in stats.items():
-        print(f"  {k}: {v}")
 
 
 if __name__ == "__main__":
