@@ -27,6 +27,7 @@ MODEL_CONFIGS = {
             "gradient_clip": 5.0,
             "early_stop_patience": COMMON_EARLY_STOP_PATIENCE,
             "early_stop_min_delta": COMMON_EARLY_STOP_MIN_DELTA,
+            "confidence_alpha": 0.0,
         },
     },
     "gsasrec": {
@@ -50,6 +51,7 @@ MODEL_CONFIGS = {
             "gradient_clip": 5.0,
             "early_stop_patience": COMMON_EARLY_STOP_PATIENCE,
             "early_stop_min_delta": COMMON_EARLY_STOP_MIN_DELTA,
+            "confidence_alpha": 0.0,
         },
     },
     "gru4rec": {

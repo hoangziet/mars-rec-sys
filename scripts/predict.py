@@ -120,7 +120,7 @@ def main():
     args = parser.parse_args()
 
     data_dir = Path(args.data_dir)
-    stats    = load_stats(data_dir / "dataset_stats.json")
+    stats    = load_stats(data_dir / "reports" / "dataset_stats.json")
     device   = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     cfg          = MODEL_CONFIGS[args.model]
@@ -139,7 +139,7 @@ def main():
 
     model = load_checkpoint(model, ckpt_path, device)
 
-    history = load_user_history(data_dir / "train.csv", args.user_id)
+    history = load_user_history(data_dir / "splits" / "train_sequences.csv", args.user_id)
     if not history:
         print(f"User {args.user_id} not found in training data.", file=sys.stderr)
         sys.exit(1)
@@ -158,7 +158,7 @@ def main():
         print(f"Model {args.model} not supported for inference.", file=sys.stderr)
         sys.exit(1)
 
-    titles = load_item_titles(data_dir / "item_meta.csv") if args.show_titles else {}
+    titles = load_item_titles(data_dir / "item_features" / "item_metadata.csv") if args.show_titles else {}
 
     for rank, item_id in enumerate(recs, 1):
         title = f"  [{titles[item_id]}]" if item_id in titles else ""
