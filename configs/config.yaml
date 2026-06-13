@@ -1,0 +1,9 @@
+# configs/config.yaml
+defaults:
+  - model: sasrec
+  - db: default
+  - _self_
+
+seed: 42
+output_dir: experiments
+device: auto

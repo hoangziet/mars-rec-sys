@@ -1,0 +1,3 @@
+# configs/db/default.yaml
+data_dir: data/processed
+max_len: 50

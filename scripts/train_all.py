@@ -92,7 +92,24 @@ def run_neural_model(
     optimizer = build_optimizer(model_name, model, train_kwargs)
     scheduler = build_scheduler(optimizer, train_kwargs, len(train_loader))
 
-    trainer   = Trainer(model_name, device, output_dir)
+    trainer   = Trainer(
+        model_name, device, output_dir,
+        use_mlflow=True,
+        mlflow_config={
+            "experiment_name": "mars_benchmark",
+            "run_name": f"{model_name}-seed-{seed}",
+            "log_artifacts": True,
+        },
+    )
+
+    mlflow_cfg = {
+        "model": model_name,
+        "seed": seed,
+        "phase": "benchmark",
+        **model_kwargs,
+        **train_kwargs,
+    }
+
     tracker   = trainer.train(
         model=model,
         train_loader=train_loader,
@@ -107,6 +124,7 @@ def run_neural_model(
         early_stop_patience=train_kwargs.get("early_stop_patience", 0),
         early_stop_min_delta=train_kwargs.get("early_stop_min_delta", 1e-4),
         scheduler=scheduler,
+        mlflow_params=mlflow_cfg,
     )
     return tracker.summary()
 
@@ -151,6 +169,13 @@ def run_heuristic_model(
             "test_results": test_results,
         }
         save_heuristic_metrics(model_name, model_output_dir, summary)
+
+        import mlflow
+        mlflow.set_experiment("mars_benchmark")
+        with mlflow.start_run(run_name=f"{model_name}-seed-{seed}"):
+            mlflow.log_params({"model": model_name, "seed": seed, "phase": "benchmark", **model_kwargs, **train_kwargs})
+            mlflow.log_metrics({f"test_{k}".replace('@', '_at_'): v for k, v in test_results.items()})
+
         return summary
 
     if model_name == "itemcf":
@@ -169,6 +194,13 @@ def run_heuristic_model(
             "test_results": test_results,
         }
         save_heuristic_metrics(model_name, model_output_dir, summary)
+
+        import mlflow
+        mlflow.set_experiment("mars_benchmark")
+        with mlflow.start_run(run_name=f"{model_name}-seed-{seed}"):
+            mlflow.log_params({"model": model_name, "seed": seed, "phase": "benchmark", **model_kwargs, **train_kwargs})
+            mlflow.log_metrics({f"test_{k}".replace('@', '_at_'): v for k, v in test_results.items()})
+
         return summary
 
     raise ValueError(f"Unknown heuristic model: {model_name}")

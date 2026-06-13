@@ -22,7 +22,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from training.configs import DEFAULT_DATA_DIR, MODEL_CONFIGS
+from training.configs import DEFAULT_DATA_DIR, build_model_config
 from pipeline.builder import build_model
 from pipeline.loaders import load_stats, parse_seq, pad_sequence
 
@@ -111,7 +111,7 @@ def predict_bprmf(model, user_id: int, history: list[int], n_items: int,
 
 def main():
     parser = argparse.ArgumentParser(description="Generate top-K recommendations for a user.")
-    parser.add_argument("model",       choices=[m for m in MODEL_CONFIGS if m not in ("popularity", "itemcf")])
+    parser.add_argument("model",       choices=["sasrec", "gsasrec", "gru4rec", "bert4rec", "bprmf"])
     parser.add_argument("--user_id",   type=int, required=True, help="Remapped user index (1-based)")
     parser.add_argument("--top_k",     type=int, default=10)
     parser.add_argument("--data_dir",  default=DEFAULT_DATA_DIR)
@@ -123,7 +123,7 @@ def main():
     stats    = load_stats(data_dir / "reports" / "dataset_stats.json")
     device   = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    cfg          = MODEL_CONFIGS[args.model]
+    cfg          = build_model_config(args.model)
     model_kwargs = cfg["model_kwargs"].copy()
     train_kwargs = cfg["train_kwargs"].copy()
     max_len      = train_kwargs.get("max_len", 50)
