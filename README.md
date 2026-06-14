@@ -93,8 +93,6 @@ uv run python scripts/publish_dataset_manifest.py     # publish dataset manifest
 uv run python scripts/publish_report_bundle.py        # publish report bundle
 ```
 
-See `docs/superpowers/specs/` for the full MLflow infrastructure specification.
-
 ## Project Structure
 
 ```
