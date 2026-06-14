@@ -1,0 +1,6 @@
+# configs/model/popularity.yaml
+name: popularity
+model_kwargs: {}
+train_kwargs:
+  max_len: 50
+  num_neg: 99

@@ -21,6 +21,9 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
+from training.mlflow_contract import ARTIFACT_PATHS
+from training.mlflow_utils import configure_mlflow, sanitize_metric_name
+
 
 def _should_use_tqdm() -> bool:
     """Enable live progress bars only when stderr looks like an interactive TTY."""
@@ -40,6 +43,17 @@ def _progress(iterable, desc: str):
         mininterval=0.5,
         bar_format="{desc:<18} {percentage:3.0f}%|{bar:24}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]",
     )
+
+
+def _flatten_dict(d: dict, prefix: str = "") -> dict:
+    flat = {}
+    for key, value in d.items():
+        full_key = f"{prefix}.{key}" if prefix else key
+        if isinstance(value, dict):
+            flat.update(_flatten_dict(value, full_key))
+        else:
+            flat[full_key] = value
+    return flat
 
 
 # Experiment Tracker 
@@ -139,12 +153,36 @@ class Trainer:
     """Unified training loop for all model types."""
 
     def __init__(self, model_name: str, device: str | torch.device,
-                 output_dir: str | Path = "experiments"):
+                 output_dir: str | Path = "experiments",
+                 use_mlflow: bool = False,
+                 mlflow_config: dict | None = None):
         self.model_name = model_name
         self.device = torch.device(device)
         self.output_dir = Path(output_dir) / model_name
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.tracker = ExperimentTracker(model_name)
+
+        self._use_mlflow = use_mlflow
+        self._mlflow_run = None
+        self._mlflow = None
+        self._mlflow_log_artifacts = False
+        if use_mlflow:
+            import mlflow
+
+            self._mlflow = mlflow
+            mlflow_config = mlflow_config or {}
+            experiment_name = mlflow_config.get("experiment_name", "mars_rec_sys")
+            run_name = mlflow_config.get("run_name", model_name)
+            self._mlflow_log_artifacts = mlflow_config.get("log_artifacts", True)
+            self._mlflow_phase = mlflow_config.get("phase")
+            self._mlflow_variant = mlflow_config.get("variant")
+            self._mlflow_dataset_name = mlflow_config.get("dataset_name")
+            self._mlflow_dataset_version = mlflow_config.get("dataset_version")
+            self._mlflow_git_commit = mlflow_config.get("git_commit")
+            self._mlflow_reportable = mlflow_config.get("reportable", True)
+            configure_mlflow(mlflow_module=self._mlflow)
+            self._mlflow.set_experiment(experiment_name)
+            self._mlflow_run = self._mlflow.start_run(run_name=run_name)
 
     # Public API
     def train(self, model, train_loader, val_loader, test_loader,
@@ -154,7 +192,8 @@ class Trainer:
               val_loss_loader=None,
               early_stop_patience: int = 0,
               early_stop_min_delta: float = 1e-4,
-              scheduler=None):
+              scheduler=None,
+              mlflow_params: dict | None = None):
         """
         Full training pipeline.
 
@@ -178,6 +217,13 @@ class Trainer:
         print(f"  Val sz    : {len(val_loader.dataset):,}")
         print(f"  Test sz   : {len(test_loader.dataset):,}")
         print(f"{'='*50}\n")
+
+        if self._use_mlflow and mlflow_params:
+            self._mlflow.log_params(_flatten_dict(mlflow_params))
+
+        tags = mlflow_params.get("tags", {})
+        if tags and self._use_mlflow:
+            self._mlflow.set_tags(tags)
 
         best_val_ndcg = -1.0
         best_state = None
@@ -209,6 +255,15 @@ class Trainer:
 
             # Log
             self.tracker.log_epoch(epoch, train_loss, val_loss, val_metrics)
+
+            if self._use_mlflow:
+                ml_metrics = {
+                    "train_loss": train_loss,
+                    "val_loss": val_loss if val_loss is not None else 0.0,
+                }
+                ml_metrics.update(val_metrics)
+                ml_metrics = {sanitize_metric_name(k): v for k, v in ml_metrics.items()}
+                self._mlflow.log_metrics(ml_metrics, step=epoch)
 
             # Print
             hr10 = val_metrics.get("Recall@10", 0)
@@ -269,6 +324,20 @@ class Trainer:
 
         # Print summary
         self._print_summary()
+
+        if self._use_mlflow:
+            test_ml_metrics = {f"test_{sanitize_metric_name(k)}": v for k, v in test_metrics.items()}
+            self._mlflow.log_metrics(test_ml_metrics)
+            if self._mlflow_log_artifacts:
+                if (self.output_dir / "metrics.json").exists():
+                    self._mlflow.log_artifact(str(self.output_dir / "metrics.json"), artifact_path="metrics")
+                if (self.output_dir / "loss_plot.png").exists():
+                    self._mlflow.log_artifact(str(self.output_dir / "loss_plot.png"), artifact_path="plots")
+                if (self.output_dir / "metrics_plot.png").exists():
+                    self._mlflow.log_artifact(str(self.output_dir / "metrics_plot.png"), artifact_path="plots")
+                if (self.output_dir / "best_model.pt").exists():
+                    self._mlflow.log_artifact(str(self.output_dir / "best_model.pt"), artifact_path="checkpoints")
+            self._mlflow.end_run()
 
         return self.tracker
 

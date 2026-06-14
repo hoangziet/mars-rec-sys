@@ -1,132 +1,64 @@
 """
 training/configs.py
 ===================
-Centralised hyperparameter configurations for all models.
+Configuration helpers.  The primary source of truth is the Hydra YAML config
+hierarchy under configs/.  This module provides thin wrappers that load those
+YAML files into plain dicts for consumers that do not use @hydra.main
+(scripts/train_all.py, scripts/predict.py, tests).
 """
+
+from pathlib import Path
+
+from omegaconf import OmegaConf
+
+CONFIG_DIR = Path(__file__).resolve().parent.parent / "configs"
 
 COMMON_NEURAL_EPOCHS = 50
 COMMON_EARLY_STOP_PATIENCE = 10
 COMMON_EARLY_STOP_MIN_DELTA = 1e-4
 
-MODEL_CONFIGS = {
-    "sasrec": {
-        "model_kwargs": {
-            "hidden_dim": 64,
-            "num_heads": 2,
-            "num_layers": 2,
-            "dropout": 0.2,
-            "norm_first": True,
-        },
-        "train_kwargs": {
-            "batch_size": 256,
-            "epochs": COMMON_NEURAL_EPOCHS,
-            "lr": 1e-3,
-            "weight_decay": 1e-4,
-            "beta2": 0.98,
-            "max_len": 50,
-            "gradient_clip": 5.0,
-            "early_stop_patience": COMMON_EARLY_STOP_PATIENCE,
-            "early_stop_min_delta": COMMON_EARLY_STOP_MIN_DELTA,
-            "confidence_alpha": 0.0,
-        },
-    },
-    "gsasrec": {
-        "model_kwargs": {
-            "hidden_dim": 64,
-            "num_heads": 2,
-            "num_layers": 2,
-            "dropout": 0.2,
-            "t": 0.5,      # gBCE temperature (paper default: 0.5)
-            "num_neg": 32, # negatives per positive (paper default: 32)
-            "pos_smoothing": 0.0,
-        },
-        "train_kwargs": {
-            "batch_size": 256,
-            "epochs": COMMON_NEURAL_EPOCHS,
-            "lr": 1e-3,
-            "weight_decay": 0.0,
-            "beta2": 0.98,
-            "max_len": 50,
-            "num_neg": 32,  # passed to TrainSequenceDataset
-            "gradient_clip": 5.0,
-            "early_stop_patience": COMMON_EARLY_STOP_PATIENCE,
-            "early_stop_min_delta": COMMON_EARLY_STOP_MIN_DELTA,
-            "confidence_alpha": 0.0,
-        },
-    },
-    "gru4rec": {
-        "model_kwargs": {
-            "emb_dim": 64,
-            "hidden_dim": 128,
-            "num_layers": 1,
-            "dropout": 0.2,
-        },
-        "train_kwargs": {
-            "batch_size": 512,
-            "epochs": COMMON_NEURAL_EPOCHS,
-            "lr": 1e-3,
-            "max_len": 50,
-            "gradient_clip": 5.0,
-            "early_stop_patience": COMMON_EARLY_STOP_PATIENCE,
-            "early_stop_min_delta": COMMON_EARLY_STOP_MIN_DELTA,
-            "loss_type": "ce",
-        },
-    },
-    "bprmf": {
-        "model_kwargs": {
-            "emb_dim": 64,
-        },
-        "train_kwargs": {
-            "batch_size": 1024,
-            "epochs": COMMON_NEURAL_EPOCHS,
-            "lr": 1e-3,
-            "reg_lambda": 1e-4,
-            "max_len": 50,
-            "gradient_clip": 0,
-            "early_stop_patience": COMMON_EARLY_STOP_PATIENCE,
-            "early_stop_min_delta": COMMON_EARLY_STOP_MIN_DELTA,
-        },
-    },
-    "bert4rec": {
-        "model_kwargs": {
-            "hidden_dim": 64,
-            "num_heads": 2,
-            "num_layers": 2,
-            "dropout": 0.2,
-        },
-        "train_kwargs": {
-            "batch_size": 256,
-            "epochs": COMMON_NEURAL_EPOCHS,
-            "lr": 1e-4,
-            "weight_decay": 1e-2,
-            "max_len": 50,
-            "gradient_clip": 5.0,
-            "early_stop_patience": COMMON_EARLY_STOP_PATIENCE,
-            "early_stop_min_delta": COMMON_EARLY_STOP_MIN_DELTA,
-            "mask_ratio": 0.2,
-            "warmup_steps": 100,
-            "dupe_factor": 10,
-            "prop_sliding_window": 0.1,
-            "force_last_item_mask": True,
-        },
-    },
-    "itemcf": {
-        "model_kwargs": {
-            "top_k_sim": 20,
-        },
-        "train_kwargs": {
-            "max_len": 50,
-            "num_neg": 99,
-        },
-    },
-    "popularity": {
-        "model_kwargs": {},
-        "train_kwargs": {
-            "max_len": 50,
-            "num_neg": 99,
-        },
-    },
-}
+
+def _load_model_yaml(model_name: str) -> dict:
+    """Load a model YAML config file and return its contents as a plain dict."""
+    path = CONFIG_DIR / "model" / f"{model_name}.yaml"
+    if not path.exists():
+        raise FileNotFoundError(f"No config for model '{model_name}' at {path}")
+    cfg = OmegaConf.load(path)
+    return OmegaConf.to_container(cfg, resolve=True)
+
+
+def build_model_config(model_name: str) -> dict:
+    """Return the {model_kwargs, train_kwargs} dict for a model."""
+    raw = _load_model_yaml(model_name)
+    return {
+        "model_kwargs": dict(raw.get("model_kwargs", {})),
+        "train_kwargs": dict(raw.get("train_kwargs", {})),
+    }
+
+
+# Lazily-built cache of all model configs.
+_MODEL_CONFIGS_CACHE: dict | None = None
+
+
+def _build_all_configs() -> dict:
+    models = ["sasrec", "gsasrec", "gru4rec", "bert4rec", "bprmf", "itemcf", "popularity"]
+    return {name: build_model_config(name) for name in models}
+
+
+def get_model_configs() -> dict:
+    global _MODEL_CONFIGS_CACHE
+    if _MODEL_CONFIGS_CACHE is None:
+        _MODEL_CONFIGS_CACHE = _build_all_configs()
+    return _MODEL_CONFIGS_CACHE
+
+
+# Module-level alias for backward compatibility.
+# Consumers that access training.configs.MODEL_CONFIGS get the lazy cache.
+def __getattr__(name: str):
+    if name == "MODEL_CONFIGS":
+        return get_model_configs()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 DEFAULT_SEED = 42
 DEFAULT_DATA_DIR = "data/processed"
