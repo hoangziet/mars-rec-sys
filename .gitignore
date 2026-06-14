@@ -17,6 +17,7 @@ __pycache__/
 
 # notebook
 .ipynb_checkpoints/
+*.ipynb
 
 # experiments
 experiments/
@@ -46,3 +47,7 @@ AGENTS.md
 CLAUDE.md
 .opencode/
 .sisyphus/
+
+# VPS 
+.forward-port-linux.sh
+.forward-port-win.sh

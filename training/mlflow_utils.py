@@ -134,3 +134,42 @@ def get_dataset_version(stats_path: Path) -> str:
     if not stats_path.exists():
         return "unknown"
     return "mars-processed-v1"
+
+
+def build_dataset_run_ref(
+    *,
+    dataset_name: str,
+    dataset_version: str,
+    raw_data_hash: str,
+    processed_data_hash: str,
+    preprocessing_config_hash: str,
+    dataset_experiment: str,
+    dataset_run_id: str,
+) -> dict[str, str]:
+    return {
+        "dataset_name": dataset_name,
+        "dataset_version": dataset_version,
+        "raw_data_hash": raw_data_hash,
+        "processed_data_hash": processed_data_hash,
+        "preprocessing_config_hash": preprocessing_config_hash,
+        "dataset_experiment": dataset_experiment,
+        "dataset_run_id": dataset_run_id,
+    }
+
+
+def validate_reportable_dataset_metadata(*, tags: dict[str, str], dataset_ref: dict[str, str]) -> None:
+    required_keys = {
+        "dataset_name",
+        "dataset_version",
+        "raw_data_hash",
+        "processed_data_hash",
+        "preprocessing_config_hash",
+        "dataset_run_id",
+    }
+    missing = sorted(key for key in required_keys if not tags.get(key))
+    if missing:
+        raise RuntimeError(f"Missing required dataset tags: {missing}")
+
+    mismatched = [key for key in required_keys if tags.get(key) != dataset_ref.get(key)]
+    if mismatched:
+        raise RuntimeError(f"Dataset metadata mismatch between tags and dataset ref: {mismatched}")
