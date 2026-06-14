@@ -21,6 +21,7 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
+from training.mlflow_contract import ARTIFACT_PATHS
 from training.mlflow_utils import configure_mlflow, sanitize_metric_name
 
 
@@ -173,6 +174,12 @@ class Trainer:
             experiment_name = mlflow_config.get("experiment_name", "mars_rec_sys")
             run_name = mlflow_config.get("run_name", model_name)
             self._mlflow_log_artifacts = mlflow_config.get("log_artifacts", True)
+            self._mlflow_phase = mlflow_config.get("phase")
+            self._mlflow_variant = mlflow_config.get("variant")
+            self._mlflow_dataset_name = mlflow_config.get("dataset_name")
+            self._mlflow_dataset_version = mlflow_config.get("dataset_version")
+            self._mlflow_git_commit = mlflow_config.get("git_commit")
+            self._mlflow_reportable = mlflow_config.get("reportable", True)
             configure_mlflow(mlflow_module=self._mlflow)
             self._mlflow.set_experiment(experiment_name)
             self._mlflow_run = self._mlflow.start_run(run_name=run_name)
@@ -213,6 +220,10 @@ class Trainer:
 
         if self._use_mlflow and mlflow_params:
             self._mlflow.log_params(_flatten_dict(mlflow_params))
+
+        tags = mlflow_params.get("tags", {})
+        if tags and self._use_mlflow:
+            self._mlflow.set_tags(tags)
 
         best_val_ndcg = -1.0
         best_state = None
@@ -319,13 +330,13 @@ class Trainer:
             self._mlflow.log_metrics(test_ml_metrics)
             if self._mlflow_log_artifacts:
                 if (self.output_dir / "metrics.json").exists():
-                    self._mlflow.log_artifact(str(self.output_dir / "metrics.json"))
+                    self._mlflow.log_artifact(str(self.output_dir / "metrics.json"), artifact_path="metrics")
                 if (self.output_dir / "loss_plot.png").exists():
-                    self._mlflow.log_artifact(str(self.output_dir / "loss_plot.png"))
+                    self._mlflow.log_artifact(str(self.output_dir / "loss_plot.png"), artifact_path="plots")
                 if (self.output_dir / "metrics_plot.png").exists():
-                    self._mlflow.log_artifact(str(self.output_dir / "metrics_plot.png"))
+                    self._mlflow.log_artifact(str(self.output_dir / "metrics_plot.png"), artifact_path="plots")
                 if (self.output_dir / "best_model.pt").exists():
-                    self._mlflow.log_artifact(str(self.output_dir / "best_model.pt"))
+                    self._mlflow.log_artifact(str(self.output_dir / "best_model.pt"), artifact_path="checkpoints")
             self._mlflow.end_run()
 
         return self.tracker

@@ -23,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from pipeline.builder import build_criterion_fn, build_eval_fn, build_model, build_train_loader
 from pipeline.loaders import get_eval_loader, get_val_loss_loader, load_stats
 from pipeline.optim import build_optimizer, build_scheduler
+from training.mlflow_contract import build_run_name, build_training_tags, get_experiment_name_for_phase
 from training.mlflow_utils import collect_common_run_metadata, get_dataset_version, get_git_commit
 from training.trainer import Trainer
 
@@ -100,26 +101,46 @@ def main(cfg: DictConfig) -> None:
         seed=cfg.seed,
     )
 
+    phase = "benchmark"
+    experiment_name = get_experiment_name_for_phase(phase)
+    stats_path = data_dir / "reports" / "dataset_stats.json"
+    dataset_version = get_dataset_version(stats_path)
+    run_name = build_run_name(model_name, cfg.seed, variant="base")
+
     trainer = Trainer(
         model_name,
         device,
         cfg.output_dir,
         use_mlflow=True,
         mlflow_config={
-            "experiment_name": "mars_benchmark",
-            "run_name": f"{model_name}-seed-{cfg.seed}",
+            "experiment_name": experiment_name,
+            "run_name": run_name,
             "log_artifacts": True,
+            "phase": phase,
+            "variant": "base",
+            "dataset_name": "mars",
+            "dataset_version": dataset_version,
+            "git_commit": get_git_commit(),
+            "reportable": True,
         },
     )
 
-    stats_path = data_dir / "reports" / "dataset_stats.json"
     mlflow_cfg = collect_common_run_metadata(
         model_name=model_name,
         seed=cfg.seed,
-        phase="benchmark",
+        phase=phase,
         git_commit=get_git_commit(),
-        dataset_version=get_dataset_version(stats_path),
+        dataset_version=dataset_version,
         extra_params={**model_kwargs, **train_kwargs},
+    )
+    mlflow_cfg["tags"] = build_training_tags(
+        model_name=model_name,
+        phase=phase,
+        variant="base",
+        git_commit=get_git_commit(),
+        dataset_name="mars",
+        dataset_version=dataset_version,
+        reportable=True,
     )
 
     trainer.train(

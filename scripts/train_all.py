@@ -37,7 +37,8 @@ from pipeline.metrics import (
 )
 from pipeline.optim import build_optimizer, build_scheduler
 from scripts.train import validate_processed_layout
-from training.mlflow_utils import collect_common_run_metadata, configure_mlflow, build_run_name, get_dataset_version, get_git_commit, sanitize_metric_name
+from training.mlflow_contract import build_run_name, build_training_tags, get_experiment_name_for_phase
+from training.mlflow_utils import collect_common_run_metadata, configure_mlflow, get_dataset_version, get_git_commit, sanitize_metric_name
 from training.trainer import Trainer
 
 
@@ -69,6 +70,10 @@ def run_neural_model(
 ) -> dict:
     seed_everything(seed)
 
+    phase = "benchmark"
+    experiment_name = get_experiment_name_for_phase(phase)
+    run_name = build_run_name(model_name, seed, variant="base")
+
     max_len    = train_kwargs.get("max_len", 50)
     batch_size = train_kwargs.get("batch_size", 256)
 
@@ -96,8 +101,8 @@ def run_neural_model(
         model_name, device, output_dir,
         use_mlflow=True,
         mlflow_config={
-            "experiment_name": "mars_benchmark",
-            "run_name": f"{model_name}-seed-{seed}",
+            "experiment_name": experiment_name,
+            "run_name": run_name,
             "log_artifacts": True,
         },
     )
@@ -109,6 +114,15 @@ def run_neural_model(
         git_commit=get_git_commit(),
         dataset_version=get_dataset_version(data_dir / "reports" / "dataset_stats.json"),
         extra_params={**model_kwargs, **train_kwargs},
+    )
+    mlflow_cfg["tags"] = build_training_tags(
+        model_name=model_name,
+        phase="benchmark",
+        variant="base",
+        git_commit=get_git_commit(),
+        dataset_name="mars",
+        dataset_version=get_dataset_version(data_dir / "reports" / "dataset_stats.json"),
+        reportable=True,
     )
 
     tracker   = trainer.train(
@@ -146,6 +160,9 @@ def run_heuristic_model(
 ) -> dict:
     seed_everything(seed)
 
+    phase = "benchmark"
+    experiment_name = get_experiment_name_for_phase(phase)
+
     max_len    = train_kwargs.get("max_len", 50)
     batch_size = train_kwargs.get("batch_size", 256)
     model_output_dir = Path(output_dir) / model_name
@@ -174,8 +191,8 @@ def run_heuristic_model(
         import mlflow
 
         configure_mlflow(mlflow_module=mlflow)
-        mlflow.set_experiment("mars_benchmark")
-        with mlflow.start_run(run_name=build_run_name(model_name, seed, phase="benchmark")):
+        mlflow.set_experiment(experiment_name)
+        with mlflow.start_run(run_name=build_run_name(model_name, seed, variant="base")):
             mlflow.log_params(
                 collect_common_run_metadata(
                     model_name=model_name,
@@ -184,6 +201,17 @@ def run_heuristic_model(
                     git_commit=get_git_commit(),
                     dataset_version=get_dataset_version(data_dir / "reports" / "dataset_stats.json"),
                     extra_params={**model_kwargs, **train_kwargs},
+                )
+            )
+            mlflow.set_tags(
+                build_training_tags(
+                    model_name=model_name,
+                    phase="benchmark",
+                    variant="base",
+                    git_commit=get_git_commit(),
+                    dataset_name="mars",
+                    dataset_version=get_dataset_version(data_dir / "reports" / "dataset_stats.json"),
+                    reportable=True,
                 )
             )
             mlflow.log_metrics({f"test_{sanitize_metric_name(k)}": v for k, v in test_results.items()})
@@ -210,8 +238,8 @@ def run_heuristic_model(
         import mlflow
 
         configure_mlflow(mlflow_module=mlflow)
-        mlflow.set_experiment("mars_benchmark")
-        with mlflow.start_run(run_name=build_run_name(model_name, seed, phase="benchmark")):
+        mlflow.set_experiment(experiment_name)
+        with mlflow.start_run(run_name=build_run_name(model_name, seed, variant="base")):
             mlflow.log_params(
                 collect_common_run_metadata(
                     model_name=model_name,
@@ -220,6 +248,17 @@ def run_heuristic_model(
                     git_commit=get_git_commit(),
                     dataset_version=get_dataset_version(data_dir / "reports" / "dataset_stats.json"),
                     extra_params={**model_kwargs, **train_kwargs},
+                )
+            )
+            mlflow.set_tags(
+                build_training_tags(
+                    model_name=model_name,
+                    phase="benchmark",
+                    variant="base",
+                    git_commit=get_git_commit(),
+                    dataset_name="mars",
+                    dataset_version=get_dataset_version(data_dir / "reports" / "dataset_stats.json"),
+                    reportable=True,
                 )
             )
             mlflow.log_metrics({f"test_{sanitize_metric_name(k)}": v for k, v in test_results.items()})
