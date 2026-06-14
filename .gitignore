@@ -55,5 +55,5 @@ CLAUDE.md
 .sisyphus/
 
 # VPS 
-.forward-port-linux.sh
-.forward-port-win.sh
+forward-port-linux.sh
+forward-port-win.ps1
