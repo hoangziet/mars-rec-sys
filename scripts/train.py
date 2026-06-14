@@ -23,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from pipeline.builder import build_criterion_fn, build_eval_fn, build_model, build_train_loader
 from pipeline.loaders import get_eval_loader, get_val_loss_loader, load_stats
 from pipeline.optim import build_optimizer, build_scheduler
+from training.mlflow_utils import collect_common_run_metadata, get_dataset_version, get_git_commit
 from training.trainer import Trainer
 
 TRAINABLE_MODELS = ("sasrec", "gsasrec", "gru4rec", "bert4rec", "bprmf")
@@ -49,6 +50,7 @@ def validate_processed_layout(data_dir: Path) -> None:
     missing = [str(path) for path in required if not path.exists()]
     if missing:
         raise FileNotFoundError(f"Missing processed artifacts: {missing}")
+
 
 
 @hydra.main(version_base=None, config_path="../configs", config_name="config")
@@ -110,13 +112,15 @@ def main(cfg: DictConfig) -> None:
         },
     )
 
-    mlflow_cfg = {
-        "model": model_name,
-        "seed": cfg.seed,
-        "phase": "benchmark",
-        **model_kwargs,
-        **train_kwargs,
-    }
+    stats_path = data_dir / "reports" / "dataset_stats.json"
+    mlflow_cfg = collect_common_run_metadata(
+        model_name=model_name,
+        seed=cfg.seed,
+        phase="benchmark",
+        git_commit=get_git_commit(),
+        dataset_version=get_dataset_version(stats_path),
+        extra_params={**model_kwargs, **train_kwargs},
+    )
 
     trainer.train(
         model=model,
