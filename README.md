@@ -128,8 +128,6 @@ uv run python scripts/publish_report_bundle.py        # publish report bundle
 │
 ├── configs/                    # Hydra YAML configs
 ├── infra/                      # VPS stack: compose, env, nginx, backup scripts
-├── tests/                      # Pytest suite
-└── docs/                       # Specs, plans, reports
 ```
 
 ## Infra
@@ -141,12 +139,6 @@ docker compose -f infra/compose.yaml up -d
 ```
 
 See `infra/` for compose, env templates, backup scripts, and restore checklist.
-
-## Running Tests
-
-```bash
-uv run pytest tests/ -v
-```
 
 ## Implementation Notes
 
