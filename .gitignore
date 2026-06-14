@@ -3,8 +3,14 @@
 .env.*
 
 # data
-data/**
-!data/**/.gitkeep
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+data/interim/*
+!data/interim/.gitkeep
+data/external/*
+!data/external/.gitkeep
 
 # python
 .venv/
