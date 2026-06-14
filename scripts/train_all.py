@@ -14,7 +14,6 @@ Supported models:
 import argparse
 import json
 import random
-import subprocess
 import sys
 from pathlib import Path
 
@@ -38,6 +37,7 @@ from pipeline.metrics import (
 )
 from pipeline.optim import build_optimizer, build_scheduler
 from scripts.train import validate_processed_layout
+from training.mlflow_utils import collect_common_run_metadata, configure_mlflow, build_run_name, get_dataset_version, get_git_commit, sanitize_metric_name
 from training.trainer import Trainer
 
 
@@ -102,13 +102,14 @@ def run_neural_model(
         },
     )
 
-    mlflow_cfg = {
-        "model": model_name,
-        "seed": seed,
-        "phase": "benchmark",
-        **model_kwargs,
-        **train_kwargs,
-    }
+    mlflow_cfg = collect_common_run_metadata(
+        model_name=model_name,
+        seed=seed,
+        phase="benchmark",
+        git_commit=get_git_commit(),
+        dataset_version=get_dataset_version(data_dir / "reports" / "dataset_stats.json"),
+        extra_params={**model_kwargs, **train_kwargs},
+    )
 
     tracker   = trainer.train(
         model=model,
@@ -171,10 +172,21 @@ def run_heuristic_model(
         save_heuristic_metrics(model_name, model_output_dir, summary)
 
         import mlflow
+
+        configure_mlflow(mlflow_module=mlflow)
         mlflow.set_experiment("mars_benchmark")
-        with mlflow.start_run(run_name=f"{model_name}-seed-{seed}"):
-            mlflow.log_params({"model": model_name, "seed": seed, "phase": "benchmark", **model_kwargs, **train_kwargs})
-            mlflow.log_metrics({f"test_{k}".replace('@', '_at_'): v for k, v in test_results.items()})
+        with mlflow.start_run(run_name=build_run_name(model_name, seed, phase="benchmark")):
+            mlflow.log_params(
+                collect_common_run_metadata(
+                    model_name=model_name,
+                    seed=seed,
+                    phase="benchmark",
+                    git_commit=get_git_commit(),
+                    dataset_version=get_dataset_version(data_dir / "reports" / "dataset_stats.json"),
+                    extra_params={**model_kwargs, **train_kwargs},
+                )
+            )
+            mlflow.log_metrics({f"test_{sanitize_metric_name(k)}": v for k, v in test_results.items()})
 
         return summary
 
@@ -196,10 +208,21 @@ def run_heuristic_model(
         save_heuristic_metrics(model_name, model_output_dir, summary)
 
         import mlflow
+
+        configure_mlflow(mlflow_module=mlflow)
         mlflow.set_experiment("mars_benchmark")
-        with mlflow.start_run(run_name=f"{model_name}-seed-{seed}"):
-            mlflow.log_params({"model": model_name, "seed": seed, "phase": "benchmark", **model_kwargs, **train_kwargs})
-            mlflow.log_metrics({f"test_{k}".replace('@', '_at_'): v for k, v in test_results.items()})
+        with mlflow.start_run(run_name=build_run_name(model_name, seed, phase="benchmark")):
+            mlflow.log_params(
+                collect_common_run_metadata(
+                    model_name=model_name,
+                    seed=seed,
+                    phase="benchmark",
+                    git_commit=get_git_commit(),
+                    dataset_version=get_dataset_version(data_dir / "reports" / "dataset_stats.json"),
+                    extra_params={**model_kwargs, **train_kwargs},
+                )
+            )
+            mlflow.log_metrics({f"test_{sanitize_metric_name(k)}": v for k, v in test_results.items()})
 
         return summary
 
@@ -251,17 +274,6 @@ def aggregate_records(records: list[dict]) -> dict:
         for model, ml in grouped.items()
     }
 
-
-def get_git_commit() -> str:
-    try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "HEAD"],
-            cwd=Path(__file__).resolve().parent.parent,
-            stderr=subprocess.DEVNULL,
-            text=True,
-        ).strip()
-    except Exception:
-        return "unknown"
 
 
 def plot_comparison(results: dict, output_dir: str) -> None:

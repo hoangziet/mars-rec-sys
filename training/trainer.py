@@ -21,6 +21,8 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
+from training.mlflow_utils import configure_mlflow, sanitize_metric_name
+
 
 def _should_use_tqdm() -> bool:
     """Enable live progress bars only when stderr looks like an interactive TTY."""
@@ -51,11 +53,6 @@ def _flatten_dict(d: dict, prefix: str = "") -> dict:
         else:
             flat[full_key] = value
     return flat
-
-
-def _sanitize_mlflow_name(name: str) -> str:
-    """Replace chars unsupported by MLflow metric names (e.g. '@') with '_at_'."""
-    return name.replace("@", "_at_")
 
 
 # Experiment Tracker 
@@ -170,11 +167,13 @@ class Trainer:
         self._mlflow_log_artifacts = False
         if use_mlflow:
             import mlflow
+
             self._mlflow = mlflow
             mlflow_config = mlflow_config or {}
             experiment_name = mlflow_config.get("experiment_name", "mars_rec_sys")
             run_name = mlflow_config.get("run_name", model_name)
             self._mlflow_log_artifacts = mlflow_config.get("log_artifacts", True)
+            configure_mlflow(mlflow_module=self._mlflow)
             self._mlflow.set_experiment(experiment_name)
             self._mlflow_run = self._mlflow.start_run(run_name=run_name)
 
@@ -252,7 +251,7 @@ class Trainer:
                     "val_loss": val_loss if val_loss is not None else 0.0,
                 }
                 ml_metrics.update(val_metrics)
-                ml_metrics = {_sanitize_mlflow_name(k): v for k, v in ml_metrics.items()}
+                ml_metrics = {sanitize_metric_name(k): v for k, v in ml_metrics.items()}
                 self._mlflow.log_metrics(ml_metrics, step=epoch)
 
             # Print
@@ -316,7 +315,7 @@ class Trainer:
         self._print_summary()
 
         if self._use_mlflow:
-            test_ml_metrics = {f"test_{_sanitize_mlflow_name(k)}": v for k, v in test_metrics.items()}
+            test_ml_metrics = {f"test_{sanitize_metric_name(k)}": v for k, v in test_metrics.items()}
             self._mlflow.log_metrics(test_ml_metrics)
             if self._mlflow_log_artifacts:
                 if (self.output_dir / "metrics.json").exists():
