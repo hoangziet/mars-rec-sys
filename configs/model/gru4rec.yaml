@@ -1,0 +1,17 @@
+# configs/model/gru4rec.yaml
+name: gru4rec
+model_kwargs:
+  emb_dim: 64
+  hidden_dim: 128
+  num_layers: 1
+  dropout: 0.2
+train_kwargs:
+  batch_size: 512
+  epochs: 50
+  lr: 1e-3
+  max_len: 50
+  gradient_clip: 5.0
+  early_stop_patience: 10
+  early_stop_min_delta: 1e-4
+  loss_type: ce
+  confidence_alpha: 0.0

@@ -3,8 +3,14 @@
 .env.*
 
 # data
-data/**
-!data/**/.gitkeep
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+data/interim/*
+!data/interim/.gitkeep
+data/external/*
+!data/external/.gitkeep
 
 # python
 .venv/
@@ -17,6 +23,16 @@ __pycache__/
 
 # notebook
 .ipynb_checkpoints/
+*.ipynb
+
+# experiments
+experiments/
+
+# mlruns
+mlruns/
+
+# output
+outputs/
 
 # IDE
 .vscode/
@@ -37,3 +53,7 @@ AGENTS.md
 CLAUDE.md
 .opencode/
 .sisyphus/
+
+# VPS 
+forward-port-linux.sh
+forward-port-win.ps1
