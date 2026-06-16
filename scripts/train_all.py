@@ -64,6 +64,18 @@ def build_benchmark_run_dir(output_dir: str | Path, benchmark_id: str, model_nam
     return Path(output_dir) / "benchmark" / benchmark_id / model_name / f"seed_{seed}"
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Train all models for benchmark orchestration.")
+    parser.add_argument("models", nargs="*", default=None, choices=list(MODEL_CONFIGS.keys()),
+                        help="Subset of models to run (default: all).")
+    parser.add_argument("--data_dir", default=DEFAULT_DATA_DIR)
+    parser.add_argument("--output_dir", default=DEFAULT_OUTPUT_DIR)
+    parser.add_argument("--seeds", nargs="+", type=int, default=DEFAULT_SEEDS)
+    parser.add_argument("--benchmark-id", required=True)
+    parser.add_argument("--protocol-version", default="rq1-v1")
+    return parser.parse_args()
+
+
 # ---------------------------------------------------------------------------
 # Neural model runner
 # ---------------------------------------------------------------------------
@@ -76,6 +88,7 @@ def run_neural_model(
     device: torch.device,
     output_dir: str,
     benchmark_id: str,
+    protocol_version: str,
     model_kwargs: dict,
     train_kwargs: dict,
     seed: int,
@@ -109,6 +122,8 @@ def run_neural_model(
 
     optimizer = build_optimizer(model_name, model, train_kwargs)
     scheduler = build_scheduler(optimizer, train_kwargs, len(train_loader))
+    freeze_record = load_dataset_freeze_record(data_dir / "reports" / "dataset_freeze.json")
+    dataset_version = freeze_record["dataset_version"]
 
     trainer   = Trainer(
         model_name, device, output_dir,
@@ -118,11 +133,14 @@ def run_neural_model(
             "experiment_name": experiment_name,
             "run_name": run_name,
             "log_artifacts": True,
+            "phase": phase,
+            "variant": "base",
+            "dataset_name": "mars",
+            "dataset_version": dataset_version,
+            "git_commit": get_git_commit(),
+            "reportable": True,
         },
     )
-
-    freeze_record = load_dataset_freeze_record(data_dir / "reports" / "dataset_freeze.json")
-    dataset_version = freeze_record["dataset_version"]
 
     mlflow_cfg = collect_common_run_metadata(
         model_name=model_name,
@@ -144,7 +162,7 @@ def run_neural_model(
     mlflow_cfg["tags"].update(
         {
             "benchmark_id": benchmark_id,
-            "protocol_version": benchmark_id,
+            "protocol_version": protocol_version,
             "dataset_run_id": freeze_record["dataset_run_id"],
             "raw_data_hash": freeze_record["raw_data_hash"],
             "processed_data_hash": freeze_record["processed_data_hash"],
@@ -182,6 +200,7 @@ def run_heuristic_model(
     stats: dict,
     output_dir: str,
     benchmark_id: str,
+    protocol_version: str,
     model_kwargs: dict,
     train_kwargs: dict,
     seed: int,
@@ -246,7 +265,7 @@ def run_heuristic_model(
                     reportable=True,
                     ),
                     "benchmark_id": benchmark_id,
-                    "protocol_version": benchmark_id,
+                    "protocol_version": protocol_version,
                 }
             )
             mlflow.set_tags(
@@ -311,7 +330,7 @@ def run_heuristic_model(
                     reportable=True,
                     ),
                     "benchmark_id": benchmark_id,
-                    "protocol_version": benchmark_id,
+                    "protocol_version": protocol_version,
                 }
             )
             mlflow.set_tags(
@@ -413,14 +432,7 @@ def plot_comparison(results: dict, output_dir: str) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Train all models and compare results.")
-    parser.add_argument("models", nargs="*", default=None, choices=list(MODEL_CONFIGS.keys()),
-                        help="Subset of models to run (default: all).")
-    parser.add_argument("--data_dir",   default=DEFAULT_DATA_DIR)
-    parser.add_argument("--output_dir", default=DEFAULT_OUTPUT_DIR)
-    parser.add_argument("--seeds", nargs="+", type=int, default=DEFAULT_SEEDS)
-    parser.add_argument("--benchmark-id", required=True)
-    args = parser.parse_args()
+    args = parse_args()
 
     if not args.models:
         args.models = list(MODEL_CONFIGS.keys())
@@ -446,12 +458,12 @@ def main() -> None:
 
             if name in NEURAL_MODELS:
                 summary = run_neural_model(
-                    name, data_dir, stats, device, args.output_dir, args.benchmark_id,
+                    name, data_dir, stats, device, args.output_dir, args.benchmark_id, args.protocol_version,
                     cfg["model_kwargs"].copy(), cfg["train_kwargs"].copy(), seed,
                 )
             elif name in HEURISTIC_MODELS:
                 summary = run_heuristic_model(
-                    name, data_dir, stats, args.output_dir, args.benchmark_id,
+                    name, data_dir, stats, args.output_dir, args.benchmark_id, args.protocol_version,
                     cfg["model_kwargs"].copy(), cfg["train_kwargs"].copy(), seed,
                 )
             else:

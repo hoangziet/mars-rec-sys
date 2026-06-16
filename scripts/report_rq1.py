@@ -33,6 +33,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--benchmark-id", required=True)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--dataset-version", default=None)
+    parser.add_argument("--expected-neural-runs", type=int, default=5)
     return parser.parse_args()
 
 
@@ -70,7 +71,7 @@ def main() -> None:
     for run in selected_runs:
         grouped.setdefault(run.data.tags["model"], []).append(run)
 
-    seed_count = 5
+    seed_count = args.expected_neural_runs
     for model_name, model_runs in grouped.items():
         expected = required_run_count_for_model(model_name, seed_count)
         if len(model_runs) != expected:
