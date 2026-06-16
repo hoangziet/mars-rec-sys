@@ -53,6 +53,18 @@ def validate_processed_layout(data_dir: Path) -> None:
         raise FileNotFoundError(f"Missing processed artifacts: {missing}")
 
 
+def resolve_dataset_context(data_dir: Path, *, reportable: bool) -> tuple[str, dict | None]:
+    freeze_path = data_dir / "reports" / "dataset_freeze.json"
+    if freeze_path.exists():
+        freeze_record = load_dataset_freeze_record(freeze_path)
+        return freeze_record["dataset_version"], freeze_record
+    if reportable:
+        raise FileNotFoundError(
+            f"Reportable run requires canonical dataset freeze record at {freeze_path}"
+        )
+    return "unknown", None
+
+
 
 @hydra.main(version_base=None, config_path="../configs", config_name="config")
 def main(cfg: DictConfig) -> None:
@@ -104,9 +116,7 @@ def main(cfg: DictConfig) -> None:
     phase = str(cfg.get("phase", "benchmark"))
     reportable = bool(cfg.get("reportable", phase in {"benchmark", "ablation", "final"}))
     experiment_name = get_experiment_name_for_phase(phase)
-    stats_path = data_dir / "reports" / "dataset_stats.json"
-    freeze_record = load_dataset_freeze_record(data_dir / "reports" / "dataset_freeze.json")
-    dataset_version = freeze_record["dataset_version"]
+    dataset_version, freeze_record = resolve_dataset_context(data_dir, reportable=reportable)
     run_name = build_run_name(model_name, cfg.seed, variant="base")
 
     trainer = Trainer(
@@ -144,14 +154,15 @@ def main(cfg: DictConfig) -> None:
         dataset_version=dataset_version,
         reportable=reportable,
     )
-    mlflow_cfg["tags"].update(
-        {
-            "dataset_run_id": freeze_record["dataset_run_id"],
-            "raw_data_hash": freeze_record["raw_data_hash"],
-            "processed_data_hash": freeze_record["processed_data_hash"],
-            "preprocessing_config_hash": freeze_record["preprocessing_config_hash"],
-        }
-    )
+    if freeze_record is not None:
+        mlflow_cfg["tags"].update(
+            {
+                "dataset_run_id": freeze_record["dataset_run_id"],
+                "raw_data_hash": freeze_record["raw_data_hash"],
+                "processed_data_hash": freeze_record["processed_data_hash"],
+                "preprocessing_config_hash": freeze_record["preprocessing_config_hash"],
+            }
+        )
 
     trainer.train(
         model=model,
