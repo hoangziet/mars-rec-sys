@@ -101,7 +101,8 @@ def main(cfg: DictConfig) -> None:
         seed=cfg.seed,
     )
 
-    phase = "benchmark"
+    phase = str(cfg.get("phase", "benchmark"))
+    reportable = bool(cfg.get("reportable", phase in {"benchmark", "ablation", "final"}))
     experiment_name = get_experiment_name_for_phase(phase)
     stats_path = data_dir / "reports" / "dataset_stats.json"
     freeze_record = load_dataset_freeze_record(data_dir / "reports" / "dataset_freeze.json")
@@ -122,7 +123,7 @@ def main(cfg: DictConfig) -> None:
             "dataset_name": "mars",
             "dataset_version": dataset_version,
             "git_commit": get_git_commit(),
-            "reportable": True,
+            "reportable": reportable,
         },
     )
 
@@ -141,7 +142,7 @@ def main(cfg: DictConfig) -> None:
         git_commit=get_git_commit(),
         dataset_name="mars",
         dataset_version=dataset_version,
-        reportable=True,
+        reportable=reportable,
     )
     mlflow_cfg["tags"].update(
         {
