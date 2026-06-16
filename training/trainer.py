@@ -154,11 +154,12 @@ class Trainer:
 
     def __init__(self, model_name: str, device: str | torch.device,
                  output_dir: str | Path = "experiments",
+                 run_dir: str | Path | None = None,
                  use_mlflow: bool = False,
                  mlflow_config: dict | None = None):
         self.model_name = model_name
         self.device = torch.device(device)
-        self.output_dir = Path(output_dir) / model_name
+        self.output_dir = Path(run_dir) if run_dir is not None else Path(output_dir) / model_name
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.tracker = ExperimentTracker(model_name)
 
@@ -221,7 +222,7 @@ class Trainer:
         if self._use_mlflow and mlflow_params:
             self._mlflow.log_params(_flatten_dict(mlflow_params))
 
-        tags = mlflow_params.get("tags", {})
+        tags = mlflow_params.get("tags", {}) if mlflow_params else {}
         if tags and self._use_mlflow:
             self._mlflow.set_tags(tags)
 
@@ -326,7 +327,11 @@ class Trainer:
         self._print_summary()
 
         if self._use_mlflow:
-            test_ml_metrics = {f"test_{sanitize_metric_name(k)}": v for k, v in test_metrics.items()}
+            test_ml_metrics = {
+                "best_val_ndcg_at_10": self.tracker.best_val_ndcg,
+                "best_epoch": float(self.tracker.best_epoch),
+                **{f"test_{sanitize_metric_name(k)}": v for k, v in test_metrics.items()},
+            }
             self._mlflow.log_metrics(test_ml_metrics)
             if self._mlflow_log_artifacts:
                 if (self.output_dir / "metrics.json").exists():

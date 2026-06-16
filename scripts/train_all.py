@@ -30,7 +30,6 @@ from training.configs import DEFAULT_DATA_DIR, DEFAULT_OUTPUT_DIR, DEFAULT_SEED,
 from pipeline.builder import build_criterion_fn, build_eval_fn, build_model, build_train_loader
 from pipeline.loaders import get_eval_loader, get_val_loss_loader, load_stats
 from pipeline.metrics import (
-    compare_models,
     evaluate_itemcf,
     evaluate_popularity,
     print_results,
@@ -40,6 +39,10 @@ from scripts.train import validate_processed_layout
 from training.mlflow_contract import build_run_name, build_training_tags, get_experiment_name_for_phase
 from training.mlflow_utils import collect_common_run_metadata, configure_mlflow, get_dataset_version, get_git_commit, load_dataset_freeze_record, sanitize_metric_name
 from training.trainer import Trainer
+
+DEFAULT_SEEDS = [42, 123, 2024, 3407, 9999]
+NEURAL_MODELS = {"sasrec", "gsasrec", "gru4rec", "bert4rec", "bprmf"}
+HEURISTIC_MODELS = {"popularity", "itemcf"}
 
 
 def seed_everything(seed: int) -> None:
@@ -53,6 +56,14 @@ def seed_everything(seed: int) -> None:
         torch.backends.cudnn.benchmark = False
 
 
+def get_seeds_for_model(model_name: str, seeds: list[int]) -> list[int]:
+    return list(seeds) if model_name in NEURAL_MODELS else [seeds[0]]
+
+
+def build_benchmark_run_dir(output_dir: str | Path, benchmark_id: str, model_name: str, seed: int) -> Path:
+    return Path(output_dir) / "benchmark" / benchmark_id / model_name / f"seed_{seed}"
+
+
 # ---------------------------------------------------------------------------
 # Neural model runner
 # ---------------------------------------------------------------------------
@@ -64,6 +75,7 @@ def run_neural_model(
     stats: dict,
     device: torch.device,
     output_dir: str,
+    benchmark_id: str,
     model_kwargs: dict,
     train_kwargs: dict,
     seed: int,
@@ -72,7 +84,8 @@ def run_neural_model(
 
     phase = "benchmark"
     experiment_name = get_experiment_name_for_phase(phase)
-    run_name = build_run_name(model_name, seed, variant="base")
+    run_name = f"{benchmark_id}-{build_run_name(model_name, seed, variant='base')}"
+    run_dir = build_benchmark_run_dir(output_dir, benchmark_id, model_name, seed)
 
     max_len    = train_kwargs.get("max_len", 50)
     batch_size = train_kwargs.get("batch_size", 256)
@@ -99,6 +112,7 @@ def run_neural_model(
 
     trainer   = Trainer(
         model_name, device, output_dir,
+        run_dir=run_dir,
         use_mlflow=True,
         mlflow_config={
             "experiment_name": experiment_name,
@@ -129,6 +143,8 @@ def run_neural_model(
     )
     mlflow_cfg["tags"].update(
         {
+            "benchmark_id": benchmark_id,
+            "protocol_version": benchmark_id,
             "dataset_run_id": freeze_record["dataset_run_id"],
             "raw_data_hash": freeze_record["raw_data_hash"],
             "processed_data_hash": freeze_record["processed_data_hash"],
@@ -165,6 +181,7 @@ def run_heuristic_model(
     data_dir: Path,
     stats: dict,
     output_dir: str,
+    benchmark_id: str,
     model_kwargs: dict,
     train_kwargs: dict,
     seed: int,
@@ -179,7 +196,7 @@ def run_heuristic_model(
 
     max_len    = train_kwargs.get("max_len", 50)
     batch_size = train_kwargs.get("batch_size", 256)
-    model_output_dir = Path(output_dir) / model_name
+    model_output_dir = build_benchmark_run_dir(output_dir, benchmark_id, model_name, seed)
     model_output_dir.mkdir(parents=True, exist_ok=True)
 
     val_loader  = get_eval_loader(data_dir / "splits" / "val_sequences.csv",  stats, batch_size=batch_size, max_len=max_len)
@@ -206,7 +223,7 @@ def run_heuristic_model(
 
         configure_mlflow(mlflow_module=mlflow)
         mlflow.set_experiment(experiment_name)
-        with mlflow.start_run(run_name=build_run_name(model_name, seed, variant="base")):
+        with mlflow.start_run(run_name=f"{benchmark_id}-{build_run_name(model_name, seed, variant='base')}"):
             mlflow.log_params(
                 collect_common_run_metadata(
                     model_name=model_name,
@@ -218,7 +235,8 @@ def run_heuristic_model(
                 )
             )
             mlflow.set_tags(
-                build_training_tags(
+                {
+                    **build_training_tags(
                     model_name=model_name,
                     phase="benchmark",
                     variant="base",
@@ -226,7 +244,10 @@ def run_heuristic_model(
                     dataset_name="mars",
                     dataset_version=dataset_version,
                     reportable=True,
-                )
+                    ),
+                    "benchmark_id": benchmark_id,
+                    "protocol_version": benchmark_id,
+                }
             )
             mlflow.set_tags(
                 {
@@ -236,7 +257,13 @@ def run_heuristic_model(
                     "preprocessing_config_hash": freeze_record["preprocessing_config_hash"],
                 }
             )
-            mlflow.log_metrics({f"test_{sanitize_metric_name(k)}": v for k, v in test_results.items()})
+            mlflow.log_metrics(
+                {
+                    "best_val_ndcg_at_10": float(val_results.get("NDCG@10", 0.0)),
+                    "best_epoch": 0.0,
+                    **{f"test_{sanitize_metric_name(k)}": v for k, v in test_results.items()},
+                }
+            )
 
         return summary
 
@@ -261,7 +288,7 @@ def run_heuristic_model(
 
         configure_mlflow(mlflow_module=mlflow)
         mlflow.set_experiment(experiment_name)
-        with mlflow.start_run(run_name=build_run_name(model_name, seed, variant="base")):
+        with mlflow.start_run(run_name=f"{benchmark_id}-{build_run_name(model_name, seed, variant='base')}"):
             mlflow.log_params(
                 collect_common_run_metadata(
                     model_name=model_name,
@@ -273,7 +300,8 @@ def run_heuristic_model(
                 )
             )
             mlflow.set_tags(
-                build_training_tags(
+                {
+                    **build_training_tags(
                     model_name=model_name,
                     phase="benchmark",
                     variant="base",
@@ -281,7 +309,10 @@ def run_heuristic_model(
                     dataset_name="mars",
                     dataset_version=dataset_version,
                     reportable=True,
-                )
+                    ),
+                    "benchmark_id": benchmark_id,
+                    "protocol_version": benchmark_id,
+                }
             )
             mlflow.set_tags(
                 {
@@ -291,7 +322,13 @@ def run_heuristic_model(
                     "preprocessing_config_hash": freeze_record["preprocessing_config_hash"],
                 }
             )
-            mlflow.log_metrics({f"test_{sanitize_metric_name(k)}": v for k, v in test_results.items()})
+            mlflow.log_metrics(
+                {
+                    "best_val_ndcg_at_10": float(val_results.get("NDCG@10", 0.0)),
+                    "best_epoch": 0.0,
+                    **{f"test_{sanitize_metric_name(k)}": v for k, v in test_results.items()},
+                }
+            )
 
         return summary
 
@@ -337,7 +374,10 @@ def aggregate_records(records: list[dict]) -> dict:
         grouped.setdefault(record["model"], []).append(record["metrics"])
     return {
         model: {
-            name: {"mean": float(np.mean([m[name] for m in ml])), "std": float(np.std([m[name] for m in ml]))}
+            name: {
+                "mean": float(np.mean([m[name] for m in ml])),
+                "std": float(np.std([m[name] for m in ml], ddof=1)) if len(ml) > 1 else 0.0,
+            }
             for name in ml[0].keys()
         }
         for model, ml in grouped.items()
@@ -378,7 +418,8 @@ def main() -> None:
                         help="Subset of models to run (default: all).")
     parser.add_argument("--data_dir",   default=DEFAULT_DATA_DIR)
     parser.add_argument("--output_dir", default=DEFAULT_OUTPUT_DIR)
-    parser.add_argument("--seed",       type=int, default=DEFAULT_SEED)
+    parser.add_argument("--seeds", nargs="+", type=int, default=DEFAULT_SEEDS)
+    parser.add_argument("--benchmark-id", required=True)
     args = parser.parse_args()
 
     if not args.models:
@@ -390,47 +431,43 @@ def main() -> None:
     device     = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     commit_sha = get_git_commit()
 
-    comp_dir = Path(args.output_dir) / "comparison"
+    comp_dir = Path(args.output_dir) / "benchmark" / args.benchmark_id
     comp_dir.mkdir(parents=True, exist_ok=True)
 
-    NEURAL_MODELS    = {"sasrec", "gsasrec", "gru4rec", "bert4rec", "bprmf"}
-    HEURISTIC_MODELS = {"popularity", "itemcf"}
-
-    all_results: dict[str, dict] = {}
+    raw_runs: list[dict] = []
     run_records: list[dict]      = []
 
     for name in args.models:
         cfg = MODEL_CONFIGS[name]
-        print(f"\n{'=' * 60}")
-        print(f"  Running: {name.upper()}")
-        print(f"{'=' * 60}")
+        for seed in get_seeds_for_model(name, args.seeds):
+            print(f"\n{'=' * 60}")
+            print(f"  Running: {name.upper()} | seed={seed}")
+            print(f"{'=' * 60}")
 
-        if name in NEURAL_MODELS:
-            summary = run_neural_model(
-                name, data_dir, stats, device, args.output_dir,
-                cfg["model_kwargs"].copy(), cfg["train_kwargs"].copy(), args.seed,
-            )
-        elif name in HEURISTIC_MODELS:
-            summary = run_heuristic_model(
-                name, data_dir, stats, args.output_dir,
-                cfg["model_kwargs"].copy(), cfg["train_kwargs"].copy(), args.seed,
-            )
-        else:
-            print(f"[WARNING] Unknown model '{name}', skipping.", file=sys.stderr)
-            continue
+            if name in NEURAL_MODELS:
+                summary = run_neural_model(
+                    name, data_dir, stats, device, args.output_dir, args.benchmark_id,
+                    cfg["model_kwargs"].copy(), cfg["train_kwargs"].copy(), seed,
+                )
+            elif name in HEURISTIC_MODELS:
+                summary = run_heuristic_model(
+                    name, data_dir, stats, args.output_dir, args.benchmark_id,
+                    cfg["model_kwargs"].copy(), cfg["train_kwargs"].copy(), seed,
+                )
+            else:
+                print(f"[WARNING] Unknown model '{name}', skipping.", file=sys.stderr)
+                continue
 
-        all_results[name] = summary
-        run_records.append(build_run_record(name, args.seed, summary, commit_sha))
+            raw_runs.append({"model": name, "seed": seed, "summary": summary})
+            run_records.append(build_run_record(name, seed, summary, commit_sha))
 
-    print(f"\n{'=' * 60}\n  COMPARISON\n{'=' * 60}")
-    compare_models({name: s["test_results"] for name, s in all_results.items()})
+    with open(comp_dir / "raw_runs.json", "w") as f:
+        json.dump(raw_runs, f, indent=2)
+    with open(comp_dir / "run_records.json", "w") as f:
+        json.dump(run_records, f, indent=2)
 
-    with open(comp_dir / "comparison.json",      "w") as f: json.dump({name: s["test_results"] for name, s in all_results.items()}, f, indent=2)
-    with open(comp_dir / "run_records.json",     "w") as f: json.dump(run_records, f, indent=2)
-    with open(comp_dir / "aggregate_metrics.json","w") as f: json.dump(aggregate_records(run_records), f, indent=2)
-
-    plot_comparison(all_results, args.output_dir)
-    print(f"\nComparison chart saved to: {comp_dir}/comparison.png")
+    print(f"\nBenchmark run records saved to: {comp_dir}/run_records.json")
+    print(f"Use scripts/report_rq1.py --benchmark-id {args.benchmark_id} to aggregate RQ1 results.")
 
 
 if __name__ == "__main__":
