@@ -24,7 +24,7 @@ from pipeline.builder import build_criterion_fn, build_eval_fn, build_model, bui
 from pipeline.loaders import get_eval_loader, get_val_loss_loader, load_stats
 from pipeline.optim import build_optimizer, build_scheduler
 from training.mlflow_contract import build_run_name, build_training_tags, get_experiment_name_for_phase
-from training.mlflow_utils import collect_common_run_metadata, get_dataset_version, get_git_commit
+from training.mlflow_utils import collect_common_run_metadata, get_dataset_version, get_git_commit, load_dataset_freeze_record
 from training.trainer import Trainer
 
 TRAINABLE_MODELS = ("sasrec", "gsasrec", "gru4rec", "bert4rec", "bprmf")
@@ -104,7 +104,8 @@ def main(cfg: DictConfig) -> None:
     phase = "benchmark"
     experiment_name = get_experiment_name_for_phase(phase)
     stats_path = data_dir / "reports" / "dataset_stats.json"
-    dataset_version = get_dataset_version(stats_path)
+    freeze_record = load_dataset_freeze_record(data_dir / "reports" / "dataset_freeze.json")
+    dataset_version = freeze_record["dataset_version"]
     run_name = build_run_name(model_name, cfg.seed, variant="base")
 
     trainer = Trainer(
@@ -141,6 +142,14 @@ def main(cfg: DictConfig) -> None:
         dataset_name="mars",
         dataset_version=dataset_version,
         reportable=True,
+    )
+    mlflow_cfg["tags"].update(
+        {
+            "dataset_run_id": freeze_record["dataset_run_id"],
+            "raw_data_hash": freeze_record["raw_data_hash"],
+            "processed_data_hash": freeze_record["processed_data_hash"],
+            "preprocessing_config_hash": freeze_record["preprocessing_config_hash"],
+        }
     )
 
     trainer.train(

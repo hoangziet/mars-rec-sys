@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import types
 from collections.abc import Callable
@@ -173,3 +174,22 @@ def validate_reportable_dataset_metadata(*, tags: dict[str, str], dataset_ref: d
     mismatched = [key for key in required_keys if tags.get(key) != dataset_ref.get(key)]
     if mismatched:
         raise RuntimeError(f"Dataset metadata mismatch between tags and dataset ref: {mismatched}")
+
+
+def load_dataset_freeze_record(path: Path) -> dict[str, str]:
+    if not path.exists():
+        raise FileNotFoundError(f"Dataset freeze record does not exist: {path}")
+
+    payload = json.loads(path.read_text())
+    required_keys = {
+        "dataset_name",
+        "dataset_version",
+        "dataset_run_id",
+        "raw_data_hash",
+        "processed_data_hash",
+        "preprocessing_config_hash",
+    }
+    missing = sorted(key for key in required_keys if not payload.get(key))
+    if missing:
+        raise RuntimeError(f"dataset freeze record missing fields: {missing}")
+    return payload

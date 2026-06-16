@@ -38,7 +38,7 @@ from pipeline.metrics import (
 from pipeline.optim import build_optimizer, build_scheduler
 from scripts.train import validate_processed_layout
 from training.mlflow_contract import build_run_name, build_training_tags, get_experiment_name_for_phase
-from training.mlflow_utils import collect_common_run_metadata, configure_mlflow, get_dataset_version, get_git_commit, sanitize_metric_name
+from training.mlflow_utils import collect_common_run_metadata, configure_mlflow, get_dataset_version, get_git_commit, load_dataset_freeze_record, sanitize_metric_name
 from training.trainer import Trainer
 
 
@@ -107,12 +107,15 @@ def run_neural_model(
         },
     )
 
+    freeze_record = load_dataset_freeze_record(data_dir / "reports" / "dataset_freeze.json")
+    dataset_version = freeze_record["dataset_version"]
+
     mlflow_cfg = collect_common_run_metadata(
         model_name=model_name,
         seed=seed,
         phase="benchmark",
         git_commit=get_git_commit(),
-        dataset_version=get_dataset_version(data_dir / "reports" / "dataset_stats.json"),
+        dataset_version=dataset_version,
         extra_params={**model_kwargs, **train_kwargs},
     )
     mlflow_cfg["tags"] = build_training_tags(
@@ -121,8 +124,16 @@ def run_neural_model(
         variant="base",
         git_commit=get_git_commit(),
         dataset_name="mars",
-        dataset_version=get_dataset_version(data_dir / "reports" / "dataset_stats.json"),
+        dataset_version=dataset_version,
         reportable=True,
+    )
+    mlflow_cfg["tags"].update(
+        {
+            "dataset_run_id": freeze_record["dataset_run_id"],
+            "raw_data_hash": freeze_record["raw_data_hash"],
+            "processed_data_hash": freeze_record["processed_data_hash"],
+            "preprocessing_config_hash": freeze_record["preprocessing_config_hash"],
+        }
     )
 
     tracker   = trainer.train(
@@ -163,6 +174,9 @@ def run_heuristic_model(
     phase = "benchmark"
     experiment_name = get_experiment_name_for_phase(phase)
 
+    freeze_record = load_dataset_freeze_record(data_dir / "reports" / "dataset_freeze.json")
+    dataset_version = freeze_record["dataset_version"]
+
     max_len    = train_kwargs.get("max_len", 50)
     batch_size = train_kwargs.get("batch_size", 256)
     model_output_dir = Path(output_dir) / model_name
@@ -199,7 +213,7 @@ def run_heuristic_model(
                     seed=seed,
                     phase="benchmark",
                     git_commit=get_git_commit(),
-                    dataset_version=get_dataset_version(data_dir / "reports" / "dataset_stats.json"),
+                    dataset_version=dataset_version,
                     extra_params={**model_kwargs, **train_kwargs},
                 )
             )
@@ -210,9 +224,17 @@ def run_heuristic_model(
                     variant="base",
                     git_commit=get_git_commit(),
                     dataset_name="mars",
-                    dataset_version=get_dataset_version(data_dir / "reports" / "dataset_stats.json"),
+                    dataset_version=dataset_version,
                     reportable=True,
                 )
+            )
+            mlflow.set_tags(
+                {
+                    "dataset_run_id": freeze_record["dataset_run_id"],
+                    "raw_data_hash": freeze_record["raw_data_hash"],
+                    "processed_data_hash": freeze_record["processed_data_hash"],
+                    "preprocessing_config_hash": freeze_record["preprocessing_config_hash"],
+                }
             )
             mlflow.log_metrics({f"test_{sanitize_metric_name(k)}": v for k, v in test_results.items()})
 
@@ -246,7 +268,7 @@ def run_heuristic_model(
                     seed=seed,
                     phase="benchmark",
                     git_commit=get_git_commit(),
-                    dataset_version=get_dataset_version(data_dir / "reports" / "dataset_stats.json"),
+                    dataset_version=dataset_version,
                     extra_params={**model_kwargs, **train_kwargs},
                 )
             )
@@ -257,9 +279,17 @@ def run_heuristic_model(
                     variant="base",
                     git_commit=get_git_commit(),
                     dataset_name="mars",
-                    dataset_version=get_dataset_version(data_dir / "reports" / "dataset_stats.json"),
+                    dataset_version=dataset_version,
                     reportable=True,
                 )
+            )
+            mlflow.set_tags(
+                {
+                    "dataset_run_id": freeze_record["dataset_run_id"],
+                    "raw_data_hash": freeze_record["raw_data_hash"],
+                    "processed_data_hash": freeze_record["processed_data_hash"],
+                    "preprocessing_config_hash": freeze_record["preprocessing_config_hash"],
+                }
             )
             mlflow.log_metrics({f"test_{sanitize_metric_name(k)}": v for k, v in test_results.items()})
 
