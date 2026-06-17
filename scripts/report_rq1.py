@@ -84,6 +84,13 @@ def validate_seed_set(model_name: str, actual_seed_list: list[int], expected_see
         )
 
 
+def validate_consistent_tag(runs: list, tag_name: str) -> str:
+    values = {run.data.tags.get(tag_name) for run in runs}
+    if len(values) != 1:
+        raise RuntimeError(f"Inconsistent tag {tag_name}: {sorted(values)}")
+    return next(iter(values))
+
+
 def main() -> None:
     args = parse_args()
     configure_mlflow(mlflow_module=mlflow)
@@ -129,6 +136,11 @@ def main() -> None:
         grouped.setdefault(run.data.tags["model"], []).append(run)
 
     validate_model_set(set(grouped), set(manifest["expected_models"]))
+
+    validate_consistent_tag(selected_runs, "dataset_run_id")
+    validate_consistent_tag(selected_runs, "raw_data_hash")
+    validate_consistent_tag(selected_runs, "processed_data_hash")
+    validate_consistent_tag(selected_runs, "preprocessing_config_hash")
 
     seed_count = args.expected_neural_runs
     for model_name, model_runs in grouped.items():
