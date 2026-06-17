@@ -4,7 +4,10 @@ BENCHMARK_ID ?= rq1-v1
 EXPECTED_NEURAL_RUNS ?= 5
 REPORT_OUTPUT_DIR ?= experiments/benchmark/$(BENCHMARK_ID)/reports
 
-.PHONY: freeze-v1 rq1-smoke rq1-full rq1-report test
+.PHONY: preprocess freeze-v1 rq1-smoke rq1-full rq1-report test
+
+preprocess:
+	uv run python data/preprocess.py
 
 freeze-v1:
 	uv run python scripts/publish_dataset_manifest.py --dataset-version mars-v1
