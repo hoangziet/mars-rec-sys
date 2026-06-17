@@ -31,7 +31,7 @@ def summarize_metric_values(values: list[float]) -> dict[str, float | int]:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Aggregate RQ1 benchmark runs from MLflow.")
     parser.add_argument("--benchmark-id", required=True)
-    parser.add_argument("--output-dir", required=True)
+    parser.add_argument("--output-dir", default=None)
     parser.add_argument("--dataset-version", default=None)
     parser.add_argument("--expected-neural-runs", type=int, default=5)
     return parser.parse_args()
@@ -79,7 +79,7 @@ def main() -> None:
                 f"Model {model_name} has {len(model_runs)} runs but expected {expected} for benchmark {args.benchmark_id}"
             )
 
-    output_dir = Path(args.output_dir)
+    output_dir = Path(args.output_dir) if args.output_dir else Path("experiments") / "benchmark" / args.benchmark_id / "reports"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     run_rows = []
