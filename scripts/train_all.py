@@ -64,6 +64,14 @@ def build_benchmark_run_dir(output_dir: str | Path, benchmark_id: str, model_nam
     return Path(output_dir) / "benchmark" / benchmark_id / model_name / f"seed_{seed}"
 
 
+def build_heuristic_save_target(model_name: str, model_output_dir: Path) -> Path:
+    if model_name == "popularity":
+        return model_output_dir / "popularity_model.json"
+    if model_name == "itemcf":
+        return model_output_dir
+    raise ValueError(f"Unsupported heuristic model: {model_name}")
+
+
 def build_benchmark_manifest(
     *,
     benchmark_id: str,
@@ -249,8 +257,7 @@ def run_heuristic_model(
         val_results  = evaluate_popularity(model.item_counts, val_loader)
         test_results = evaluate_popularity(model.item_counts, test_loader)
         print_results("Popularity", test_results, phase="Test")
-        model.save(data_dir / "popularity_model.json")
-        model.save(model_output_dir / "popularity_model.json")
+        model.save(build_heuristic_save_target(model_name, model_output_dir))
         summary = {
             "model_name": model_name,
             "best_epoch": 0,
@@ -314,8 +321,7 @@ def run_heuristic_model(
         val_results  = evaluate_itemcf(model.sim_matrix, model.user_history, val_loader)
         test_results = evaluate_itemcf(model.sim_matrix, model.user_history, test_loader)
         print_results("Item-CF", test_results, phase="Test")
-        model.save(data_dir)
-        model.save(model_output_dir)
+        model.save(build_heuristic_save_target(model_name, model_output_dir))
         summary = {
             "model_name": model_name,
             "best_epoch": 0,
