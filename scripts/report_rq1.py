@@ -8,6 +8,7 @@ from pathlib import Path
 
 import mlflow
 import numpy as np
+from statsmodels.stats.weightstats import DescrStatsW
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -21,11 +22,37 @@ def required_run_count_for_model(model_name: str, seed_count: int) -> int:
 
 def summarize_metric_values(values: list[float]) -> dict[str, float | int]:
     arr = np.array(values, dtype=float)
+    n = len(arr)
+    mean = float(arr.mean())
+
+    if n < 2:
+        return {
+            "mean": mean,
+            "std": None,
+            "ci95_low": None,
+            "ci95_high": None,
+            "runs": int(n),
+        }
+
+    stats = DescrStatsW(arr)
+    ci_low, ci_high = stats.tconfint_mean(alpha=0.05)
     return {
-        "mean": float(arr.mean()),
-        "std": float(arr.std(ddof=1)) if len(arr) > 1 else 0.0,
-        "runs": int(len(arr)),
+        "mean": mean,
+        "std": float(arr.std(ddof=1)),
+        "ci95_low": float(ci_low),
+        "ci95_high": float(ci_high),
+        "runs": int(n),
     }
+
+
+def format_metric_summary(summary: dict[str, float | int | None]) -> str:
+    mean = summary["mean"]
+    std = summary["std"]
+    low = summary["ci95_low"]
+    high = summary["ci95_high"]
+    if std is None:
+        return f"{mean:.4f} (std/CI: N/A)"
+    return f"{mean:.4f} ± {std:.4f} [{low:.4f}, {high:.4f}]"
 
 
 def parse_args() -> argparse.Namespace:
@@ -34,7 +61,27 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", default=None)
     parser.add_argument("--dataset-version", default=None)
     parser.add_argument("--expected-neural-runs", type=int, default=5)
+    parser.add_argument("--manifest", default=None)
     return parser.parse_args()
+
+
+def validate_model_set(actual_models: set[str], expected_models: set[str]) -> None:
+    missing_models = expected_models - actual_models
+    unexpected_models = actual_models - expected_models
+    if missing_models or unexpected_models:
+        raise RuntimeError(
+            f"Invalid model set. Missing={sorted(missing_models)}, Unexpected={sorted(unexpected_models)}"
+        )
+
+
+def validate_seed_set(model_name: str, actual_seed_list: list[int], expected_seed_set: set[int]) -> None:
+    actual_seed_set = set(actual_seed_list)
+    if len(actual_seed_list) != len(actual_seed_set):
+        raise RuntimeError(f"{model_name}: duplicated seeds")
+    if actual_seed_set != expected_seed_set:
+        raise RuntimeError(
+            f"{model_name}: expected seeds {sorted(expected_seed_set)}, got {sorted(actual_seed_set)}"
+        )
 
 
 def main() -> None:
@@ -45,6 +92,11 @@ def main() -> None:
     if dataset_version is None:
         freeze_record = load_dataset_freeze_record(Path("data/processed/reports/dataset_freeze.json"))
         dataset_version = freeze_record["dataset_version"]
+
+    manifest_path = Path(args.manifest) if args.manifest else Path("experiments") / "benchmark" / args.benchmark_id / "benchmark_manifest.json"
+    if not manifest_path.exists():
+        raise FileNotFoundError(f"Benchmark manifest does not exist: {manifest_path}")
+    manifest = json.loads(manifest_path.read_text())
 
     client = mlflow.tracking.MlflowClient()
     experiment = client.get_experiment_by_name("mars_benchmark")
@@ -65,11 +117,18 @@ def main() -> None:
             continue
         if tags.get("dataset_version") != dataset_version:
             continue
+        if tags.get("protocol_version") != manifest["protocol_version"]:
+            continue
         selected_runs.append(run)
+
+    if not selected_runs:
+        raise RuntimeError(f"No reportable runs found for benchmark {args.benchmark_id}")
 
     grouped: dict[str, list] = {}
     for run in selected_runs:
         grouped.setdefault(run.data.tags["model"], []).append(run)
+
+    validate_model_set(set(grouped), set(manifest["expected_models"]))
 
     seed_count = args.expected_neural_runs
     for model_name, model_runs in grouped.items():
@@ -78,6 +137,9 @@ def main() -> None:
             raise RuntimeError(
                 f"Model {model_name} has {len(model_runs)} runs but expected {expected} for benchmark {args.benchmark_id}"
             )
+        if model_name not in HEURISTIC_MODELS:
+            actual_seed_list = [int(run.data.params["seed"]) for run in model_runs]
+            validate_seed_set(model_name, actual_seed_list, set(manifest["neural_seeds"]))
 
     output_dir = Path(args.output_dir) if args.output_dir else Path("experiments") / "benchmark" / args.benchmark_id / "reports"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -93,16 +155,27 @@ def main() -> None:
 
         for run in model_runs:
             metrics = run.data.metrics
+            required_metrics = {
+                "best_val_ndcg_at_10",
+                "best_epoch",
+                "test_NDCG_at_10",
+                "test_Recall_at_10",
+                "test_NDCG_at_20",
+                "test_Recall_at_20",
+            }
+            missing = sorted(required_metrics - set(metrics.keys()))
+            if missing:
+                raise RuntimeError(f"Run {run.info.run_id} is missing metrics: {missing}")
             row = {
                 "model": model_name,
                 "run_id": run.info.run_id,
                 "run_name": run.info.run_name,
-                "best_val_ndcg_at_10": metrics.get("best_val_ndcg_at_10", 0.0),
-                "best_epoch": metrics.get("best_epoch", 0.0),
-                "test_NDCG_at_10": metrics.get("test_NDCG_at_10", 0.0),
-                "test_Recall_at_10": metrics.get("test_Recall_at_10", 0.0),
-                "test_NDCG_at_20": metrics.get("test_NDCG_at_20", 0.0),
-                "test_Recall_at_20": metrics.get("test_Recall_at_20", 0.0),
+                "best_val_ndcg_at_10": metrics["best_val_ndcg_at_10"],
+                "best_epoch": metrics["best_epoch"],
+                "test_NDCG_at_10": metrics["test_NDCG_at_10"],
+                "test_Recall_at_10": metrics["test_Recall_at_10"],
+                "test_NDCG_at_20": metrics["test_NDCG_at_20"],
+                "test_Recall_at_20": metrics["test_Recall_at_20"],
             }
             run_rows.append(row)
             val_values.append(row["best_val_ndcg_at_10"])
@@ -158,15 +231,15 @@ def main() -> None:
                     "model": row["model"],
                     "runs": row["runs"],
                     "val_ndcg_at_10_mean": row["val_ndcg_at_10"]["mean"],
-                    "val_ndcg_at_10_std": row["val_ndcg_at_10"]["std"],
+                    "val_ndcg_at_10_std": row["val_ndcg_at_10"]["std"] or "",
                     "test_ndcg_at_10_mean": row["test_ndcg_at_10"]["mean"],
-                    "test_ndcg_at_10_std": row["test_ndcg_at_10"]["std"],
+                    "test_ndcg_at_10_std": row["test_ndcg_at_10"]["std"] or "",
                     "test_recall_at_10_mean": row["test_recall_at_10"]["mean"],
-                    "test_recall_at_10_std": row["test_recall_at_10"]["std"],
+                    "test_recall_at_10_std": row["test_recall_at_10"]["std"] or "",
                     "test_ndcg_at_20_mean": row["test_ndcg_at_20"]["mean"],
-                    "test_ndcg_at_20_std": row["test_ndcg_at_20"]["std"],
+                    "test_ndcg_at_20_std": row["test_ndcg_at_20"]["std"] or "",
                     "test_recall_at_20_mean": row["test_recall_at_20"]["mean"],
-                    "test_recall_at_20_std": row["test_recall_at_20"]["std"],
+                    "test_recall_at_20_std": row["test_recall_at_20"]["std"] or "",
                 }
             )
 
@@ -176,11 +249,11 @@ def main() -> None:
         for rank, row in enumerate(summary_rows, start=1):
             f.write(
                 f"| {rank} | {row['model']} | {row['runs']} | "
-                f"{row['val_ndcg_at_10']['mean']:.4f} ± {row['val_ndcg_at_10']['std']:.4f} | "
-                f"{row['test_ndcg_at_10']['mean']:.4f} ± {row['test_ndcg_at_10']['std']:.4f} | "
-                f"{row['test_recall_at_10']['mean']:.4f} ± {row['test_recall_at_10']['std']:.4f} | "
-                f"{row['test_ndcg_at_20']['mean']:.4f} ± {row['test_ndcg_at_20']['std']:.4f} | "
-                f"{row['test_recall_at_20']['mean']:.4f} ± {row['test_recall_at_20']['std']:.4f} |\n"
+                f"{format_metric_summary(row['val_ndcg_at_10'])} | "
+                f"{format_metric_summary(row['test_ndcg_at_10'])} | "
+                f"{format_metric_summary(row['test_recall_at_10'])} | "
+                f"{format_metric_summary(row['test_ndcg_at_20'])} | "
+                f"{format_metric_summary(row['test_recall_at_20'])} |\n"
             )
 
 

@@ -64,6 +64,27 @@ def build_benchmark_run_dir(output_dir: str | Path, benchmark_id: str, model_nam
     return Path(output_dir) / "benchmark" / benchmark_id / model_name / f"seed_{seed}"
 
 
+def build_benchmark_manifest(
+    *,
+    benchmark_id: str,
+    protocol_version: str,
+    dataset_version: str,
+    expected_models: list[str],
+    neural_seeds: list[int],
+    heuristic_seed: int,
+    git_commit: str,
+) -> dict:
+    return {
+        "benchmark_id": benchmark_id,
+        "protocol_version": protocol_version,
+        "dataset_version": dataset_version,
+        "expected_models": expected_models,
+        "neural_seeds": neural_seeds,
+        "heuristic_seed": heuristic_seed,
+        "git_commit": git_commit,
+    }
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train all models for benchmark orchestration.")
     parser.add_argument("models", nargs="*", default=None, choices=list(MODEL_CONFIGS.keys()),
@@ -444,7 +465,25 @@ def main() -> None:
     commit_sha = get_git_commit()
 
     comp_dir = Path(args.output_dir) / "benchmark" / args.benchmark_id
+    manifest_path = comp_dir / "benchmark_manifest.json"
+    if manifest_path.exists():
+        raise RuntimeError(
+            f"Benchmark manifest already exists for benchmark_id={args.benchmark_id}: {manifest_path}. Use a new benchmark_id."
+        )
     comp_dir.mkdir(parents=True, exist_ok=True)
+    freeze_record = load_dataset_freeze_record(data_dir / "reports" / "dataset_freeze.json")
+
+    manifest = build_benchmark_manifest(
+        benchmark_id=args.benchmark_id,
+        protocol_version=args.protocol_version,
+        dataset_version=freeze_record["dataset_version"],
+        expected_models=list(args.models),
+        neural_seeds=list(args.seeds),
+        heuristic_seed=args.seeds[0],
+        git_commit=commit_sha,
+    )
+    with open(manifest_path, "w") as f:
+        json.dump(manifest, f, indent=2)
 
     raw_runs: list[dict] = []
     run_records: list[dict]      = []
