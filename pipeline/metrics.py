@@ -53,8 +53,8 @@ def compute_metrics_from_ranks(ranks: list[int], k_list: tuple = (10, 20)) -> di
     for k in k_list:
         hrs = [1.0 if r <= k else 0.0 for r in ranks]
         ndcgs = [1.0 / np.log2(r + 1) if r <= k else 0.0 for r in ranks]
-        results[f"Recall@{k}"] = round(float(np.mean(hrs)), 4)
-        results[f"NDCG@{k}"] = round(float(np.mean(ndcgs)), 4)
+        results[f"Recall@{k}"] = float(np.mean(hrs))
+        results[f"NDCG@{k}"] = float(np.mean(ndcgs))
     return results
 
 
