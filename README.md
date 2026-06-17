@@ -1,29 +1,24 @@
 # mars-rec-sys
 
-Sequential recommendation research codebase with full-sort evaluation, Hydra-based configuration, and MLflow tracking.
+Sequential recommendation research codebase with Hydra configuration, full-sort evaluation, MLflow tracking, and dataset freeze/versioning support.
 
-This repository is organized for experiment reproducibility:
+This repository is organized for:
 
-- dataset freeze and versioning
-- standardized MLflow metadata and artifact layout
+- reproducible preprocessing
+- canonical dataset freezing
 - benchmark orchestration for RQ1
-- local-first training with remote MLflow tracking
+- remote MLflow experiment tracking
+- local-first model development
 
-## What This Repo Contains
+## Repository Scope
 
-- 5 trainable neural recommenders:
-  - `sasrec`
-  - `gsasrec`
-  - `gru4rec`
-  - `bert4rec`
-  - `bprmf`
-- 2 heuristic baselines:
-  - `popularity`
-  - `itemcf`
-- unified preprocessing pipeline
-- full-sort evaluation with `Recall@K` and `NDCG@K`
-- dataset freeze workflow with canonical MLflow dataset records
-- benchmark runner and RQ1 reporter
+The codebase currently supports:
+
+- neural models: `sasrec`, `gsasrec`, `gru4rec`, `bert4rec`, `bprmf`
+- heuristic baselines: `popularity`, `itemcf`
+- full-sort evaluation with `NDCG@10`, `Recall@10`, `NDCG@20`, `Recall@20`
+- dataset freeze records and canonical dataset manifests
+- benchmark orchestration and RQ1 reporting
 
 ## Quick Start
 
@@ -45,15 +40,15 @@ Verify MLflow connectivity:
 uv run python scripts/test_mlflow_connection.py
 ```
 
-Train one neural model:
+Run one neural model:
 
 ```bash
 uv run python scripts/train.py model=sasrec
 ```
 
-## Required Local Environment
+## Local Environment
 
-Create `.env` for MLflow client access:
+Create a local `.env` with MLflow client settings:
 
 ```env
 MLFLOW_TRACKING_URI=http://127.0.0.1:8080
@@ -61,17 +56,17 @@ MLFLOW_TRACKING_USERNAME=...
 MLFLOW_TRACKING_PASSWORD=...
 ```
 
-Local training code talks only to MLflow. It does not require direct PostgreSQL or MinIO credentials.
+Local code talks only to MLflow. It does not require direct PostgreSQL or MinIO credentials.
 
-## Training Workflows
+## Main Workflows
 
 ### 1. Single-model run
 
 Use `scripts/train.py` for:
 
+- one-off neural runs
 - smoke checks
 - tuning/debug runs
-- one-off neural experiments
 
 Examples:
 
@@ -85,9 +80,29 @@ Notes:
 
 - `train.py` supports neural models only
 - `phase` defaults to `benchmark`
-- `reportable=true` requires a canonical dataset freeze record
+- reportable runs require a canonical dataset freeze record
 
-### 2. Benchmark orchestration for RQ1
+### 2. Dataset freeze
+
+Publish the current dataset state as a canonical version:
+
+```bash
+uv run python scripts/publish_dataset_manifest.py --dataset-version mars-v1
+```
+
+This command will:
+
+- compute `raw_data_hash`
+- compute `processed_data_hash`
+- compute `preprocessing_config_hash`
+- validate the requested version against the latest canonical dataset run
+- publish a canonical manifest to MLflow experiment `mars_datasets`
+- write a local freeze record:
+  - `data/processed/reports/dataset_freeze.json`
+
+Reportable benchmark and final runs read this freeze record automatically.
+
+### 3. Benchmark orchestration for RQ1
 
 Use `scripts/train_all.py` as the benchmark runner.
 
@@ -116,15 +131,36 @@ uv run python scripts/train_all.py \
   --protocol-version rq1-v1
 ```
 
-### 3. RQ1 reporting
+Artifacts are written under:
+
+```text
+experiments/benchmark/<benchmark_id>/<model>/seed_<seed>/
+```
+
+### 4. RQ1 reporting
 
 Aggregate MLflow runs into benchmark tables:
+
+Smoke campaign report:
+
+```bash
+uv run python scripts/report_rq1.py \
+  --benchmark-id rq1-smoke \
+  --expected-neural-runs 1
+```
+
+Full benchmark report:
 
 ```bash
 uv run python scripts/report_rq1.py \
   --benchmark-id rq1-v1 \
-  --output-dir report/rq1 \
   --expected-neural-runs 5
+```
+
+Default output location:
+
+```text
+experiments/benchmark/<benchmark_id>/reports/
 ```
 
 Reporter outputs:
@@ -134,43 +170,35 @@ Reporter outputs:
 - `rq1_summary.json`
 - `rq1_table.md`
 
-## Dataset Freeze Workflow
-
-Canonical dataset versions are published to the MLflow experiment `mars_datasets`.
-
-Freeze the current dataset as `mars-v1`:
+### 5. Inference
 
 ```bash
-uv run python scripts/publish_dataset_manifest.py --dataset-version mars-v1
+uv run python scripts/predict.py sasrec --user_id 42 --top_k 10
+uv run python scripts/predict.py sasrec --user_id 42 --top_k 10 --show_titles
 ```
-
-This command will:
-
-- compute `raw_data_hash`
-- compute `processed_data_hash`
-- compute `preprocessing_config_hash`
-- validate the proposed version against the latest canonical dataset run
-- publish a canonical dataset manifest to MLflow
-- write a local freeze record at:
-  - `data/processed/reports/dataset_freeze.json`
-
-Reportable benchmark/final runs reference that freeze record automatically.
 
 ## Makefile Shortcuts
 
-Common workflows are available via `Makefile`:
+Common workflows are available through `Makefile`:
 
 ```bash
 make freeze-v1
 make rq1-smoke
 make rq1-full
-make rq1-report
+make rq1-report BENCHMARK_ID=rq1-smoke EXPECTED_NEURAL_RUNS=1
+make rq1-report BENCHMARK_ID=rq1-v1 EXPECTED_NEURAL_RUNS=5
 make test
 ```
 
+`rq1-report` defaults to:
+
+- `BENCHMARK_ID=rq1-v1`
+- `EXPECTED_NEURAL_RUNS=5`
+- `REPORT_OUTPUT_DIR=experiments/benchmark/<benchmark_id>/reports`
+
 ## MLflow Conventions
 
-### Experiment taxonomy
+### Training experiments
 
 | Phase | Experiment |
 |-------|------------|
@@ -180,14 +208,12 @@ make test
 | `ablation` | `mars_ablation` |
 | `final` | `mars_final` |
 
-Shared experiments:
+### Shared experiments
 
 - `mars_datasets` for canonical dataset manifests
 - `mars_reports` for shared report bundles
 
-### Run naming
-
-Examples:
+### Run naming examples
 
 - `sasrec-base-s42`
 - `gsasrec-base-s123`
@@ -219,7 +245,7 @@ Secondary metrics:
 - `NDCG@20`
 - `Recall@20`
 
-Checkpoint selection uses validation `NDCG@10`, then the selected checkpoint is evaluated on test.
+Checkpoint selection is based on validation `NDCG@10`, then the selected checkpoint is evaluated on test.
 
 ## Project Structure
 
@@ -239,7 +265,7 @@ pipeline/
 scripts/
   train.py                   single neural run
   train_all.py               benchmark runner for RQ1
-  report_rq1.py              benchmark aggregator/reporter
+  report_rq1.py              benchmark reporter
   predict.py                 inference helper
   test_mlflow_connection.py  MLflow smoke test
   publish_dataset_manifest.py
@@ -250,6 +276,7 @@ training/
   mlflow_contract.py
   mlflow_utils.py
   dataset_versioning.py
+Makefile                     common local workflow shortcuts
 tests/                       local pytest suite (gitignored)
 docs/                        local specs/plans/research notes (gitignored)
 ```
@@ -262,16 +289,22 @@ Run the local test suite:
 uv run pytest tests/ -v
 ```
 
+Or:
+
+```bash
+make test
+```
+
 ## Infrastructure Notes
 
 The project assumes a VPS-hosted MLflow stack with:
 
 - PostgreSQL for tracking metadata
-- MinIO for artifacts
+- MinIO for artifact storage
 - MLflow server with `--serve-artifacts`
 - Nginx on the VPS host as the authenticated entrypoint
 
-Local access is typically done through SSH tunnels to the VPS.
+Local access is typically done through SSH tunnels.
 
 Reference deployment files live under `infra/`.
 
