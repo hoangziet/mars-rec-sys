@@ -80,7 +80,6 @@ def build_benchmark_manifest(
     expected_models: list[str],
     neural_seeds: list[int],
     heuristic_seed: int,
-    git_commit: str,
 ) -> dict:
     return {
         "benchmark_id": benchmark_id,
@@ -89,7 +88,6 @@ def build_benchmark_manifest(
         "expected_models": expected_models,
         "neural_seeds": neural_seeds,
         "heuristic_seed": heuristic_seed,
-        "git_commit": git_commit,
     }
 
 
@@ -398,7 +396,7 @@ def save_heuristic_metrics(model_name: str, output_dir: Path, summary: dict) -> 
         json.dump(metrics_payload, f, indent=2)
 
 
-def build_run_record(model_name: str, seed: int, summary: dict, commit_sha: str | None = None) -> dict:
+def build_run_record(model_name: str, seed: int, summary: dict) -> dict:
     return {
         "exp_id": f"{model_name}_seed{seed}",
         "model": model_name,
@@ -410,7 +408,6 @@ def build_run_record(model_name: str, seed: int, summary: dict, commit_sha: str 
             "best_val_ndcg10": summary.get("best_val_ndcg", 0.0),
             "best_epoch": summary.get("best_epoch", 0),
         },
-        "git": {"commit": commit_sha or "unknown"},
     }
 
 
@@ -468,7 +465,6 @@ def main() -> None:
     validate_processed_layout(data_dir)
     stats      = load_stats(data_dir / "reports" / "dataset_stats.json")
     device     = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    commit_sha = get_git_commit()
 
     comp_dir = Path(args.output_dir) / "benchmark" / args.benchmark_id
     manifest_path = comp_dir / "benchmark_manifest.json"
@@ -486,7 +482,6 @@ def main() -> None:
         expected_models=list(args.models),
         neural_seeds=list(args.seeds),
         heuristic_seed=args.seeds[0],
-        git_commit=commit_sha,
     )
     with open(manifest_path, "w") as f:
         json.dump(manifest, f, indent=2)
@@ -516,7 +511,7 @@ def main() -> None:
                 continue
 
             raw_runs.append({"model": name, "seed": seed, "summary": summary})
-            run_records.append(build_run_record(name, seed, summary, commit_sha))
+            run_records.append(build_run_record(name, seed, summary))
 
     with open(comp_dir / "raw_runs.json", "w") as f:
         json.dump(raw_runs, f, indent=2)
