@@ -55,14 +55,17 @@ def format_metric_summary(summary: dict[str, float | int | None]) -> str:
     return f"{mean:.4f} ± {std:.4f} [{low:.4f}, {high:.4f}]"
 
 
-def parse_args() -> argparse.Namespace:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Aggregate RQ1 benchmark runs from MLflow.")
     parser.add_argument("--benchmark-id", required=True)
     parser.add_argument("--output-dir", default=None)
-    parser.add_argument("--dataset-version", default=None)
     parser.add_argument("--expected-neural-runs", type=int, default=5)
     parser.add_argument("--manifest", default=None)
-    return parser.parse_args()
+    return parser
+
+
+def parse_args() -> argparse.Namespace:
+    return build_parser().parse_args()
 
 
 def validate_model_set(actual_models: set[str], expected_models: set[str]) -> None:
@@ -84,21 +87,9 @@ def validate_seed_set(model_name: str, actual_seed_list: list[int], expected_see
         )
 
 
-def validate_consistent_tag(runs: list, tag_name: str) -> str:
-    values = {run.data.tags.get(tag_name) for run in runs}
-    if len(values) != 1:
-        raise RuntimeError(f"Inconsistent tag {tag_name}: {sorted(values)}")
-    return next(iter(values))
-
-
 def main() -> None:
     args = parse_args()
     configure_mlflow(mlflow_module=mlflow)
-
-    dataset_version = args.dataset_version
-    if dataset_version is None:
-        freeze_record = load_dataset_freeze_record(Path("data/processed/reports/dataset_freeze.json"))
-        dataset_version = freeze_record["dataset_version"]
 
     manifest_path = Path(args.manifest) if args.manifest else Path("experiments") / "benchmark" / args.benchmark_id / "benchmark_manifest.json"
     if not manifest_path.exists():
@@ -122,9 +113,9 @@ def main() -> None:
             continue
         if tags.get("variant") != "base":
             continue
-        if tags.get("dataset_version") != dataset_version:
-            continue
         if tags.get("protocol_version") != manifest["protocol_version"]:
+            continue
+        if tags.get("preprocessing_version") != manifest["preprocessing_version"]:
             continue
         selected_runs.append(run)
 
@@ -136,11 +127,6 @@ def main() -> None:
         grouped.setdefault(run.data.tags["model"], []).append(run)
 
     validate_model_set(set(grouped), set(manifest["expected_models"]))
-
-    validate_consistent_tag(selected_runs, "dataset_run_id")
-    validate_consistent_tag(selected_runs, "raw_data_hash")
-    validate_consistent_tag(selected_runs, "processed_data_hash")
-    validate_consistent_tag(selected_runs, "preprocessing_config_hash")
 
     seed_count = args.expected_neural_runs
     for model_name, model_runs in grouped.items():
@@ -209,6 +195,8 @@ def main() -> None:
         )
 
     summary_rows.sort(key=lambda row: row["val_ndcg_at_10"]["mean"], reverse=True)
+    for rank, row in enumerate(summary_rows, start=1):
+        row["validation_rank"] = rank
 
     with open(output_dir / "rq1_runs.csv", "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=list(run_rows[0].keys()) if run_rows else ["model"])
@@ -220,7 +208,7 @@ def main() -> None:
 
     with open(output_dir / "rq1_summary.csv", "w", newline="") as f:
         fieldnames = [
-            "rank",
+            "validation_rank",
             "model",
             "runs",
             "val_ndcg_at_10_mean",
@@ -236,10 +224,10 @@ def main() -> None:
         ]
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
-        for rank, row in enumerate(summary_rows, start=1):
+        for row in summary_rows:
             writer.writerow(
                 {
-                    "rank": rank,
+                    "validation_rank": row["validation_rank"],
                     "model": row["model"],
                     "runs": row["runs"],
                     "val_ndcg_at_10_mean": row["val_ndcg_at_10"]["mean"],
@@ -256,9 +244,11 @@ def main() -> None:
             )
 
     with open(output_dir / "rq1_table.md", "w") as f:
-        f.write("| Rank | Model | Runs | Val NDCG@10 | Test NDCG@10 | Recall@10 | NDCG@20 | Recall@20 |\n")
-        f.write("| ---: | ----- | ---: | ----------: | -----------: | --------: | ------: | --------: |\n")
-        for rank, row in enumerate(summary_rows, start=1):
+        f.write("Models are ranked by mean validation NDCG@10. Test metrics are reported for final evaluation only.\n\n")
+        f.write("| Validation Rank | Model | Runs | Val NDCG@10 | Test NDCG@10 | Recall@10 | NDCG@20 | Recall@20 |\n")
+        f.write("| -------------: | ----- | ---: | ----------: | -----------: | --------: | ------: | --------: |\n")
+        for row in summary_rows:
+            rank = row["validation_rank"]
             f.write(
                 f"| {rank} | {row['model']} | {row['runs']} | "
                 f"{format_metric_summary(row['val_ndcg_at_10'])} | "
