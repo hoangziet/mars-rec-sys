@@ -166,6 +166,7 @@ def main() -> None:
                 raise RuntimeError(f"Run {run.info.run_id} is missing metrics: {missing}")
             row = {
                 "model": model_name,
+                "seed": int(run.data.params["seed"]),
                 "run_id": run.info.run_id,
                 "run_name": run.info.run_name,
                 "best_val_ndcg_at_10": metrics["best_val_ndcg_at_10"],
