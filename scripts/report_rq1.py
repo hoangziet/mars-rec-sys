@@ -13,7 +13,7 @@ from statsmodels.stats.weightstats import DescrStatsW
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from training.mlflow_contract import HEURISTIC_MODELS
-from training.mlflow_utils import configure_mlflow, load_dataset_freeze_record
+from training.mlflow_utils import configure_mlflow
 
 
 def required_run_count_for_model(model_name: str, seed_count: int) -> int:

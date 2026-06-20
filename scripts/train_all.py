@@ -37,7 +37,7 @@ from pipeline.metrics import (
 from pipeline.optim import build_optimizer, build_scheduler
 from scripts.train import validate_processed_layout
 from training.mlflow_contract import build_run_name, build_training_tags, get_experiment_name_for_phase
-from training.mlflow_utils import collect_common_run_metadata, configure_mlflow, get_dataset_version, get_git_commit, load_dataset_freeze_record, sanitize_metric_name
+from training.mlflow_utils import collect_common_run_metadata, configure_mlflow, get_git_commit, sanitize_metric_name
 from training.trainer import Trainer
 
 DEFAULT_SEEDS = [42, 123, 2024, 3407, 9999]
@@ -76,7 +76,7 @@ def build_benchmark_manifest(
     *,
     benchmark_id: str,
     protocol_version: str,
-    dataset_version: str,
+    preprocessing_version: str,
     expected_models: list[str],
     neural_seeds: list[int],
     heuristic_seed: int,
@@ -84,7 +84,7 @@ def build_benchmark_manifest(
     return {
         "benchmark_id": benchmark_id,
         "protocol_version": protocol_version,
-        "dataset_version": dataset_version,
+        "preprocessing_version": preprocessing_version,
         "expected_models": expected_models,
         "neural_seeds": neural_seeds,
         "heuristic_seed": heuristic_seed,
@@ -100,6 +100,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seeds", nargs="+", type=int, default=DEFAULT_SEEDS)
     parser.add_argument("--benchmark-id", required=True)
     parser.add_argument("--protocol-version", default="rq1-v1")
+    parser.add_argument("--preprocessing-version", default="mars-preprocess-v1")
     return parser.parse_args()
 
 
@@ -116,6 +117,7 @@ def run_neural_model(
     output_dir: str,
     benchmark_id: str,
     protocol_version: str,
+    preprocessing_version: str,
     model_kwargs: dict,
     train_kwargs: dict,
     seed: int,
@@ -149,8 +151,6 @@ def run_neural_model(
 
     optimizer = build_optimizer(model_name, model, train_kwargs)
     scheduler = build_scheduler(optimizer, train_kwargs, len(train_loader))
-    freeze_record = load_dataset_freeze_record(data_dir / "reports" / "dataset_freeze.json")
-    dataset_version = freeze_record["dataset_version"]
 
     trainer   = Trainer(
         model_name, device, output_dir,
@@ -162,8 +162,6 @@ def run_neural_model(
             "log_artifacts": True,
             "phase": phase,
             "variant": "base",
-            "dataset_name": "mars",
-            "dataset_version": dataset_version,
             "git_commit": get_git_commit(),
             "reportable": True,
         },
@@ -174,7 +172,6 @@ def run_neural_model(
         seed=seed,
         phase="benchmark",
         git_commit=get_git_commit(),
-        dataset_version=dataset_version,
         extra_params={**model_kwargs, **train_kwargs},
     )
     mlflow_cfg["tags"] = build_training_tags(
@@ -182,18 +179,14 @@ def run_neural_model(
         phase="benchmark",
         variant="base",
         git_commit=get_git_commit(),
-        dataset_name="mars",
-        dataset_version=dataset_version,
         reportable=True,
     )
     mlflow_cfg["tags"].update(
         {
             "benchmark_id": benchmark_id,
             "protocol_version": protocol_version,
-            "dataset_run_id": freeze_record["dataset_run_id"],
-            "raw_data_hash": freeze_record["raw_data_hash"],
-            "processed_data_hash": freeze_record["processed_data_hash"],
-            "preprocessing_config_hash": freeze_record["preprocessing_config_hash"],
+            "preprocessing_version": preprocessing_version,
+            "data_source": str(data_dir.resolve()),
         }
     )
 
@@ -228,6 +221,7 @@ def run_heuristic_model(
     output_dir: str,
     benchmark_id: str,
     protocol_version: str,
+    preprocessing_version: str,
     model_kwargs: dict,
     train_kwargs: dict,
     seed: int,
@@ -236,9 +230,6 @@ def run_heuristic_model(
 
     phase = "benchmark"
     experiment_name = get_experiment_name_for_phase(phase)
-
-    freeze_record = load_dataset_freeze_record(data_dir / "reports" / "dataset_freeze.json")
-    dataset_version = freeze_record["dataset_version"]
 
     max_len    = train_kwargs.get("max_len", 50)
     batch_size = train_kwargs.get("batch_size", 256)
@@ -275,7 +266,6 @@ def run_heuristic_model(
                     seed=seed,
                     phase="benchmark",
                     git_commit=get_git_commit(),
-                    dataset_version=dataset_version,
                     extra_params={**model_kwargs, **train_kwargs},
                 )
             )
@@ -286,20 +276,12 @@ def run_heuristic_model(
                     phase="benchmark",
                     variant="base",
                     git_commit=get_git_commit(),
-                    dataset_name="mars",
-                    dataset_version=dataset_version,
                     reportable=True,
                     ),
                     "benchmark_id": benchmark_id,
                     "protocol_version": protocol_version,
-                }
-            )
-            mlflow.set_tags(
-                {
-                    "dataset_run_id": freeze_record["dataset_run_id"],
-                    "raw_data_hash": freeze_record["raw_data_hash"],
-                    "processed_data_hash": freeze_record["processed_data_hash"],
-                    "preprocessing_config_hash": freeze_record["preprocessing_config_hash"],
+                    "preprocessing_version": preprocessing_version,
+                    "data_source": str(data_dir.resolve()),
                 }
             )
             mlflow.log_metrics(
@@ -339,7 +321,6 @@ def run_heuristic_model(
                     seed=seed,
                     phase="benchmark",
                     git_commit=get_git_commit(),
-                    dataset_version=dataset_version,
                     extra_params={**model_kwargs, **train_kwargs},
                 )
             )
@@ -350,20 +331,12 @@ def run_heuristic_model(
                     phase="benchmark",
                     variant="base",
                     git_commit=get_git_commit(),
-                    dataset_name="mars",
-                    dataset_version=dataset_version,
                     reportable=True,
                     ),
                     "benchmark_id": benchmark_id,
                     "protocol_version": protocol_version,
-                }
-            )
-            mlflow.set_tags(
-                {
-                    "dataset_run_id": freeze_record["dataset_run_id"],
-                    "raw_data_hash": freeze_record["raw_data_hash"],
-                    "processed_data_hash": freeze_record["processed_data_hash"],
-                    "preprocessing_config_hash": freeze_record["preprocessing_config_hash"],
+                    "preprocessing_version": preprocessing_version,
+                    "data_source": str(data_dir.resolve()),
                 }
             )
             mlflow.log_metrics(
@@ -473,12 +446,11 @@ def main() -> None:
             f"Benchmark manifest already exists for benchmark_id={args.benchmark_id}: {manifest_path}. Use a new benchmark_id."
         )
     comp_dir.mkdir(parents=True, exist_ok=True)
-    freeze_record = load_dataset_freeze_record(data_dir / "reports" / "dataset_freeze.json")
 
     manifest = build_benchmark_manifest(
         benchmark_id=args.benchmark_id,
         protocol_version=args.protocol_version,
-        dataset_version=freeze_record["dataset_version"],
+        preprocessing_version=args.preprocessing_version,
         expected_models=list(args.models),
         neural_seeds=list(args.seeds),
         heuristic_seed=args.seeds[0],
@@ -499,11 +471,13 @@ def main() -> None:
             if name in NEURAL_MODELS:
                 summary = run_neural_model(
                     name, data_dir, stats, device, args.output_dir, args.benchmark_id, args.protocol_version,
+                    args.preprocessing_version,
                     cfg["model_kwargs"].copy(), cfg["train_kwargs"].copy(), seed,
                 )
             elif name in HEURISTIC_MODELS:
                 summary = run_heuristic_model(
                     name, data_dir, stats, args.output_dir, args.benchmark_id, args.protocol_version,
+                    args.preprocessing_version,
                     cfg["model_kwargs"].copy(), cfg["train_kwargs"].copy(), seed,
                 )
             else:
