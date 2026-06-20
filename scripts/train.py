@@ -24,7 +24,7 @@ from pipeline.builder import build_criterion_fn, build_eval_fn, build_model, bui
 from pipeline.loaders import get_eval_loader, get_val_loss_loader, load_stats
 from pipeline.optim import build_optimizer, build_scheduler
 from training.mlflow_contract import build_run_name, build_training_tags, get_experiment_name_for_phase
-from training.mlflow_utils import collect_common_run_metadata, get_dataset_version, get_git_commit, load_dataset_freeze_record
+from training.mlflow_utils import collect_common_run_metadata, get_git_commit
 from training.trainer import Trainer
 
 TRAINABLE_MODELS = ("sasrec", "gsasrec", "gru4rec", "bert4rec", "bprmf")
@@ -53,17 +53,8 @@ def validate_processed_layout(data_dir: Path) -> None:
         raise FileNotFoundError(f"Missing processed artifacts: {missing}")
 
 
-def resolve_dataset_context(data_dir: Path, *, reportable: bool) -> tuple[str, dict | None]:
-    freeze_path = data_dir / "reports" / "dataset_freeze.json"
-    if freeze_path.exists():
-        freeze_record = load_dataset_freeze_record(freeze_path)
-        return freeze_record["dataset_version"], freeze_record
-    if reportable:
-        raise FileNotFoundError(
-            f"Reportable run requires canonical dataset freeze record at {freeze_path}"
-        )
-    return "unknown", None
-
+def resolve_dataset_context(data_dir: Path) -> dict[str, str]:
+    return {"data_source": str(data_dir.resolve())}
 
 
 @hydra.main(version_base=None, config_path="../configs", config_name="config")
@@ -116,7 +107,7 @@ def main(cfg: DictConfig) -> None:
     phase = str(cfg.get("phase", "benchmark"))
     reportable = bool(cfg.get("reportable", phase in {"benchmark", "ablation", "final"}))
     experiment_name = get_experiment_name_for_phase(phase)
-    dataset_version, freeze_record = resolve_dataset_context(data_dir, reportable=reportable)
+    dataset_context = resolve_dataset_context(data_dir)
     run_name = build_run_name(model_name, cfg.seed, variant="base")
 
     trainer = Trainer(
@@ -131,7 +122,6 @@ def main(cfg: DictConfig) -> None:
             "phase": phase,
             "variant": "base",
             "dataset_name": "mars",
-            "dataset_version": dataset_version,
             "git_commit": get_git_commit(),
             "reportable": reportable,
         },
@@ -142,7 +132,6 @@ def main(cfg: DictConfig) -> None:
         seed=cfg.seed,
         phase=phase,
         git_commit=get_git_commit(),
-        dataset_version=dataset_version,
         extra_params={**model_kwargs, **train_kwargs},
     )
     mlflow_cfg["tags"] = build_training_tags(
@@ -150,19 +139,9 @@ def main(cfg: DictConfig) -> None:
         phase=phase,
         variant="base",
         git_commit=get_git_commit(),
-        dataset_name="mars",
-        dataset_version=dataset_version,
         reportable=reportable,
     )
-    if freeze_record is not None:
-        mlflow_cfg["tags"].update(
-            {
-                "dataset_run_id": freeze_record["dataset_run_id"],
-                "raw_data_hash": freeze_record["raw_data_hash"],
-                "processed_data_hash": freeze_record["processed_data_hash"],
-                "preprocessing_config_hash": freeze_record["preprocessing_config_hash"],
-            }
-        )
+    mlflow_cfg["tags"].update(dataset_context)
 
     trainer.train(
         model=model,
