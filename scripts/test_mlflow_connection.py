@@ -9,13 +9,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import mlflow
 from mlflow.artifacts import download_artifacts
 
-from training.mlflow_utils import build_run_name, configure_mlflow
+from training.mlflow_contract import build_run_name
+from training.mlflow_utils import configure_mlflow
 
 
 def main() -> None:
     configure_mlflow(mlflow_module=mlflow)
     experiment_name = "phaseA_remote_test"
-    run_name = build_run_name("connectivity-check", 0, phase="smoke")
+    run_name = build_run_name("connectivity-check", 0, variant="smoke")
 
     mlflow.set_experiment(experiment_name)
     with mlflow.start_run(run_name=run_name) as run:

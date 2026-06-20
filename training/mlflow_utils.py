@@ -108,12 +108,6 @@ def configure_mlflow(
     return settings
 
 
-def build_run_name(model_name: str, seed: int, phase: str | None = None) -> str:
-    if phase:
-        return f"{phase}-{model_name}-seed-{seed}"
-    return f"{model_name}-seed-{seed}"
-
-
 def get_git_commit() -> str:
     try:
         import subprocess

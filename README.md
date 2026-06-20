@@ -126,7 +126,7 @@ make test
 
 - `mars_reports` for shared report bundles
 
-Run naming: `<benchmark-id>-<model>-s<seed>` (e.g. `rq1-v1-sasrec-s42`).
+Run naming: `<benchmark-id>-<model>-<variant>-s<seed>` (e.g. `rq1-v1-sasrec-base-s42`).
 
 ## Local Environment
 
