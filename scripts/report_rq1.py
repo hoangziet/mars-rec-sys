@@ -135,8 +135,10 @@ def main() -> None:
             raise RuntimeError(
                 f"Model {model_name} has {len(model_runs)} runs but expected {expected} for benchmark {args.benchmark_id}"
             )
-        if model_name not in HEURISTIC_MODELS:
-            actual_seed_list = [int(run.data.params["seed"]) for run in model_runs]
+        actual_seed_list = [int(run.data.params["seed"]) for run in model_runs]
+        if model_name in HEURISTIC_MODELS:
+            validate_seed_set(model_name, actual_seed_list, {int(manifest["heuristic_seed"])})
+        else:
             validate_seed_set(model_name, actual_seed_list, set(manifest["neural_seeds"]))
 
     output_dir = Path(args.output_dir) if args.output_dir else Path("experiments") / "benchmark" / args.benchmark_id / "reports"

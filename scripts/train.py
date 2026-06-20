@@ -121,7 +121,6 @@ def main(cfg: DictConfig) -> None:
             "log_artifacts": True,
             "phase": phase,
             "variant": "base",
-            "dataset_name": "mars",
             "git_commit": get_git_commit(),
             "reportable": reportable,
         },

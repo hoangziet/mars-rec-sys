@@ -113,16 +113,18 @@ def main() -> None:
 
     with open(output_dir / "rq1_pairwise.csv", "w", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(["model", "seed", "test_NDCG_at_10", "paired_metric"])
+        writer.writerow(["seed", "winner_model", "winner_value", "runner_up_model", "runner_up_value", "difference"])
         for seed, w, r in pairs:
-            writer.writerow([winner, seed, f"{w:.6f}", "winner"])
-            writer.writerow([runner_up, seed, f"{r:.6f}", "runner_up"])
+            diff = w - r
+            writer.writerow([seed, winner, f"{w:.6f}", runner_up, f"{r:.6f}", f"{diff:.6f}"])
 
     with open(output_dir / "rq1_significance.md", "w") as f:
         f.write(f"# RQ1 Statistical Comparison: {winner} vs {runner_up}\n\n")
         f.write(f"Paired seeds: {len(pairs)}\n\n")
         f.write(f"Winner ({winner}) mean test NDCG@10: {winner_mean:.4f}\n")
         f.write(f"Runner-up ({runner_up}) mean test NDCG@10: {runner_mean:.4f}\n")
+        mean_diff = winner_mean - runner_mean
+        f.write(f"Mean paired difference: {mean_diff:.6f}\n")
         f.write(f"Relative improvement: {improvement:.4f} ({improvement * 100:.2f}%)\n\n")
         f.write("## 95% CI for paired differences\n\n")
         f.write(f"[{stats['ci95_low']:.4f}, {stats['ci95_high']:.4f}]\n\n")

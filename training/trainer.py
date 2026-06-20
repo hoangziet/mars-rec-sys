@@ -177,7 +177,6 @@ class Trainer:
             self._mlflow_log_artifacts = mlflow_config.get("log_artifacts", True)
             self._mlflow_phase = mlflow_config.get("phase")
             self._mlflow_variant = mlflow_config.get("variant")
-            self._mlflow_dataset_name = mlflow_config.get("dataset_name")
             self._mlflow_git_commit = mlflow_config.get("git_commit")
             self._mlflow_reportable = mlflow_config.get("reportable", True)
             configure_mlflow(mlflow_module=self._mlflow)
