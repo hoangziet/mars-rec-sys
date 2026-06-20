@@ -3,14 +3,11 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import sys
 from pathlib import Path
 
 import numpy as np
 import scipy.stats
 from statsmodels.stats.weightstats import DescrStatsW
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -33,7 +30,7 @@ def select_top_two_models(summary_rows: list[dict]) -> tuple[str, str]:
     return ranked[0]["model"], ranked[1]["model"]
 
 
-def _index_by_metric(rows: list[dict], model: str, metric: str) -> dict[int, float]:
+def _index_by_seed(rows: list[dict], model: str, metric: str) -> dict[int, float]:
     by_seed: dict[int, float] = {}
     for row in rows:
         if row["model"] != model:
@@ -47,8 +44,8 @@ def _index_by_metric(rows: list[dict], model: str, metric: str) -> dict[int, flo
 
 def pair_runs_by_seed(rows: list[dict], winner: str, runner_up: str, expected_pairs: int) -> list[tuple[int, float, float]]:
     metric = "test_NDCG_at_10"
-    winner_by_seed = _index_by_metric(rows, winner, metric)
-    runner_by_seed = _index_by_metric(rows, runner_up, metric)
+    winner_by_seed = _index_by_seed(rows, winner, metric)
+    runner_by_seed = _index_by_seed(rows, runner_up, metric)
     if set(winner_by_seed) != set(runner_by_seed):
         raise RuntimeError(
             f"Seed mismatch: winner={sorted(winner_by_seed)}, runner_up={sorted(runner_by_seed)}"
