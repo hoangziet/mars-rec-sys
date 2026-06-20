@@ -9,7 +9,6 @@ TRAINING_EXPERIMENTS = {
 }
 
 SHARED_EXPERIMENTS = {
-    "datasets": "mars_datasets",
     "reports": "mars_reports",
 }
 
@@ -61,8 +60,6 @@ def build_training_tags(
     phase: str,
     variant: str,
     git_commit: str,
-    dataset_name: str,
-    dataset_version: str,
     reportable: bool,
 ) -> dict[str, str]:
     return {
@@ -74,7 +71,5 @@ def build_training_tags(
         "scope": "run",
         "artifact_class": "training",
         "git_commit": git_commit,
-        "dataset_name": dataset_name,
-        "dataset_version": dataset_version,
         "reportable": str(reportable).lower(),
     }

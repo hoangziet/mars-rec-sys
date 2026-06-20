@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import types
 from collections.abc import Callable
@@ -76,7 +75,6 @@ def collect_common_run_metadata(
     seed: int,
     phase: str,
     git_commit: str,
-    dataset_version: str,
     extra_params: dict,
 ) -> dict:
     payload = {
@@ -84,7 +82,6 @@ def collect_common_run_metadata(
         "seed": seed,
         "phase": phase,
         "git_commit": git_commit,
-        "dataset_version": dataset_version,
     }
     payload.update(extra_params)
     return payload
@@ -129,67 +126,3 @@ def get_git_commit() -> str:
         ).strip()
     except Exception:
         return "unknown"
-
-
-def get_dataset_version(stats_path: Path) -> str:
-    if not stats_path.exists():
-        return "unknown"
-    return "mars-processed-v1"
-
-
-def build_dataset_run_ref(
-    *,
-    dataset_name: str,
-    dataset_version: str,
-    raw_data_hash: str,
-    processed_data_hash: str,
-    preprocessing_config_hash: str,
-    dataset_experiment: str,
-    dataset_run_id: str,
-) -> dict[str, str]:
-    return {
-        "dataset_name": dataset_name,
-        "dataset_version": dataset_version,
-        "raw_data_hash": raw_data_hash,
-        "processed_data_hash": processed_data_hash,
-        "preprocessing_config_hash": preprocessing_config_hash,
-        "dataset_experiment": dataset_experiment,
-        "dataset_run_id": dataset_run_id,
-    }
-
-
-def validate_reportable_dataset_metadata(*, tags: dict[str, str], dataset_ref: dict[str, str]) -> None:
-    required_keys = {
-        "dataset_name",
-        "dataset_version",
-        "raw_data_hash",
-        "processed_data_hash",
-        "preprocessing_config_hash",
-        "dataset_run_id",
-    }
-    missing = sorted(key for key in required_keys if not tags.get(key))
-    if missing:
-        raise RuntimeError(f"Missing required dataset tags: {missing}")
-
-    mismatched = [key for key in required_keys if tags.get(key) != dataset_ref.get(key)]
-    if mismatched:
-        raise RuntimeError(f"Dataset metadata mismatch between tags and dataset ref: {mismatched}")
-
-
-def load_dataset_freeze_record(path: Path) -> dict[str, str]:
-    if not path.exists():
-        raise FileNotFoundError(f"Dataset freeze record does not exist: {path}")
-
-    payload = json.loads(path.read_text())
-    required_keys = {
-        "dataset_name",
-        "dataset_version",
-        "dataset_run_id",
-        "raw_data_hash",
-        "processed_data_hash",
-        "preprocessing_config_hash",
-    }
-    missing = sorted(key for key in required_keys if not payload.get(key))
-    if missing:
-        raise RuntimeError(f"dataset freeze record missing fields: {missing}")
-    return payload
