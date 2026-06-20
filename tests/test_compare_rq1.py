@@ -6,7 +6,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scripts.compare_rq1 import pair_runs_by_seed, relative_improvement, select_top_two_models
+from scripts.compare_rq1 import pair_runs_by_seed, relative_improvement, select_top_two_models, _require_min_pairs
 
 
 def test_pair_runs_by_seed_matches_winner_and_runner_up():
@@ -69,3 +69,8 @@ def test_zero_differences_are_handled_without_nan():
         (42, 0.30, 0.30),
         (123, 0.28, 0.28),
     ]
+
+
+def test_require_min_pairs_rejects_single_pair():
+    with pytest.raises(ValueError, match="at least two paired seeds"):
+        _require_min_pairs(1)

@@ -59,7 +59,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Aggregate RQ1 benchmark runs from MLflow.")
     parser.add_argument("--benchmark-id", required=True)
     parser.add_argument("--output-dir", default=None)
-    parser.add_argument("--expected-neural-runs", type=int, default=5)
     parser.add_argument("--manifest", default=None)
     return parser
 
@@ -128,7 +127,7 @@ def main() -> None:
 
     validate_model_set(set(grouped), set(manifest["expected_models"]))
 
-    seed_count = args.expected_neural_runs
+    seed_count = len(manifest["neural_seeds"])
     for model_name, model_runs in grouped.items():
         expected = required_run_count_for_model(model_name, seed_count)
         if len(model_runs) != expected:
@@ -234,15 +233,15 @@ def main() -> None:
                     "model": row["model"],
                     "runs": row["runs"],
                     "val_ndcg_at_10_mean": row["val_ndcg_at_10"]["mean"],
-                    "val_ndcg_at_10_std": row["val_ndcg_at_10"]["std"] or "",
+                    "val_ndcg_at_10_std": "" if row["val_ndcg_at_10"]["std"] is None else row["val_ndcg_at_10"]["std"],
                     "test_ndcg_at_10_mean": row["test_ndcg_at_10"]["mean"],
-                    "test_ndcg_at_10_std": row["test_ndcg_at_10"]["std"] or "",
+                    "test_ndcg_at_10_std": "" if row["test_ndcg_at_10"]["std"] is None else row["test_ndcg_at_10"]["std"],
                     "test_recall_at_10_mean": row["test_recall_at_10"]["mean"],
-                    "test_recall_at_10_std": row["test_recall_at_10"]["std"] or "",
+                    "test_recall_at_10_std": "" if row["test_recall_at_10"]["std"] is None else row["test_recall_at_10"]["std"],
                     "test_ndcg_at_20_mean": row["test_ndcg_at_20"]["mean"],
-                    "test_ndcg_at_20_std": row["test_ndcg_at_20"]["std"] or "",
+                    "test_ndcg_at_20_std": "" if row["test_ndcg_at_20"]["std"] is None else row["test_ndcg_at_20"]["std"],
                     "test_recall_at_20_mean": row["test_recall_at_20"]["mean"],
-                    "test_recall_at_20_std": row["test_recall_at_20"]["std"] or "",
+                    "test_recall_at_20_std": "" if row["test_recall_at_20"]["std"] is None else row["test_recall_at_20"]["std"],
                 }
             )
 

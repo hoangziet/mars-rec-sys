@@ -23,6 +23,13 @@ def parse_args() -> argparse.Namespace:
     return build_parser().parse_args()
 
 
+def _require_min_pairs(n: int) -> None:
+    if n < 2:
+        raise ValueError(
+            f"Statistical comparison requires at least two paired seeds. Got expected-pairs={n}."
+        )
+
+
 def select_top_two_models(summary_rows: list[dict]) -> tuple[str, str]:
     if len(summary_rows) < 2:
         raise RuntimeError(f"Need at least 2 ranked models, got {len(summary_rows)}")
@@ -93,6 +100,8 @@ def _summarize_paired_differences(pairs: list[tuple[int, float, float]]) -> dict
 
 def main() -> None:
     args = parse_args()
+
+    _require_min_pairs(args.expected_pairs)
 
     summary_rows = json.loads(Path(args.summary_file).read_text())
     winner, runner_up = select_top_two_models(summary_rows)

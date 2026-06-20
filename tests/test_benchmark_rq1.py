@@ -110,15 +110,16 @@ def test_train_all_parse_args_supports_protocol_version_and_seeds(monkeypatch):
     assert args.seeds == [42]
 
 
-def test_report_rq1_parse_args_supports_expected_neural_runs(monkeypatch):
+def test_report_rq1_parse_args_only_has_manifest_args(monkeypatch):
     monkeypatch.setattr(
         sys,
         "argv",
-        ["report_rq1.py", "--benchmark-id", "rq1-smoke", "--manifest", "experiments/benchmark/rq1-smoke/benchmark_manifest.json", "--expected-neural-runs", "1"],
+        ["report_rq1.py", "--benchmark-id", "rq1-smoke", "--manifest", "experiments/benchmark/rq1-smoke/benchmark_manifest.json"],
     )
     args = parse_report_args()
-    assert args.expected_neural_runs == 1
+    assert args.benchmark_id == "rq1-smoke"
     assert args.manifest.endswith("benchmark_manifest.json")
+    assert not hasattr(args, "expected_neural_runs")
 
 
 def test_build_benchmark_manifest_contains_expected_models_and_seed_policy():

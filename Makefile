@@ -19,7 +19,7 @@ rq1-full:
 	uv run python scripts/train_all.py $(BENCHMARK_MODELS) --seeds $(RQ1_SEEDS) --benchmark-id $(BENCHMARK_ID) --protocol-version rq1-v1 --preprocessing-version $(PREPROCESSING_VERSION)
 
 rq1-report:
-	uv run python scripts/report_rq1.py --benchmark-id $(BENCHMARK_ID) --output-dir $(REPORT_OUTPUT_DIR) --expected-neural-runs $(EXPECTED_NEURAL_RUNS)
+	uv run python scripts/report_rq1.py --benchmark-id $(BENCHMARK_ID) --output-dir $(REPORT_OUTPUT_DIR)
 
 rq1-compare:
 	uv run python scripts/compare_rq1.py --runs-file $(REPORT_OUTPUT_DIR)/rq1_runs.csv --summary-file $(REPORT_OUTPUT_DIR)/rq1_summary.json --output-dir $(PAIRWISE_OUTPUT_DIR) --expected-pairs $(EXPECTED_NEURAL_RUNS)
