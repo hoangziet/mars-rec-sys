@@ -17,13 +17,11 @@ SEQUENTIAL_BACKBONES = {"sasrec", "gsasrec", "gru4rec", "bert4rec", "bprmf"}
 
 ARTIFACT_PATHS = {
     "config_dir": "config",
-    "dataset_dir": "dataset",
     "metrics_dir": "metrics",
     "plots_dir": "plots",
     "checkpoints_dir": "checkpoints",
     "reports_dir": "reports",
     "resolved_config": "config/resolved_config.yaml",
-    "dataset_ref": "dataset/run_dataset_ref.json",
     "metrics_history": "metrics/history.json",
     "metrics_final": "metrics/final_metrics.json",
     "loss_plot": "plots/loss_plot.png",

@@ -46,7 +46,7 @@ make rq1-full
 
 - Neural models train on every seed in `--seeds`. With the default `RQ1_SEEDS = 42 123 2024 3407 9999`, you get five runs per neural model.
 - Heuristic models (`popularity`, `itemcf`) run once per campaign because they are deterministic. The runner still produces a single output per heuristic model per `benchmark_id`.
-- `--benchmark-id` is a unique campaign ID. Each `benchmark_id` produces an isolated output directory. To rerun a campaign, either pick a new `benchmark_id` or delete the old `experiments/benchmark/<benchmark_id>/` directory first.
+- Each `benchmark_id` must be a unique campaign ID. Do not reuse the same ID by only deleting the local output directory — MLflow runs persist and the reporter will collect both old and new runs, causing duplicate seed or wrong run count errors. Always pick a new `benchmark_id` for a fresh campaign.
 
 ### 3. Benchmark report
 
@@ -66,7 +66,7 @@ Outputs:
 
 ### 4. Statistical comparison
 
-Pairwise significance tests between neural models:
+Paired statistical comparison between the validation-ranked winner and runner-up:
 
 ```bash
 make rq1-compare BENCHMARK_ID=rq1-v1 EXPECTED_NEURAL_RUNS=5
@@ -79,8 +79,8 @@ Writes pairwise stats to `experiments/benchmark/<benchmark_id>/stats/`.
 Use `scripts/train.py` for one-off neural runs, smoke checks, and tuning:
 
 ```bash
-uv run python scripts/train.py sasrec
-uv run python scripts/train.py gru4rec --seed 123
+uv run python scripts/train.py model=sasrec
+uv run python scripts/train.py model=gru4rec seed=123
 ```
 
 `train.py` is a development tool, not part of the benchmark path.

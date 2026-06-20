@@ -40,8 +40,6 @@ outputs/
 # models
 *.pt
 
-# Tests
-tests/
 
 # others
 .claude/

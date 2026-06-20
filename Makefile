@@ -1,6 +1,7 @@
 BENCHMARK_MODELS = sasrec gsasrec gru4rec bert4rec bprmf popularity itemcf
 RQ1_SEEDS = 42 123 2024 3407 9999
 BENCHMARK_ID ?= rq1-v1
+SMOKE_BENCHMARK_ID ?= rq1-smoke
 EXPECTED_NEURAL_RUNS ?= 5
 REPORT_OUTPUT_DIR ?= experiments/benchmark/$(BENCHMARK_ID)/reports
 PAIRWISE_OUTPUT_DIR ?= experiments/benchmark/$(BENCHMARK_ID)/stats
@@ -12,10 +13,10 @@ preprocess:
 	uv run python data/preprocess.py
 
 rq1-smoke:
-	uv run python scripts/train_all.py $(BENCHMARK_MODELS) --seeds 42 --benchmark-id rq1-smoke --protocol-version rq1-v1 --preprocessing-version $(PREPROCESSING_VERSION)
+	uv run python scripts/train_all.py $(BENCHMARK_MODELS) --seeds 42 --benchmark-id $(SMOKE_BENCHMARK_ID) --protocol-version rq1-v1 --preprocessing-version $(PREPROCESSING_VERSION)
 
 rq1-full:
-	uv run python scripts/train_all.py $(BENCHMARK_MODELS) --seeds $(RQ1_SEEDS) --benchmark-id rq1-v1 --protocol-version rq1-v1 --preprocessing-version $(PREPROCESSING_VERSION)
+	uv run python scripts/train_all.py $(BENCHMARK_MODELS) --seeds $(RQ1_SEEDS) --benchmark-id $(BENCHMARK_ID) --protocol-version rq1-v1 --preprocessing-version $(PREPROCESSING_VERSION)
 
 rq1-report:
 	uv run python scripts/report_rq1.py --benchmark-id $(BENCHMARK_ID) --output-dir $(REPORT_OUTPUT_DIR) --expected-neural-runs $(EXPECTED_NEURAL_RUNS)
