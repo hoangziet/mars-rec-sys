@@ -27,6 +27,7 @@ __pycache__/
 
 # experiments
 experiments/
+!experiments/benchmark/*/benchmark_manifest.json
 
 # mlruns
 mlruns/
