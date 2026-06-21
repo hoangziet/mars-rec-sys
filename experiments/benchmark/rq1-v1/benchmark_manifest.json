@@ -1,0 +1,22 @@
+{
+  "benchmark_id": "rq1-v1",
+  "protocol_version": "rq1-v1",
+  "expected_models": [
+    "sasrec",
+    "gsasrec",
+    "gru4rec",
+    "bert4rec",
+    "bprmf",
+    "popularity",
+    "itemcf"
+  ],
+  "neural_seeds": [
+    42,
+    123,
+    2024,
+    3407,
+    9999
+  ],
+  "heuristic_seed": 42,
+  "preprocessing_version": "mars-preprocess-v1"
+}
