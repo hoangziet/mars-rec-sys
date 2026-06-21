@@ -177,7 +177,7 @@ scripts/
   train.py                   single neural run (dev tool)
   train_all.py               benchmark runner for RQ1
   report_rq1.py              benchmark reporter
-  compare_rq1.py             winner-versus-baseline statistical comparison
+  rq1_compare.py             winner-versus-baseline statistical comparison
   predict.py                 inference helper
   test_mlflow_connection.py  MLflow smoke test
   publish_report_bundle.py
