@@ -53,8 +53,8 @@ make rq1-full
 Aggregates MLflow runs into `experiments/benchmark/<benchmark_id>/reports/`:
 
 ```bash
-make rq1-report BENCHMARK_ID=rq1-smoke EXPECTED_NEURAL_RUNS=1
-make rq1-report BENCHMARK_ID=rq1-v1 EXPECTED_NEURAL_RUNS=5
+make rq1-report BENCHMARK_ID=rq1-smoke
+make rq1-report BENCHMARK_ID=rq1-v1
 ```
 
 Outputs:
@@ -66,13 +66,20 @@ Outputs:
 
 ### 4. Statistical comparison
 
-Paired statistical comparison between the validation-ranked winner and runner-up:
+The model ranked first by mean validation NDCG@10 is compared against every baseline.
+
+Winner-versus-neural-baseline comparisons use two-sided paired t-tests across matched random seeds. Holm correction controls the family-wise error rate at α = 0.05.
+
+ItemCF and Popularity are deterministic and are reported descriptively.
 
 ```bash
-make rq1-compare BENCHMARK_ID=rq1-v1 EXPECTED_NEURAL_RUNS=5
+make rq1-compare BENCHMARK_ID=rq1-v1
 ```
 
-Writes pairwise stats to `experiments/benchmark/<benchmark_id>/stats/`.
+Writes winner-versus-baseline stats to `experiments/benchmark/<benchmark_id>/stats/`:
+- `rq1_winner_vs_all.csv` — one row per baseline with p-values and Holm-adjusted p-values
+- `rq1_seed_pairs.csv` — per-seed paired values for every neural comparison
+- `rq1_significance.md` — formatted summary table
 
 ## Single-model runs
 
@@ -101,14 +108,14 @@ uv run python scripts/predict.py sasrec --user_id 42 --top_k 10 --show_titles
 ```bash
 make preprocess
 make rq1-smoke
-make rq1-report BENCHMARK_ID=rq1-smoke EXPECTED_NEURAL_RUNS=1
+make rq1-report BENCHMARK_ID=rq1-smoke
 make rq1-full
-make rq1-report BENCHMARK_ID=rq1-v1 EXPECTED_NEURAL_RUNS=5
-make rq1-compare BENCHMARK_ID=rq1-v1 EXPECTED_NEURAL_RUNS=5
+make rq1-report BENCHMARK_ID=rq1-v1
+make rq1-compare BENCHMARK_ID=rq1-v1
 make test
 ```
 
-`rq1-report` and `rq1-compare` default to `BENCHMARK_ID=rq1-v1` and `EXPECTED_NEURAL_RUNS=5`.
+`rq1-report` and `rq1-compare` default to `BENCHMARK_ID=rq1-v1`.
 
 ## MLflow Conventions
 
@@ -170,7 +177,7 @@ scripts/
   train.py                   single neural run (dev tool)
   train_all.py               benchmark runner for RQ1
   report_rq1.py              benchmark reporter
-  compare_rq1.py             pairwise statistical comparison
+  compare_rq1.py             winner-versus-baseline statistical comparison
   predict.py                 inference helper
   test_mlflow_connection.py  MLflow smoke test
   publish_report_bundle.py
