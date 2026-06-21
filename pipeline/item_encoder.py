@@ -79,19 +79,19 @@ class ItemEncoder(nn.Module):
                 tensor = getattr(self, f"meta_{field}")
                 field_vals = tensor[item_ids]
 
-                if field_vals.dim() == 1:
-                    if field == "duration":
-                        proj = getattr(self, f"proj_{field}")
-                        parts.append(proj(field_vals.unsqueeze(-1)))
-                    else:
-                        emb = getattr(self, f"emb_{field}")
-                        parts.append(emb(field_vals))
+                if field == "duration":
+                    proj = getattr(self, f"proj_{field}")
+                    encoded = proj(field_vals.unsqueeze(-1))
+                elif tensor.dim() == 1:
+                    emb = getattr(self, f"emb_{field}")
+                    encoded = emb(field_vals)
                 else:
                     emb = getattr(self, f"emb_{field}")
                     embedded = emb(field_vals)
                     mask = (field_vals != 0).unsqueeze(-1).float()
-                    pooled = (embedded * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1)
-                    parts.append(pooled)
+                    encoded = (embedded * mask).sum(dim=-2) / mask.sum(dim=-2).clamp(min=1)
+
+                parts.append(encoded)
 
         if self.use_text:
             text_vecs = self.text_emb[item_ids]

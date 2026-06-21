@@ -96,6 +96,12 @@ uv run python scripts/train.py model=gru4rec seed=123
 
 Models are ranked by validation `NDCG@10` (primary metric, checkpoint selection). Test metrics are for final evaluation only and are not used for ranking or early stopping.
 
+## Data notes
+
+**Engagement signal:** `engagement_score` in `train_sequences.csv` is a per-user-item aggregate derived from `watch_percentage` in explicit ratings. It uses the global max watch percentage per (user, item) pair, not a temporally aligned per-event signal. Missing watch data defaults to 0.0. The confidence weighting formula is `confidence = 1 + alpha * clip(engagement, 0, 1)`.
+
+**Metadata completeness:** Item metadata (`item_features/item_metadata.csv`) has varying missing rates: ~17% difficulty, ~15% theme, ~10% software, ~90% job, ~1% duration. Missing fields are encoded as MISSING tokens (index 1) in the vocabulary.
+
 ## Inference
 
 ```bash

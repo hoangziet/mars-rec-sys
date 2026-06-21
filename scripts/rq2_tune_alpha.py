@@ -73,7 +73,6 @@ def _run_single(args, alpha: float, seed: int) -> dict:
     model = build_model("gsasrec", stats["n_items"], stats["n_users"], model_kwargs, max_len).to(device)
     train_loader = build_train_loader("gsasrec", data_dir, stats, train_kwargs)
     val_loader = get_eval_loader(data_dir / "splits" / "val_sequences.csv", stats, batch_size=batch_size, max_len=max_len)
-    test_loader = get_eval_loader(data_dir / "splits" / "test_sequences.csv", stats, batch_size=batch_size, max_len=max_len)
     optimizer = build_optimizer("gsasrec", model, train_kwargs)
     scheduler = build_scheduler(optimizer, train_kwargs, len(train_loader))
     criterion_fn = build_criterion_fn("gsasrec", train_kwargs)
@@ -93,7 +92,7 @@ def _run_single(args, alpha: float, seed: int) -> dict:
     mlflow_cfg["tags"]["rq"] = "rq2"
     mlflow_cfg["tags"]["benchmark_id"] = args.benchmark_id
 
-    return trainer.train(model=model, train_loader=train_loader, val_loader=val_loader, test_loader=test_loader, optimizer=optimizer, epochs=train_kwargs["epochs"], criterion_fn=criterion_fn, eval_fn=eval_fn, gradient_clip=train_kwargs.get("gradient_clip", 5.0), val_loss_loader=val_loss_loader, early_stop_patience=train_kwargs.get("early_stop_patience", 10), early_stop_min_delta=train_kwargs.get("early_stop_min_delta", 1e-4), scheduler=scheduler, mlflow_params=mlflow_cfg)
+    return trainer.train(model=model, train_loader=train_loader, val_loader=val_loader, optimizer=optimizer, epochs=train_kwargs["epochs"], criterion_fn=criterion_fn, eval_fn=eval_fn, gradient_clip=train_kwargs.get("gradient_clip", 5.0), val_loss_loader=val_loss_loader, early_stop_patience=train_kwargs.get("early_stop_patience", 10), early_stop_min_delta=train_kwargs.get("early_stop_min_delta", 1e-4), scheduler=scheduler, mlflow_params=mlflow_cfg)
 
 
 def main() -> None:

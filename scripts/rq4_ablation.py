@@ -54,15 +54,24 @@ def parse_args() -> argparse.Namespace:
     return build_parser().parse_args()
 
 
+METADATA_FLAGS = {
+    "M0": (False, False),
+    "M1": (True, False),
+    "M2": (False, True),
+    "M3": (True, True),
+}
+
+
 def _get_variant_config(variant: str, best_alpha: float, best_variant: str) -> dict:
+    use_structured, use_text = METADATA_FLAGS[best_variant]
     if variant == "V0":
         return {"config_name": "gsasrec", "use_structured": False, "use_text": False, "confidence_alpha": 0.0}
     elif variant == "V1":
         return {"config_name": "gsasrec", "use_structured": False, "use_text": False, "confidence_alpha": best_alpha}
     elif variant == "V2":
-        return {"config_name": "gsasrec_metadata", "use_structured": True, "use_text": True, "confidence_alpha": 0.0}
+        return {"config_name": "gsasrec_metadata", "use_structured": use_structured, "use_text": use_text, "confidence_alpha": 0.0}
     elif variant == "V3":
-        return {"config_name": "gsasrec_metadata", "use_structured": True, "use_text": True, "confidence_alpha": best_alpha}
+        return {"config_name": "gsasrec_metadata", "use_structured": use_structured, "use_text": use_text, "confidence_alpha": best_alpha}
     else:
         raise ValueError(f"Unknown variant: {variant}")
 
@@ -82,6 +91,7 @@ def _run_single(args, variant: str, seed: int, variant_cfg: dict) -> dict:
     model_kwargs = dict(base_cfg["model_kwargs"])
     train_kwargs = dict(base_cfg["train_kwargs"])
     train_kwargs["confidence_alpha"] = variant_cfg["confidence_alpha"]
+    train_kwargs["batch_size"] = 128
 
     if variant_cfg["config_name"] == "gsasrec_metadata":
         encoder_cfg = model_kwargs.get("item_encoder", {})
@@ -117,7 +127,31 @@ def _run_single(args, variant: str, seed: int, variant_cfg: dict) -> dict:
     mlflow_cfg["tags"]["benchmark_id"] = args.benchmark_id
     mlflow_cfg["tags"]["confidence_alpha"] = str(variant_cfg["confidence_alpha"])
 
-    return trainer.train(model=model, train_loader=train_loader, val_loader=val_loader, test_loader=test_loader, optimizer=optimizer, epochs=train_kwargs["epochs"], criterion_fn=criterion_fn, eval_fn=eval_fn, gradient_clip=train_kwargs.get("gradient_clip", 5.0), val_loss_loader=val_loss_loader, early_stop_patience=train_kwargs.get("early_stop_patience", 10), early_stop_min_delta=train_kwargs.get("early_stop_min_delta", 1e-4), scheduler=scheduler, mlflow_params=mlflow_cfg)
+    result = trainer.train(model=model, train_loader=train_loader, val_loader=val_loader, test_loader=test_loader, optimizer=optimizer, epochs=train_kwargs["epochs"], criterion_fn=criterion_fn, eval_fn=eval_fn, gradient_clip=train_kwargs.get("gradient_clip", 5.0), val_loss_loader=val_loss_loader, early_stop_patience=train_kwargs.get("early_stop_patience", 10), early_stop_min_delta=train_kwargs.get("early_stop_min_delta", 1e-4), scheduler=scheduler, mlflow_params=mlflow_cfg)
+
+    _export_per_user(model, test_loader, device, variant, seed, args.output_dir)
+
+    return result
+
+
+def _export_per_user(model, test_loader, device, variant, seed, output_dir):
+    from pipeline.metrics import evaluate_sequential_detailed
+    import csv as csv_mod
+
+    _, per_user = evaluate_sequential_detailed(model, test_loader, device)
+    for row in per_user:
+        row["variant"] = variant
+        row["seed"] = seed
+
+    user_dir = Path(output_dir) / "per_user"
+    user_dir.mkdir(parents=True, exist_ok=True)
+    path = user_dir / f"{variant}_s{seed}.csv"
+    fields = ["variant", "seed", "user_idx", "target_item", "rank", "hit_at_10", "ndcg_at_10", "hit_at_20", "ndcg_at_20"]
+    with open(path, "w", newline="") as f:
+        writer = csv_mod.DictWriter(f, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(per_user)
+    return path
 
 
 def main() -> None:

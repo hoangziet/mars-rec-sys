@@ -6,7 +6,7 @@ REPORT_OUTPUT_DIR ?= experiments/benchmark/$(BENCHMARK_ID)/reports
 STATS_OUTPUT_DIR ?= experiments/benchmark/$(BENCHMARK_ID)/stats
 PREPROCESSING_VERSION ?= mars-preprocess-v1
 
-.PHONY: preprocess rq1-smoke rq1-full rq1-report rq1-compare test rq3-precompute rq3-tune rq3-report rq4-ablation rq4-compare rq4-report
+.PHONY: preprocess rq1-smoke rq1-full rq1-report rq1-compare test rq2-tune rq2-report rq3-precompute rq3-tune rq3-report rq4-ablation rq4-collect rq4-compare rq4-report
 
 preprocess:
 	uv run python data/preprocess.py
@@ -67,8 +67,11 @@ RQ4_COMPARISON_DIR ?= experiments/rq4/$(RQ4_BENCHMARK_ID)
 rq4-ablation:
 	uv run python scripts/rq4_ablation.py --best-alpha $(RQ2_BEST_ALPHA) --best-variant $(RQ3_BEST_VARIANT) --seeds $(RQ4_SEEDS) --benchmark-id $(RQ4_BENCHMARK_ID)
 
+rq4-collect:
+	uv run python scripts/rq4_collect.py --benchmark-id $(RQ4_BENCHMARK_ID) --output-dir $(RQ4_COMPARISON_DIR)
+
 rq4-compare:
-	uv run python scripts/rq4_compare.py --runs-file $(RQ4_COMPARISON_DIR)/rq4_runs.csv --summary-file $(RQ4_COMPARISON_DIR)/rq4_summary.json --manifest experiments/benchmark/rq1-v1/benchmark_manifest.json --output-dir $(RQ4_COMPARISON_DIR)
+	uv run python scripts/rq4_compare.py --runs-file $(RQ4_COMPARISON_DIR)/rq4_runs.csv --summary-file $(RQ4_COMPARISON_DIR)/rq4_summary.json --manifest $(RQ4_COMPARISON_DIR)/rq4_manifest.json --output-dir $(RQ4_COMPARISON_DIR)
 
 rq4-report:
 	uv run python scripts/rq4_report.py --benchmark-id $(RQ4_BENCHMARK_ID) --comparison-dir $(RQ4_COMPARISON_DIR) --output-dir $(RQ4_OUTPUT_DIR)
