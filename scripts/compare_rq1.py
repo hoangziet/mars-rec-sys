@@ -3,12 +3,15 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import sys
 from pathlib import Path
 
 import numpy as np
 import scipy.stats
 from statsmodels.stats.multitest import multipletests
 from statsmodels.stats.weightstats import DescrStatsW
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from training.mlflow_contract import HEURISTIC_MODELS
 
