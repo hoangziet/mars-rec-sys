@@ -96,10 +96,23 @@ def relative_improvement(winner_mean: float, baseline_mean: float) -> float | No
 
 
 def _count_wins_ties_losses(differences: np.ndarray) -> tuple[int, int, int]:
-    wins = int(np.sum(differences > 0))
-    ties = int(np.sum(np.isclose(differences, 0.0)))
-    losses = int(np.sum(differences < 0))
+    tie_mask = np.isclose(differences, 0.0)
+    wins = int(np.sum((differences > 0) & ~tie_mask))
+    ties = int(np.sum(tie_mask))
+    losses = int(np.sum((differences < 0) & ~tie_mask))
+    assert wins + ties + losses == len(differences), (
+        f"wins({wins}) + ties({ties}) + losses({losses}) "
+        f"!= {len(differences)}"
+    )
     return wins, ties, losses
+
+
+def _format_p_value(value: float | None) -> str:
+    if value is None:
+        return "-"
+    if value < 1e-6:
+        return f"{value:.2e}"
+    return f"{value:.6f}"
 
 
 def _compute_paired_stats(
@@ -122,7 +135,9 @@ def _compute_paired_stats(
         }
 
     wins, ties, losses = _count_wins_ties_losses(differences)
-    t_result = scipy.stats.ttest_rel(winner_values, baseline_values)
+    t_result = scipy.stats.ttest_rel(
+        winner_values, baseline_values, alternative="two-sided"
+    )
     diff_stats = DescrStatsW(differences)
     ci_low, ci_high = diff_stats.tconfint_mean(alpha=0.05)
 
@@ -145,6 +160,13 @@ def _run_comparisons(
     baselines: list[str],
     neural_seeds: set[int],
 ) -> tuple[list[dict], list[dict]]:
+    if winner in HEURISTIC_MODELS:
+        raise RuntimeError(
+            f"Winner '{winner}' is a deterministic model. "
+            "Winner-versus-neural seed-paired comparison requires "
+            "a neural winner."
+        )
+
     neural_baselines = [m for m in baselines if m not in HEURISTIC_MODELS]
     heuristic_baselines = [m for m in baselines if m in HEURISTIC_MODELS]
 
@@ -217,9 +239,10 @@ def _run_comparisons(
 
     for baseline in heuristic_baselines:
         baseline_rows = [r for r in run_rows if r["model"] == baseline]
-        if not baseline_rows:
+        if len(baseline_rows) != 1:
             raise RuntimeError(
-                f"No runs found for heuristic baseline {baseline}"
+                f"{baseline}: expected exactly one deterministic run, "
+                f"got {len(baseline_rows)}"
             )
         baseline_val = float(baseline_rows[0][PRIMARY_METRIC])
         diff = winner_mean - baseline_val
@@ -260,6 +283,9 @@ def _write_outputs(
     seed_pairs: list[dict],
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    legacy_file = output_dir / "rq1_pairwise.csv"
+    legacy_file.unlink(missing_ok=True)
 
     all_fields = [
         "winner_model",
@@ -311,7 +337,12 @@ def _write_outputs(
         f.write(f"Primary metric: {METRIC_LABEL}\n")
         f.write("Statistical test: Two-sided paired t-test\n")
         f.write("Multiple-comparison correction: Holm\n")
-        f.write("Family-wise significance level: α = 0.05\n\n")
+        f.write("Family-wise significance level: α = 0.05\n")
+        f.write(
+            "Confidence intervals are unadjusted per-comparison intervals; "
+            "family-wise control is applied to hypothesis-test p-values "
+            "through Holm correction.\n\n"
+        )
 
         neural_rows = [
             r for r in summary_rows if r["comparison_type"] != "descriptive"
@@ -324,8 +355,8 @@ def _write_outputs(
             f.write("## Neural baselines\n\n")
             f.write(
                 "| Baseline | Winner mean | Baseline mean | Difference"
-                " | Relative gain | 95% CI | W/T/L | Raw p | Holm p"
-                " | Significant |\n"
+                " | Relative gain | Per-comparison 95% CI | W/T/L"
+                " | Raw p | Holm p | Significant |\n"
             )
             f.write(
                 "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---:"
@@ -347,16 +378,8 @@ def _write_outputs(
                     if r["wins"] is not None
                     else "-"
                 )
-                raw_p = (
-                    f"{r['raw_p_value']:.6f}"
-                    if r["raw_p_value"] is not None
-                    else "-"
-                )
-                holm_p = (
-                    f"{r['holm_adjusted_p_value']:.6f}"
-                    if r["holm_adjusted_p_value"] is not None
-                    else "-"
-                )
+                raw_p = _format_p_value(r.get("raw_p_value"))
+                holm_p = _format_p_value(r.get("holm_adjusted_p_value"))
                 sig = "✅" if r.get("significant_after_holm") else "-"
                 f.write(
                     f"| {r['baseline_model']} "
