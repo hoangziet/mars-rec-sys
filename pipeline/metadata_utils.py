@@ -126,9 +126,18 @@ class MetadataVocab:
 def load_item_metadata(csv_path: str | Path, n_items: int) -> pd.DataFrame:
     df = pd.read_csv(csv_path)
     df = df.sort_values("item_idx").reset_index(drop=True)
-    if len(df) < n_items:
-        missing = pd.DataFrame({"item_idx": range(len(df) + 1, n_items + 1)})
-        df = pd.concat([df, missing], ignore_index=True)
+
+    if df["item_idx"].duplicated().any():
+        dupes = df[df["item_idx"].duplicated()]["item_idx"].tolist()
+        raise ValueError(f"Duplicate item_idx in metadata: {dupes}")
+
+    expected = set(range(1, n_items + 1))
+    actual = set(df["item_idx"].astype(int))
+    if actual != expected:
+        missing = sorted(expected - actual)
+        extra = sorted(actual - expected)
+        raise ValueError(f"item_idx mismatch. Missing={missing[:10]}, Extra={extra[:10]}")
+
     return df.head(n_items)
 
 

@@ -94,6 +94,12 @@ def main() -> None:
     by_variant: dict[str, dict[int, float]] = {}
     for v in variants:
         by_variant[v] = _index_by_seed(run_rows, v, PRIMARY_METRIC)
+        actual_seeds = set(by_variant[v].keys())
+        if actual_seeds != expected_seeds:
+            raise RuntimeError(
+                f"{v}: expected seeds {sorted(expected_seeds)}, "
+                f"got {sorted(actual_seeds)}"
+            )
 
     primary_results = []
     for comp_variant, base_variant in PRIMARY_COMPARISONS:

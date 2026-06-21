@@ -184,11 +184,12 @@ class Trainer:
             self._mlflow_run = self._mlflow.start_run(run_name=run_name)
 
     # Public API
-    def train(self, model, train_loader, val_loader, test_loader,
+    def train(self, model, train_loader, val_loader,
               optimizer, epochs: int,
               criterion_fn, eval_fn,
               gradient_clip: float = 5.0,
               val_loss_loader=None,
+              test_loader=None,
               early_stop_patience: int = 0,
               early_stop_min_delta: float = 1e-4,
               scheduler=None,
@@ -214,7 +215,8 @@ class Trainer:
         print(f"  Epochs    : {epochs}")
         print(f"  Train sz  : {len(train_loader.dataset):,}")
         print(f"  Val sz    : {len(val_loader.dataset):,}")
-        print(f"  Test sz   : {len(test_loader.dataset):,}")
+        if test_loader is not None:
+            print(f"  Test sz   : {len(test_loader.dataset):,}")
         print(f"{'='*50}\n")
 
         if self._use_mlflow and mlflow_params:
@@ -311,8 +313,10 @@ class Trainer:
             model.load_state_dict(best_state)
 
         # Test
-        print(f"\n  Evaluating on Test set...")
-        test_metrics = eval_fn(model, test_loader, self.device)
+        test_metrics = {}
+        if test_loader is not None:
+            print(f"\n  Evaluating on Test set...")
+            test_metrics = eval_fn(model, test_loader, self.device)
         self.tracker.finalize(test_metrics)
 
         # Save everything
