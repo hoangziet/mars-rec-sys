@@ -40,7 +40,34 @@ def build_model(
 
     if model_name == "gsasrec":
         from models.gsasrec import GSASRec
-        return GSASRec(n_items=n_items, max_len=max_len, **model_kwargs)
+
+        item_encoder = None
+        encoder_cfg = model_kwargs.pop("item_encoder", None)
+        if encoder_cfg is not None:
+            from pipeline.item_encoder import ItemEncoder
+            from pipeline.metadata_utils import MetadataVocab, build_metadata_tensors, load_item_metadata
+
+            vocab = MetadataVocab.load(encoder_cfg["metadata_vocab_path"])
+            meta_df = load_item_metadata(
+                encoder_cfg.get("metadata_csv_path", "data/processed/item_features/item_metadata.csv"),
+                n_items,
+            )
+            meta_tensors = build_metadata_tensors(vocab, meta_df, n_items)
+
+            text_emb = None
+            if encoder_cfg.get("use_text", False):
+                text_emb = torch.load(encoder_cfg["text_emb_path"], weights_only=True)
+
+            item_encoder = ItemEncoder(
+                n_items=n_items,
+                hidden_dim=model_kwargs.get("hidden_dim", 64),
+                metadata_tensors=meta_tensors,
+                text_embeddings=text_emb,
+                use_structured=encoder_cfg.get("use_structured", True),
+                use_text=encoder_cfg.get("use_text", True),
+            )
+
+        return GSASRec(n_items=n_items, max_len=max_len, item_encoder=item_encoder, **model_kwargs)
 
     if model_name == "gru4rec":
         from models.gru4rec import GRU4Rec
@@ -75,12 +102,20 @@ def build_criterion_fn(model_name: str, train_kwargs: dict):
         return fn
 
     if model_name == "gsasrec":
+        alpha = train_kwargs.get("confidence_alpha", 0.0)
+
         def fn(model, batch, device):
             return model.loss(
                 batch["input_seq"].to(device),
                 batch["pos_items"].to(device),
                 batch["neg_items"].to(device),
+                reduction="none" if alpha > 0 else "mean",
             )
+
+        if alpha > 0:
+            from pipeline.confidence import WeightedCriterionFn
+            return WeightedCriterionFn(fn, alpha=alpha)
+
         return fn
 
     if model_name == "gru4rec":

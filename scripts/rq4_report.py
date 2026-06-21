@@ -1,0 +1,85 @@
+"""
+scripts/rq4_report.py
+=====================
+RQ4: Final report aggregation.
+
+Usage:
+    uv run python scripts/rq4_report.py --benchmark-id rq4-ablation --comparison-dir experiments/rq4/rq4-ablation
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+import shutil
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="RQ4: final report.")
+    parser.add_argument("--benchmark-id", required=True)
+    parser.add_argument("--comparison-dir", required=True)
+    parser.add_argument("--output-dir", default=None)
+    return parser
+
+
+def parse_args() -> argparse.Namespace:
+    return build_parser().parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+
+    comparison_dir = Path(args.comparison_dir)
+    output_dir = Path(args.output_dir) if args.output_dir else Path("experiments") / "rq4" / args.benchmark_id
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    comparison_csv = comparison_dir / "rq4_comparison.csv"
+    if not comparison_csv.exists():
+        raise FileNotFoundError(f"Comparison results not found: {comparison_csv}")
+
+    with open(comparison_csv, newline="") as f:
+        rows = list(csv.DictReader(f))
+
+    primary = [r for r in rows if r["comparison_type"] == "primary"]
+    secondary = [r for r in rows if r["comparison_type"] == "secondary"]
+
+    thresholds_path = comparison_dir / "rq4_subgroup_thresholds.json"
+    thresholds = None
+    if thresholds_path.exists():
+        thresholds = json.loads(thresholds_path.read_text())
+
+    with open(output_dir / "rq4_final_report.md", "w") as f:
+        f.write("# RQ4 Final Ablation Report\n\n")
+        f.write(f"Benchmark: {args.benchmark_id}\n\n")
+
+        f.write("## Primary Findings\n\n")
+        for r in primary:
+            sig = "statistically significant" if r.get("significant") == "True" else "not significant"
+            f.write(f"- **{r['comparison']}**: {sig} (Holm p = {r.get('holm_p', '-')})\n")
+            f.write(f"  - Mean difference: {float(r['mean_diff']):.6f}\n")
+            f.write(f"  - 95% CI: [{r['ci95_low']}, {r['ci95_high']}]\n\n")
+
+        f.write("## Secondary Findings (Descriptive)\n\n")
+        for r in secondary:
+            f.write(f"- **{r['comparison']}**: mean diff = {float(r['mean_diff']):.6f}\n")
+
+        if thresholds:
+            f.write("\n## Subgroup Thresholds\n\n")
+            for k, v in thresholds.items():
+                f.write(f"- {k}: {v}\n")
+
+    for fname in ["rq4_comparison.csv", "rq4_comparison.md"]:
+        src = comparison_dir / fname
+        if src.exists():
+            shutil.copy2(src, output_dir / fname)
+
+    print(f"Final report: {output_dir / 'rq4_final_report.md'}")
+
+
+if __name__ == "__main__":
+    main()

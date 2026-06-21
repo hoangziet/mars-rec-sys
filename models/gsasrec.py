@@ -108,6 +108,7 @@ class GSASRec(nn.Module):
         num_neg: int = 32,
         pos_smoothing: float = 0.0,
         norm_first: bool = True,
+        item_encoder=None,
     ) -> None:
         super().__init__()
         if emb_dim is not None:
@@ -121,7 +122,11 @@ class GSASRec(nn.Module):
         self.num_neg    = num_neg
         self.pos_smoothing = pos_smoothing
 
-        self.item_emb    = nn.Embedding(n_items + 1, hidden_dim, padding_idx=0)
+        if item_encoder is not None:
+            self.item_emb = item_encoder
+        else:
+            self.item_emb = nn.Embedding(n_items + 1, hidden_dim, padding_idx=0)
+            nn.init.normal_(self.item_emb.weight, std=0.01)
         # 1-indexed positions; index 0 (padding_idx=0) → zero vector for padding tokens.
         self.pos_emb     = nn.Embedding(max_len + 1, hidden_dim, padding_idx=0)
         self.emb_dropout = nn.Dropout(dropout)
@@ -131,7 +136,6 @@ class GSASRec(nn.Module):
         )
         self.final_ln = nn.LayerNorm(hidden_dim, eps=1e-8)
 
-        nn.init.normal_(self.item_emb.weight, std=0.01)
         nn.init.normal_(self.pos_emb.weight,  std=0.01)
 
     # ------------------------------------------------------------------
@@ -200,6 +204,7 @@ class GSASRec(nn.Module):
         input_seq: torch.Tensor,
         pos_items: torch.Tensor,
         neg_items: torch.Tensor,
+        reduction: str = "mean",
     ) -> torch.Tensor:
         """Generalised BCE loss at the last valid sequence position.
 
@@ -243,6 +248,8 @@ class GSASRec(nn.Module):
             all_scores, all_labels, reduction="none"
         ).mean(dim=1)                                                          # (B,)
 
+        if reduction == "none":
+            return loss_per_sample
         return loss_per_sample.mean()
 
     # ------------------------------------------------------------------
@@ -251,7 +258,12 @@ class GSASRec(nn.Module):
 
     def predict(self, input_seq: torch.Tensor) -> torch.Tensor:
         """Return scores (B, n_items+1) via dot-product with item_emb."""
-        return self._last_hidden(input_seq) @ self.item_emb.weight.T
+        h = self._last_hidden(input_seq)  # (B, D)
+        if hasattr(self.item_emb, "weight"):
+            return h @ self.item_emb.weight.T
+        all_ids = torch.arange(self.n_items + 1, device=input_seq.device)
+        all_embs = self.item_emb(all_ids)
+        return h @ all_embs.T
 
     def forward(self, input_seq: torch.Tensor) -> torch.Tensor:
         """Alias for predict — returns scores over full item vocab."""
