@@ -21,7 +21,7 @@ rq1-report:
 	uv run python scripts/report_rq1.py --benchmark-id $(BENCHMARK_ID) --output-dir $(REPORT_OUTPUT_DIR)
 
 rq1-compare:
-	uv run python scripts/compare_rq1.py \
+	uv run python scripts/rq1_compare.py \
 		--runs-file $(REPORT_OUTPUT_DIR)/rq1_runs.csv \
 		--summary-file $(REPORT_OUTPUT_DIR)/rq1_summary.json \
 		--manifest experiments/benchmark/$(BENCHMARK_ID)/benchmark_manifest.json \

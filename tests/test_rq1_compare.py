@@ -8,7 +8,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scripts.compare_rq1 import (
+from scripts.rq1_compare import (
     _compute_paired_stats,
     _count_wins_ties_losses,
     _format_p_value,
