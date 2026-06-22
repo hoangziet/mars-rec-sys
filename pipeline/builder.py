@@ -114,14 +114,19 @@ def build_model(
     n_users: int,
     model_kwargs: dict,
     max_len: int,
+    data_dir: str | Path = "data/processed",
 ) -> torch.nn.Module:
     model_kwargs = copy.deepcopy(model_kwargs)
+    data_dir = Path(data_dir)
     if model_name == "sasrec":
         from models.sasrec import SASRec
         return SASRec(n_items=n_items, max_len=max_len, **model_kwargs)
 
     if model_name == "gsasrec":
         from models.gsasrec import GSASRec
+
+        item_id_map_path = data_dir / "mappings" / "item_id_map.csv"
+        metadata_csv_path_default = data_dir / "item_features" / "item_metadata.csv"
 
         item_encoder = None
         encoder_cfg = model_kwargs.pop("item_encoder", None)
@@ -131,7 +136,7 @@ def build_model(
 
             vocab = MetadataVocab.load(encoder_cfg["metadata_vocab_path"])
             meta_df = load_item_metadata(
-                encoder_cfg.get("metadata_csv_path", "data/processed/item_features/item_metadata.csv"),
+                encoder_cfg.get("metadata_csv_path", str(metadata_csv_path_default)),
                 n_items,
             )
             meta_tensors = build_metadata_tensors(vocab, meta_df, n_items)
@@ -145,8 +150,10 @@ def build_model(
                     _validate_text_embedding_manifest(
                         embeddings_path=text_emb_path,
                         manifest=manifest,
-                        item_id_map_path=Path("data/processed/mappings/item_id_map.csv"),
-                        metadata_csv_path=Path(encoder_cfg.get("metadata_csv_path", "data/processed/item_features/item_metadata.csv")),
+                        item_id_map_path=item_id_map_path,
+                        metadata_csv_path=Path(
+                            encoder_cfg.get("metadata_csv_path", str(metadata_csv_path_default))
+                        ),
                         n_items=n_items,
                     )
                 else:

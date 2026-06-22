@@ -42,9 +42,6 @@ SECONDARY_COMPARISONS = [("V3", "V1"), ("V3", "V2")]
 BOOTSTRAP_N = 10000
 PERMUTATION_N = 10000
 RNG_SEED = 42
-PRACTICAL_THRESHOLD = 0.01  # absolute NDCG@10 improvement threshold
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="RQ4: user-level statistical comparison.")
     parser.add_argument("--per-user-dir", required=True, help="Directory with per-user CSV files")
@@ -70,6 +67,46 @@ def _load_per_user(per_user_dir: Path, variants: list[str], seeds: list[int]) ->
                 raise RuntimeError(f"Empty per-user file: {path}")
             frames.append(df)
     return pd.concat(frames, ignore_index=True)
+
+
+def _check_duplicates(per_user: pd.DataFrame) -> None:
+    """Fail-fast: same (variant, seed, user, target) twice inflates join counts."""
+    dup_mask = per_user.duplicated(
+        subset=["variant", "seed", "user_idx", "target_item"], keep=False
+    )
+    if dup_mask.any():
+        sample = per_user[dup_mask].head(10)
+        raise RuntimeError(
+            f"Duplicate (variant, seed, user_idx, target_item) rows found in "
+            f"per-user CSVs. {len(per_user[dup_mask])} duplicate rows. "
+            f"First few: {sample.to_dict(orient='records')}"
+        )
+
+
+def _check_key_set_equality(per_user: pd.DataFrame, variants: list[str]) -> None:
+    """Fail-fast: every variant must have identical (user_idx, target_item) keys.
+
+    A paired join on (variant, seed, user_idx, target_item) silently drops rows
+    when the key sets diverge, biasing the comparison.
+    """
+    key_sets: dict[str, set[tuple[int, int]]] = {}
+    for variant in variants:
+        sub = per_user[per_user["variant"] == variant]
+        key_sets[variant] = set(zip(sub["user_idx"], sub["target_item"]))
+
+    ref_variant = variants[0]
+    ref_keys = key_sets[ref_variant]
+    for variant in variants[1:]:
+        other = key_sets[variant]
+        if other != ref_keys:
+            missing = ref_keys - other
+            extra = other - ref_keys
+            raise RuntimeError(
+                f"Key-set mismatch: {ref_variant} has {len(ref_keys)} keys, "
+                f"{variant} has {len(other)} keys. "
+                f"Missing from {variant}: {len(missing)}, extra: {len(extra)}. "
+                f"This would silently bias the paired comparison."
+            )
 
 
 def _join_by_user(per_user: pd.DataFrame, comp_variant: str, base_variant: str,
@@ -215,6 +252,16 @@ def _run_comparison(per_user: pd.DataFrame, comp_variant: str, base_variant: str
     mean_diff = float(deltas.mean())
     relative_imp = (mean_diff / base_mean) if base_mean != 0 else None
 
+    # Significance classification (uses the raw permutation p-value, not Holm)
+    if perm_p >= 0.05:
+        significance_label = "inconclusive"
+    elif mean_diff > 0:
+        significance_label = "significant_improvement"
+    elif mean_diff < 0:
+        significance_label = "significant_degradation"
+    else:
+        significance_label = "tie"
+
     return {
         "comparison": f"{comp_variant} vs {base_variant}",
         "comp_variant": comp_variant,
@@ -224,7 +271,11 @@ def _run_comparison(per_user: pd.DataFrame, comp_variant: str, base_variant: str
         "base_mean": base_mean,
         "mean_difference": mean_diff,
         "relative_improvement": relative_imp,
-        "practically_significant": bool(mean_diff >= PRACTICAL_THRESHOLD),
+        "relative_improvement_pct": (
+            round(100.0 * mean_diff / base_mean, 2) if base_mean != 0 else None
+        ),
+        "abs_mean_difference": abs(mean_diff),
+        "significance_label": significance_label,
         "wins": wins,
         "ties": ties,
         "losses": losses,
@@ -249,6 +300,9 @@ def main() -> None:
 
     per_user_dir = Path(args.per_user_dir)
     per_user = _load_per_user(per_user_dir, variants, sorted(expected_seeds))
+
+    _check_duplicates(per_user)
+    _check_key_set_equality(per_user, variants)
 
     rng = np.random.default_rng(RNG_SEED)
 
@@ -283,7 +337,8 @@ def main() -> None:
     fields = [
         "comparison", "comparison_type", "comp_variant", "base_variant",
         "n_users", "comp_mean", "base_mean", "mean_difference", "relative_improvement",
-        "practically_significant",
+        "relative_improvement_pct", "abs_mean_difference",
+        "significance_label",
         "wins", "ties", "losses",
         "bootstrap_ci_low", "bootstrap_ci_high",
         "permutation_p", "cohens_d",
@@ -303,16 +358,17 @@ def main() -> None:
         f.write(f"User-level paired permutation test ({PERMUTATION_N} sign-flips)\n")
         f.write("Multiple-comparison correction: Holm (primary comparisons only)\n")
         f.write("Family-wise significance level: α = 0.05\n")
-        f.write(f"Practical significance threshold: Δ ≥ {PRACTICAL_THRESHOLD}\n\n")
+        f.write("Practical-significance threshold: not enforced. Report Δ, rel%, [95% CI].\n")
+        f.write("Apply your own practical-significance rule based on the CI.\n\n")
 
         f.write("## Primary comparisons (Holm-corrected)\n\n")
-        f.write("| Comparison | Comp | Base | Δ | Rel | Practical | 95% CI (bootstrap) | W/T/L | Perm p | Holm p | Cohen's d | Sig |\n")
-        f.write("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |\n")
+        f.write("| Comparison | Comp | Base | Δ | Rel % | 95% CI (bootstrap) | W/T/L | Perm p | Holm p | Cohen's d | Label | Sig |\n")
+        f.write("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |\n")
         for r in primary_results:
             ci = f"[{r['bootstrap_ci_low']:.4f}, {r['bootstrap_ci_high']:.4f}]"
             wtl = f"{r['wins']}/{r['ties']}/{r['losses']}"
-            rel = f"{r['relative_improvement']*100:.2f}%" if r["relative_improvement"] is not None else "-"
-            pract = "✅" if r.get("practically_significant") else "-"
+            rel = f"{r['relative_improvement_pct']:.2f}%" if r["relative_improvement_pct"] is not None else "-"
+            label = r.get("significance_label", "inconclusive")
             sig = "✅" if r["significant"] else "-"
             f.write(
                 f"| {r['comparison']} "
@@ -320,12 +376,12 @@ def main() -> None:
                 f"| {r['base_mean']:.4f} "
                 f"| {r['mean_difference']:.6f} "
                 f"| {rel} "
-                f"| {pract} "
                 f"| {ci} "
                 f"| {wtl} "
                 f"| {_format_p_value(r['permutation_p'])} "
                 f"| {_format_p_value(r['holm_adjusted_p'])} "
                 f"| {r['cohens_d']:.3f} "
+                f"| {label} "
                 f"| {sig} |\n"
             )
 

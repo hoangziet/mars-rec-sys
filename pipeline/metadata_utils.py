@@ -44,17 +44,22 @@ class MetadataVocab:
         self.duration_std = duration_std
 
     @classmethod
-    def build(cls, df: pd.DataFrame) -> MetadataVocab:
+    def build(cls, df: pd.DataFrame, train_item_idx: set[int] | None = None) -> MetadataVocab:
         categorical = {}
         multilabel = {}
 
         categorical_fields = ["language", "difficulty"]
         multilabel_fields = ["theme", "software", "job", "type"]
 
+        # ponytail: fit vocab on train-only items. Test items map to UNK through
+        # encode_categorical/encode_multilabel, which is the correct behavior
+        # (their categories are unseen at training time).
+        fit_df = df if train_item_idx is None else df[df["item_idx"].isin(train_item_idx)]
+
         for field in categorical_fields:
             vocab = {}
             idx = 3
-            for val in df[field].dropna().unique():
+            for val in fit_df[field].dropna().unique():
                 if val not in vocab:
                     vocab[val] = idx
                     idx += 1
@@ -63,7 +68,7 @@ class MetadataVocab:
         for field in multilabel_fields:
             vocab = {}
             idx = 3
-            for val in df[field].dropna():
+            for val in fit_df[field].dropna():
                 for tag in str(val).split(";"):
                     tag = tag.strip()
                     if tag and tag not in vocab:
@@ -71,7 +76,7 @@ class MetadataVocab:
                         idx += 1
             multilabel[field] = vocab
 
-        durations = pd.to_numeric(df["duration"], errors="coerce").dropna()
+        durations = pd.to_numeric(fit_df["duration"], errors="coerce").dropna()
         if len(durations) > 0:
             log_durations = np.log1p(durations.values)
             duration_mean = float(log_durations.mean())
@@ -101,19 +106,35 @@ class MetadataVocab:
                 indices.append(vocab.get(tag, UNK))
         return indices if indices else [MISSING]
 
-    def encode_duration(self, value) -> float:
-        if value is None or (isinstance(value, float) and np.isnan(value)):
-            return 0.0
-        log_val = np.log1p(float(value))
-        return (log_val - self.duration_mean) / self.duration_std
+    def encode_duration(self, value) -> tuple[float, bool]:
+        """Return (normalized_value, is_missing).
 
-    def save(self, path: str | Path) -> None:
+        - is_missing=True for None/NaN/empty/non-numeric
+        - For valid values: normalize via log1p and z-score
+        - Validates non-negative
+        """
+        if value is None or (isinstance(value, float) and np.isnan(value)) or value == "":
+            return 0.0, True
+        try:
+            val = float(value)
+        except (ValueError, TypeError):
+            return 0.0, True
+        if val < 0:
+            raise ValueError(f"Duration must be non-negative, got {val}")
+        if val == 0:
+            return 0.0, False
+        log_val = np.log1p(val)
+        return (log_val - self.duration_mean) / self.duration_std, False
+
+    def save(self, path: str | Path, train_item_sha256: str | None = None) -> None:
         data = {
             "categorical": self.categorical,
             "multilabel": self.multilabel,
             "duration_mean": self.duration_mean,
             "duration_std": self.duration_std,
         }
+        if train_item_sha256 is not None:
+            data["train_item_sha256"] = train_item_sha256
         Path(path).write_text(json.dumps(data, indent=2, ensure_ascii=False))
 
     @classmethod
@@ -163,9 +184,13 @@ def build_metadata_tensors(vocab: MetadataVocab, df: pd.DataFrame, n_items: int)
         tensors[field] = torch.tensor(padded, dtype=torch.long)
 
     durations = [0.0]
+    duration_missing = [1]  # 1=missing for padding
     for i in range(n_items):
         val = df.iloc[i]["duration"] if i < len(df) else None
-        durations.append(vocab.encode_duration(val))
+        norm, missing = vocab.encode_duration(val)
+        durations.append(norm)
+        duration_missing.append(int(missing))
     tensors["duration"] = torch.tensor(durations, dtype=torch.float32)
+    tensors["duration_missing"] = torch.tensor(duration_missing, dtype=torch.bool)
 
     return tensors

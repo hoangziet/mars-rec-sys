@@ -43,12 +43,31 @@ def parse_args() -> argparse.Namespace:
     return build_parser().parse_args()
 
 
+def _resolve_encoder_revision(model_name: str) -> str:
+    """Return the HF commit SHA for `model_name`, falling back to "main".
+
+    ponytail: SHA is the only way to pin the exact model bytes used; "main"
+    is a moving target. If we cannot reach the hub, fall back and let the
+    downstream consumer see that provenance is missing.
+    """
+    try:
+        from huggingface_hub import HfApi
+        info = HfApi().model_info(model_name)
+        if info.sha:
+            return info.sha
+    except Exception as exc:
+        print(f"  Could not fetch encoder SHA (falling back to 'main'): {exc}")
+    return "main"
+
+
 def main() -> None:
     args = parse_args()
 
     print(f"Loading model: {args.model_name}")
     from sentence_transformers import SentenceTransformer
     model = SentenceTransformer(args.model_name, device="cpu")
+
+    encoder_revision = _resolve_encoder_revision(args.model_name)
 
     df = pd.read_csv(args.input)
     df = df.sort_values("item_idx").reset_index(drop=True)
@@ -64,6 +83,7 @@ def main() -> None:
         missing = sorted(expected_idx - actual_idx)
         raise ValueError(f"item_idx gap. Missing={missing[:10]}")
 
+    emb_dim = model.get_sentence_embedding_dimension()
     texts = []
     for _, row in df.iterrows():
         parts = []
@@ -73,8 +93,6 @@ def main() -> None:
             parts.append(str(row["description"]))
         text = " ".join(parts) if parts else MISSING_TEXT
         texts.append(text)
-
-    emb_dim = model.get_sentence_embedding_dimension()
 
     print(f"Encoding {n_items} items (dim={emb_dim})...")
     embeddings = model.encode(texts, batch_size=args.batch_size, show_progress_bar=True,
@@ -103,7 +121,7 @@ def main() -> None:
         "item_id_map_sha256": item_id_map_sha256,
         "metadata_sha256": metadata_sha256,
         "encoder": args.model_name,
-        "encoder_revision": "main",
+        "encoder_revision": encoder_revision,
         "text_template_version": "v1",
         "shape": list(full_embeddings.shape),
     }, indent=2))
