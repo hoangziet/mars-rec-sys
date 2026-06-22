@@ -10,6 +10,7 @@ Functions:
     build_train_loader() — return a training DataLoader
 """
 
+import copy
 import hashlib
 import json
 from pathlib import Path
@@ -114,6 +115,7 @@ def build_model(
     model_kwargs: dict,
     max_len: int,
 ) -> torch.nn.Module:
+    model_kwargs = copy.deepcopy(model_kwargs)
     if model_name == "sasrec":
         from models.sasrec import SASRec
         return SASRec(n_items=n_items, max_len=max_len, **model_kwargs)
