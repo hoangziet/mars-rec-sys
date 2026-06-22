@@ -312,15 +312,20 @@ class Trainer:
         if best_state is not None:
             model.load_state_dict(best_state)
 
-        # Test
         test_metrics = {}
-        if test_loader is not None:
-            print(f"\n  Evaluating on Test set...")
-            test_metrics = eval_fn(model, test_loader, self.device)
-        self.tracker.finalize(test_metrics)
+        if best_state is not None:
+            # Only run test if we have a valid checkpoint
+            if test_loader is not None:
+                print(f"\n  Evaluating on Test set...")
+                test_metrics = eval_fn(model, test_loader, self.device)
+            self.tracker.finalize(test_metrics)
+            self._save_checkpoint(model, best_val_ndcg)
+        else:
+            # No valid checkpoint — mark run FAILED
+            print(f"\n  Run FAILED: no valid checkpoint produced (all training was non-finite).")
+            print(f"  Skipping test evaluation. Skipping checkpoint save.")
+            self.tracker.finalize({})
 
-        # Save everything
-        self._save_checkpoint(model, best_val_ndcg)
         self.tracker.save_metrics(self.output_dir / "metrics.json")
         self.tracker.plot_losses(self.output_dir / "loss_plot.png")
         self.tracker.plot_metrics(self.output_dir / "metrics_plot.png")

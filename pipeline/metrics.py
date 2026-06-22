@@ -75,6 +75,12 @@ def _ranks_from_logits(
     counted ahead of it. This avoids optimistic metrics for heuristic models
     (e.g. popularity, item-CF) where many items often share identical scores.
     """
+    if not torch.isfinite(logits).all():
+        raise FloatingPointError(
+            f"Non-finite logits during evaluation. "
+            f"NaN count: {torch.isnan(logits).sum().item()}, "
+            f"Inf count: {torch.isinf(logits).sum().item()}"
+        )
     logits = logits.masked_fill(history_mask, float("-inf"))
     target_scores = logits.gather(1, target.unsqueeze(1))   # (B, 1)
     ranks = (logits >= target_scores).sum(dim=1)            # (B,) 1-indexed
