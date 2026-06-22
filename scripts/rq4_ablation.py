@@ -132,7 +132,13 @@ def _run_single(args, variant: str, seed: int, variant_cfg: dict, benchmark_id: 
     if protocol.get("text_artifact_sha256"):
         mlflow_cfg["tags"]["text_artifact_sha256"] = protocol["text_artifact_sha256"]
 
-    result = trainer.train(model=model, train_loader=train_loader, val_loader=val_loader, test_loader=test_loader, optimizer=optimizer, epochs=train_kwargs["epochs"], criterion_fn=criterion_fn, eval_fn=eval_fn, gradient_clip=train_kwargs.get("gradient_clip", 5.0), val_loss_loader=val_loss_loader, early_stop_patience=train_kwargs.get("early_stop_patience", 10), early_stop_min_delta=train_kwargs.get("early_stop_min_delta", 1e-4), scheduler=scheduler, mlflow_params=mlflow_cfg)
+    try:
+        result = trainer.train(model=model, train_loader=train_loader, val_loader=val_loader, test_loader=test_loader, optimizer=optimizer, epochs=train_kwargs["epochs"], criterion_fn=criterion_fn, eval_fn=eval_fn, gradient_clip=train_kwargs.get("gradient_clip", 5.0), val_loss_loader=val_loss_loader, early_stop_patience=train_kwargs.get("early_stop_patience", 10), early_stop_min_delta=train_kwargs.get("early_stop_min_delta", 1e-4), scheduler=scheduler, mlflow_params=mlflow_cfg)
+    except RuntimeError:
+        # Training produced no valid checkpoint — MLflow already marked FAILED.
+        # Do NOT export per-user results for this (variant, seed) pair.
+        print(f"  {variant} seed={seed}: skipping per-user export (no valid checkpoint)")
+        return None
 
     run_id = trainer._mlflow_run.info.run_id if trainer._mlflow_run else None
     _export_per_user(model, test_loader, device, variant, seed, args.output_dir, benchmark_id, run_id)

@@ -321,10 +321,27 @@ class Trainer:
             self.tracker.finalize(test_metrics)
             self._save_checkpoint(model, best_val_ndcg)
         else:
-            # No valid checkpoint — mark run FAILED
+            # No valid checkpoint — mark run FAILED and raise so the caller
+            # never exports per-user results or treats this as a successful run.
             print(f"\n  Run FAILED: no valid checkpoint produced (all training was non-finite).")
             print(f"  Skipping test evaluation. Skipping checkpoint save.")
             self.tracker.finalize({})
+
+            if self._use_mlflow and self._mlflow_run:
+                self._mlflow.tracking.MlflowClient().set_terminated(
+                    self._mlflow_run.info.run_id, status="FAILED"
+                )
+                self._mlflow.end_run()
+
+            self.tracker.save_metrics(self.output_dir / "metrics.json")
+            self.tracker.plot_losses(self.output_dir / "loss_plot.png")
+            self.tracker.plot_metrics(self.output_dir / "metrics_plot.png")
+
+            raise RuntimeError(
+                "No valid checkpoint produced — all training was non-finite. "
+                "MLflow run has been marked FAILED. Check learning rate, "
+                "gradient clip, or data validity."
+            )
 
         self.tracker.save_metrics(self.output_dir / "metrics.json")
         self.tracker.plot_losses(self.output_dir / "loss_plot.png")
