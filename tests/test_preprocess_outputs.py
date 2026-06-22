@@ -337,3 +337,43 @@ def test_has_watch_signal_requires_temporal_match():
     result = preprocess.attach_engagement_score(implicit, lookup)
     assert result.loc[0, "engagement_score"] == 0.0
     assert bool(result.loc[0, "has_watch_signal"]) is False
+
+
+def test_attach_engagement_score_records_temporal_stats():
+    """attach_engagement_score should return temporal deltas so the report
+    can distinguish 'explicit before implicit' from 'explicit after implicit'."""
+    implicit = pd.DataFrame(
+        {
+            "user_id": ["1", "1", "2", "2"],
+            "item_id": ["10", "20", "10", "30"],
+            "created_at": pd.to_datetime(
+                ["2024-01-01", "2024-01-02", "2024-01-01", "2024-01-03"]
+            ),
+        }
+    )
+    lookup = pd.DataFrame(
+        {
+            "user_id": ["1", "1", "2", "2"],
+            "item_id": ["10", "20", "10", "30"],
+            "created_at": pd.to_datetime(
+                ["2023-12-31", "2024-01-02", "2024-01-02", "2024-01-04"]
+            ),
+            "engagement_score": [0.5, 0.3, 0.7, 0.9],
+        }
+    )
+
+    result = preprocess.attach_engagement_score(implicit, lookup, return_temporal_stats=True)
+
+    assert "temporal_delta_seconds" in result.columns
+    assert "temporal_direction" in result.columns
+    matched = result[result["has_watch_signal"]]
+    assert (matched["temporal_direction"] == "before").all()
+    assert result.loc[2, "temporal_direction"] == "after"
+    assert result.loc[3, "temporal_direction"] == "after"
+
+    if "temporal_stats" in result.attrs:
+        stats = result.attrs["temporal_stats"]
+        assert "matched_count" in stats
+        assert "explicit_before_pct" in stats
+        assert "explicit_after_pct" in stats
+        assert "median_delta_seconds" in stats

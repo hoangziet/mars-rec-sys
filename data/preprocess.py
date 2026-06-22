@@ -72,21 +72,31 @@ def build_engagement_lookup(explicit: pd.DataFrame) -> pd.DataFrame:
 def attach_engagement_score(
     interactions: pd.DataFrame,
     engagement_lookup: pd.DataFrame,
+    return_temporal_stats: bool = False,
 ) -> pd.DataFrame:
     """Attach engagement score using temporal alignment.
 
     For each implicit interaction, finds the most recent explicit watch event
     for the same (user_id, item_id) with timestamp <= interaction timestamp.
-    If no such event exists, engagement_score = 0.0.
-    Also adds has_watch_signal (True if any explicit watch exists for this pair).
+    If no such event exists, engagement_score = 0.0 and has_watch_signal = False.
+
+    When return_temporal_stats is True, also adds:
+        - temporal_delta_seconds: explicit.created_at - implicit.created_at (NaT if no match)
+        - temporal_direction: 'before' (matched) | 'after' (unmatched but future explicit exists) | 'missing'
+    and stores aggregate stats in result.attrs["temporal_stats"]:
+        - matched_count, explicit_before_pct, explicit_after_pct,
+          median_delta_seconds, p25_delta_seconds, p75_delta_seconds
     """
     if engagement_lookup.empty:
         result = interactions.copy()
         result["engagement_score"] = 0.0
         result["has_watch_signal"] = False
+        if return_temporal_stats:
+            result["temporal_delta_seconds"] = pd.NaT
+            result["temporal_direction"] = "missing"
+            result.attrs["temporal_stats"] = _empty_temporal_stats()
         return result
 
-    # Sort both by created_at for merge_asof (must be globally sorted)
     interactions_sorted = interactions.assign(
         _original_order=range(len(interactions))
     ).sort_values("created_at", kind="stable").reset_index(drop=True)
@@ -99,10 +109,12 @@ def attach_engagement_score(
         result = interactions_sorted.drop(columns=["_original_order"])
         result["engagement_score"] = 0.0
         result["has_watch_signal"] = False
-        return result.sort_values("_original_order").drop(columns=["_original_order"]) if "_original_order" in result.columns else result
+        if return_temporal_stats:
+            result["temporal_delta_seconds"] = pd.NaT
+            result["temporal_direction"] = "missing"
+            result.attrs["temporal_stats"] = _empty_temporal_stats()
+        return result.sort_values("_original_order", kind="stable").reset_index(drop=True).drop(columns=["_original_order"], errors="ignore")
 
-    # merge_asof: for each interaction row, find the latest engagement event
-    # with same (user_id, item_id) and engagement.created_at <= interaction.created_at
     merged = pd.merge_asof(
         interactions_sorted,
         engagement_sorted.rename(columns={"created_at": "engagement_at", "engagement_score": "engagement_score_raw"}),
@@ -113,15 +125,68 @@ def attach_engagement_score(
     )
 
     merged["engagement_score"] = merged["engagement_score_raw"].fillna(0.0).clip(lower=0.0, upper=1.0)
-
-    # has_watch_signal: True if temporal match found (engagement_at is not NaT)
     merged["has_watch_signal"] = merged["engagement_at"].notna()
 
-    # Restore original order
-    merged = merged.sort_values("_original_order", kind="stable")
+    if return_temporal_stats:
+        delta = (merged["engagement_at"] - merged["created_at"]).dt.total_seconds()
+        merged["temporal_delta_seconds"] = delta
+
+        forward_match = pd.merge_asof(
+            merged[["user_id", "item_id", "created_at"]],
+            engagement_sorted[["user_id", "item_id", "created_at"]].rename(
+                columns={"created_at": "after_at"}
+            ),
+            left_on="created_at",
+            right_on="after_at",
+            by=["user_id", "item_id"],
+            direction="forward",
+        )
+        has_after_mask = forward_match["after_at"].notna()
+        matched_mask = merged["engagement_at"].notna()
+
+        direction = pd.Series("missing", index=merged.index, dtype="object")
+        direction[matched_mask.values] = "before"
+        direction[(~matched_mask & has_after_mask).values] = "after"
+        merged["temporal_direction"] = direction
+
+        n_matched = int(matched_mask.sum())
+        n_strictly_before = int((delta < 0).sum())
+        n_equal = int((delta == 0).sum())
+        n_after = int((~matched_mask & has_after_mask).sum())
+        matched_deltas = delta[matched_mask]
+        total = len(merged)
+        merged.attrs["temporal_stats"] = {
+            "matched_count": n_matched,
+            "explicit_before_count": n_strictly_before,
+            "explicit_equal_count": n_equal,
+            "explicit_after_count": n_after,
+            "explicit_before_pct": round(100.0 * n_strictly_before / n_matched, 2) if n_matched else 0.0,
+            "explicit_equal_pct": round(100.0 * n_equal / n_matched, 2) if n_matched else 0.0,
+            "explicit_after_pct": round(100.0 * n_after / total, 2) if total else 0.0,
+            "median_delta_seconds": float(matched_deltas.median()) if n_matched else None,
+            "p25_delta_seconds": float(matched_deltas.quantile(0.25)) if n_matched else None,
+            "p75_delta_seconds": float(matched_deltas.quantile(0.75)) if n_matched else None,
+        }
+
+    merged = merged.sort_values("_original_order", kind="stable").reset_index(drop=True)
     merged = merged.drop(columns=["engagement_at", "engagement_score_raw", "_original_order"], errors="ignore")
 
     return merged
+
+
+def _empty_temporal_stats() -> dict:
+    return {
+        "matched_count": 0,
+        "explicit_before_count": 0,
+        "explicit_equal_count": 0,
+        "explicit_after_count": 0,
+        "explicit_before_pct": 0.0,
+        "explicit_equal_pct": 0.0,
+        "explicit_after_pct": 0.0,
+        "median_delta_seconds": None,
+        "p25_delta_seconds": None,
+        "p75_delta_seconds": None,
+    }
 
 
 def build_user_sequences(interactions: pd.DataFrame) -> pd.DataFrame:
@@ -545,6 +610,7 @@ def build_preprocessing_report(
     coverage_pct: float = 0.0,
     post_k_core_interactions: int = 0,
     train_history_users_with_watch_signal: int = 0,
+    temporal_stats: dict | None = None,
 ) -> dict:
     return {
         "orphan_implicit_count": orphan_implicit_count,
@@ -565,6 +631,7 @@ def build_preprocessing_report(
             "positive_watch": n_positive_watch,
             "coverage_pct": round(coverage_pct, 2),
         },
+        "temporal_join_stats": temporal_stats or _empty_temporal_stats(),
     }
 
 
@@ -603,7 +670,8 @@ def main() -> None:
     orphan_explicit_count = int((~explicit["item_id"].isin(catalog_item_ids)).sum())
 
     interactions = implicit_dedup[implicit_dedup["item_id"].isin(catalog_item_ids)].copy()
-    interactions = attach_engagement_score(interactions, engagement_lookup)
+    interactions = attach_engagement_score(interactions, engagement_lookup, return_temporal_stats=True)
+    temporal_stats = interactions.attrs.get("temporal_stats", _empty_temporal_stats())
 
     # Coverage stats
     n_interactions_total = len(interactions)
@@ -707,6 +775,7 @@ def main() -> None:
         coverage_pct=coverage_pct,
         post_k_core_interactions=len(interactions),
         train_history_users_with_watch_signal=train_history_watch_users,
+        temporal_stats=temporal_stats,
     )
 
     save_processed_outputs(
