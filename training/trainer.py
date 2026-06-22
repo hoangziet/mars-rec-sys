@@ -56,6 +56,17 @@ def _flatten_dict(d: dict, prefix: str = "") -> dict:
     return flat
 
 
+class NoValidCheckpointError(RuntimeError):
+    """Raised by Trainer.train() when no valid checkpoint was produced.
+
+    Callers (e.g. rq4_ablation) must catch this specifically — it is
+    not a system error and should skip per-user export, not crash the
+    entire campaign. Any other RuntimeError indicates a real bug and
+    must propagate.
+    """
+    pass
+
+
 # Experiment Tracker 
 class ExperimentTracker:
     """Track per-epoch metrics, save JSON, generate plots."""
@@ -328,16 +339,13 @@ class Trainer:
             self.tracker.finalize({})
 
             if self._use_mlflow and self._mlflow_run:
-                self._mlflow.tracking.MlflowClient().set_terminated(
-                    self._mlflow_run.info.run_id, status="FAILED"
-                )
-                self._mlflow.end_run()
+                self._mlflow.end_run(status="FAILED")
 
             self.tracker.save_metrics(self.output_dir / "metrics.json")
             self.tracker.plot_losses(self.output_dir / "loss_plot.png")
             self.tracker.plot_metrics(self.output_dir / "metrics_plot.png")
 
-            raise RuntimeError(
+            raise NoValidCheckpointError(
                 "No valid checkpoint produced — all training was non-finite. "
                 "MLflow run has been marked FAILED. Check learning rate, "
                 "gradient clip, or data validity."
@@ -366,7 +374,7 @@ class Trainer:
                     self._mlflow.log_artifact(str(self.output_dir / "metrics_plot.png"), artifact_path="plots")
                 if (self.output_dir / "best_model.pt").exists():
                     self._mlflow.log_artifact(str(self.output_dir / "best_model.pt"), artifact_path="checkpoints")
-            self._mlflow.end_run()
+            self._mlflow.end_run(status="FINISHED")
 
         return self.tracker
 

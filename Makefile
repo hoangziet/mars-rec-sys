@@ -79,7 +79,10 @@ rq4-init:
 		--output-dir $(RQ4_COMPARISON_DIR)
 
 rq4-ablation:
-	uv run python scripts/rq4_ablation.py --protocol $(RQ4_MANIFEST)
+	uv run python scripts/rq4_ablation.py \
+		--protocol $(RQ4_MANIFEST) \
+		--data-dir $(DATA_DIR) \
+		--output-dir experiments
 
 rq4-collect:
 	uv run python scripts/rq4_collect.py --benchmark-id $(RQ4_BENCHMARK_ID) --protocol $(RQ4_MANIFEST) --data-dir $(DATA_DIR) --output-dir $(RQ4_COMPARISON_DIR)

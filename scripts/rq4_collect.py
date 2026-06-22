@@ -47,21 +47,22 @@ def parse_args() -> argparse.Namespace:
     return build_parser().parse_args()
 
 
-def _attach_tags_to_selected(client, experiment_id, selected):
-    """Fetch tags from MLflow for each selected run and attach to dict."""
+def _get_run_tags(client, experiment_id):
+    """Fetch tags from MLflow for all runs in the experiment.
+
+    Returns a dict {run_id: tags_dict}.
+    """
     run_tag_cache = {}
     for mlf_run in client.search_runs([experiment_id]):
         run_tag_cache[mlf_run.info.run_id] = mlf_run.data.tags
-    for r in selected:
-        r["tags"] = run_tag_cache.get(r["run_id"], {})
-    return selected
+    return run_tag_cache
 
 
-def _validate_run_tags(selected, expected_alpha, best_metadata_variant, metadata_variants):
+def _validate_run_tags(selected, tags_by_run, expected_alpha, best_metadata_variant, metadata_variants):
     """Validate that each run's tags match the expected config per variant.
 
-    Returns a list of error strings (empty if all valid).  Each selected run
-    must have its tags attached (see ``_attach_tags_to_selected``).
+    Returns a list of error strings (empty if all valid).  ``tags_by_run``
+    is a {run_id: tags} dict produced by ``_get_run_tags``.
     """
     errors = []
     variant_flags = metadata_variants.get(best_metadata_variant, {})
@@ -69,7 +70,7 @@ def _validate_run_tags(selected, expected_alpha, best_metadata_variant, metadata
     expected_text = str(bool(variant_flags.get("use_text", True))).lower()
 
     for r in selected:
-        tags = r.get("tags", {})
+        tags = tags_by_run.get(r["run_id"], {})
         variant = r["variant"]
 
         run_alpha_str = tags.get("confidence_alpha")
@@ -124,7 +125,8 @@ def _validate_run_tags(selected, expected_alpha, best_metadata_variant, metadata
     return errors
 
 
-def _validate_provenance_tags(selected: list[dict], protocol: dict) -> list[str]:
+def _validate_provenance_tags(selected: list[dict], tags_by_run: dict[str, dict],
+                             protocol: dict) -> list[str]:
     """Each MLflow run must carry the exact provenance hashes from the protocol.
 
     A run with outdated or missing provenance tags was trained with a
@@ -132,7 +134,7 @@ def _validate_provenance_tags(selected: list[dict], protocol: dict) -> list[str]
     """
     errors = []
     for r in selected:
-        tags = r.get("tags", {})
+        tags = tags_by_run.get(r["run_id"], {})
         variant = r["variant"]
         seed = r["seed"]
         prefix = f"{variant} seed={seed}"
@@ -159,6 +161,17 @@ def _validate_provenance_tags(selected: list[dict], protocol: dict) -> list[str]
                 errors.append(
                     f"{prefix}: text_artifact_sha256 mismatch — "
                     f"expected {text_expected[:12]}..., got {text_actual[:12]}..."
+                )
+
+        git_expected = protocol.get("git_commit")
+        if git_expected and git_expected != "unknown":
+            git_actual = tags.get("git_commit")
+            if git_actual is None:
+                errors.append(f"{prefix}: missing tag git_commit")
+            elif git_actual != git_expected:
+                errors.append(
+                    f"{prefix}: git_commit mismatch — "
+                    f"expected {git_expected[:12]}, got {git_actual[:12]}"
                 )
 
     return errors
@@ -255,12 +268,13 @@ def main() -> None:
             errors.append(f"Duplicate (variant, seed): {dupes}")
 
         # Validate tags against protocol
-        _attach_tags_to_selected(client, experiment.experiment_id, selected)
+        tags_by_run = _get_run_tags(client, experiment.experiment_id)
         best_metadata_variant = protocol.get("best_metadata_variant", "M3")
         metadata_variants = protocol.get("metadata_variants", {})
         errors.extend(
             _validate_run_tags(
                 selected,
+                tags_by_run,
                 expected_alpha,
                 best_metadata_variant,
                 metadata_variants,
@@ -268,7 +282,7 @@ def main() -> None:
         )
 
         # Each MLflow run must carry provenance hashes matching the protocol
-        errors.extend(_validate_provenance_tags(selected, protocol))
+        errors.extend(_validate_provenance_tags(selected, tags_by_run, protocol))
 
         # Require all secondary metrics
         for r in selected:
