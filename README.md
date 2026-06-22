@@ -81,6 +81,54 @@ Writes winner-versus-baseline stats to `experiments/benchmark/<benchmark_id>/sta
 - `rq1_seed_pairs.csv` — per-seed paired values for every neural comparison
 - `rq1_significance.md` — formatted summary table
 
+## RQ2–RQ4 Workflow
+
+RQ2–RQ4 build on the RQ1 gSASRec backbone. The final flow is:
+
+```text
+RQ1 winner selection
+  ↓
+RQ2 alpha tuning (validation only)
+  ↓
+RQ3 metadata tuning (validation only)
+  ↓
+rq4-init           -> frozen rq4_protocol_manifest.json
+  ↓
+rq4-ablation       -> V0–V3 × 10 seeds
+  ↓
+rq4-collect        -> validates exact runs, writes rq4_result_manifest.json
+  ↓
+rq4-compare        -> user-level bootstrap/permutation + Holm correction
+  ↓
+rq4-subgroup       -> subgroup metrics from per-user outputs
+  ↓
+rq4-report         -> final markdown report
+```
+
+### Temporal watch signal
+
+`engagement_score` is attached by a temporal backward join: the pipeline uses
+the latest explicit watch event for the same `(user_id, item_id)` with
+`explicit.created_at <= implicit.created_at`. Interactions without a temporal
+match receive `engagement_score = 0.0` and `has_watch_signal = false`.
+
+### Required commands
+
+```bash
+make preprocess
+make rq3-precompute
+make rq2-tune
+make rq2-report
+make rq3-tune
+make rq3-report
+make rq4-init
+make rq4-ablation
+make rq4-collect
+make rq4-compare
+make rq4-subgroup
+make rq4-report
+```
+
 ## Single-model runs
 
 Use `scripts/train.py` for one-off neural runs, smoke checks, and tuning:
