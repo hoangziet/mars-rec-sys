@@ -219,12 +219,14 @@ def compute_per_split_coverage(
     train_df: pd.DataFrame,
     val_df: pd.DataFrame,
     test_df: pd.DataFrame,
+    user_sequences: pd.DataFrame | None = None,
 ) -> dict:
     """Compute watch-signal coverage per split.
 
     - train_history: per-user train history events (sequence)
     - val_target: per-user val target item
     - test_target: per-user test target item
+    - train_sample: per (prefix, target) training sample (sliding window)
 
     Returns counts and percentages.
     """
@@ -239,26 +241,50 @@ def compute_per_split_coverage(
         return with_watch, total
 
     def _target_with_watch(df: pd.DataFrame) -> tuple[int, int]:
+        """Count rows where the target has a watch signal.
+
+        Prefers the explicit ``target_has_watch_signal`` column (set by
+        split_leave_one_out). Falls back to ``target_engagement > 0`` for
+        backward compatibility with old CSVs.
+        """
         if df.empty:
             return 0, 0
-        if "watch_signal_sequence" in df.columns:
-            target_signal = df["watch_signal_sequence"].apply(
-                lambda s: (
-                    s[-1]
-                    if isinstance(s, list) and s
-                    else (int(_coerce_signal_seq(s)[-1]) if _coerce_signal_seq(s) else 0)
-                )
-            )
-            has_watch = (target_signal == 1).sum()
+        if "target_has_watch_signal" in df.columns:
+            has_watch = int(df["target_has_watch_signal"].astype(bool).sum())
         elif "target_engagement" in df.columns:
-            has_watch = (df["target_engagement"] > 0).sum()
+            has_watch = int((df["target_engagement"].astype(float) > 0).sum())
         else:
             has_watch = 0
-        return int(has_watch), len(df)
+        return has_watch, len(df)
+
+    def _train_sample_coverage(user_seqs: pd.DataFrame) -> dict:
+        """Per-sample watch-signal coverage on training samples.
+
+        For each user with k items, TrainSequenceDataset builds
+        (prefix=train_history[:i], target=train_history[i]) for i in
+        range(1, len(train_history)) = (k-3) samples. Targets are at
+        positions [1, k-2) of the full user sequence, i.e. ``watch_signal[1:-2]``
+        (exclude first item — no prefix — and the val target at position -2).
+        """
+        total = 0
+        with_watch = 0
+        for _, row in user_seqs.iterrows():
+            watch_signal = row.get("watch_signal_seq")
+            if watch_signal is None or (isinstance(watch_signal, float) and pd.isna(watch_signal)):
+                continue
+            targets_signal = watch_signal[1:-2]
+            total += len(targets_signal)
+            with_watch += int(sum(1 for v in targets_signal if v))
+        return {
+            "train_sample_total": total,
+            "train_sample_with_watch": with_watch,
+            "train_sample_with_watch_pct": round(100.0 * with_watch / total, 2) if total else 0.0,
+        }
 
     train_with, train_total = _history_with_watch(train_df)
     val_with, val_total = _target_with_watch(val_df)
     test_with, test_total = _target_with_watch(test_df)
+    train_sample_cov = _train_sample_coverage(user_sequences) if user_sequences is not None else {}
 
     def _pct(numerator: int, denominator: int) -> float:
         return round(100.0 * numerator / denominator, 2) if denominator else 0.0
@@ -273,6 +299,7 @@ def compute_per_split_coverage(
         "test_target_with_watch": test_with,
         "test_target_total": test_total,
         "test_target_pct": _pct(test_with, test_total),
+        **train_sample_cov,
     }
 
 
@@ -425,6 +452,7 @@ def split_leave_one_out(
         "sequence_length",
         "target_item",
         "target_engagement",
+        "target_has_watch_signal",
     ]
 
     if user_sequences.empty:
@@ -492,6 +520,7 @@ def split_leave_one_out(
                 "sequence_length": len(train_history),
                 "target_item": val_target,
                 "target_engagement": val_target_engagement,
+                "target_has_watch_signal": bool(watch_signal[-2]),
             }
         )
         test_rows.append(
@@ -503,6 +532,7 @@ def split_leave_one_out(
                 "sequence_length": len(test_history),
                 "target_item": test_target,
                 "target_engagement": test_target_engagement,
+                "target_has_watch_signal": bool(watch_signal[-1]),
             }
         )
 
@@ -852,7 +882,7 @@ def main() -> None:
         sum(any(seq[:-2]) for seq in mapped_user_sequences["watch_signal_seq"])
     )
     train_df, val_df, test_df = split_leave_one_out(mapped_user_sequences)
-    per_split_coverage = compute_per_split_coverage(train_df, val_df, test_df)
+    per_split_coverage = compute_per_split_coverage(train_df, val_df, test_df, mapped_user_sequences)
 
     item_metadata = _build_item_metadata(items, item_id_map)
     dataset_stats = build_dataset_stats(
