@@ -53,6 +53,17 @@ def main() -> None:
     df = pd.read_csv(args.input)
     df = df.sort_values("item_idx").reset_index(drop=True)
 
+    if df["item_idx"].duplicated().any():
+        dupes = df[df["item_idx"].duplicated()]["item_idx"].tolist()
+        raise ValueError(f"Duplicate item_idx: {dupes[:10]}")
+
+    n_items = len(df)
+    expected_idx = set(range(1, n_items + 1))
+    actual_idx = set(df["item_idx"].astype(int))
+    if actual_idx != expected_idx:
+        missing = sorted(expected_idx - actual_idx)
+        raise ValueError(f"item_idx gap. Missing={missing[:10]}")
+
     texts = []
     for _, row in df.iterrows():
         parts = []
@@ -63,7 +74,6 @@ def main() -> None:
         text = " ".join(parts) if parts else MISSING_TEXT
         texts.append(text)
 
-    n_items = len(df)
     emb_dim = model.get_sentence_embedding_dimension()
 
     print(f"Encoding {n_items} items (dim={emb_dim})...")
@@ -71,7 +81,9 @@ def main() -> None:
                               convert_to_numpy=True, normalize_embeddings=False)
 
     full_embeddings = torch.zeros(n_items + 1, emb_dim)
-    full_embeddings[1:] = torch.tensor(embeddings, dtype=torch.float32)
+    item_indices = df["item_idx"].astype(int).tolist()
+    for i, idx in enumerate(item_indices):
+        full_embeddings[idx] = torch.tensor(embeddings[i], dtype=torch.float32)
 
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)

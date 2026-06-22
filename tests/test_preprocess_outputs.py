@@ -1,6 +1,10 @@
 import json
+import sys
+from pathlib import Path
 
 import pandas as pd
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from data import preprocess
 
@@ -17,6 +21,7 @@ def test_attach_engagement_score_uses_zero_for_missing_explicit_pair():
         {
             "user_id": ["1"],
             "item_id": ["10"],
+            "created_at": pd.to_datetime(["2024-01-01"]),
             "engagement_score": [0.8],
         }
     )

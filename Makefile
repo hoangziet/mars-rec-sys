@@ -71,7 +71,7 @@ rq4-collect:
 	uv run python scripts/rq4_collect.py --benchmark-id $(RQ4_BENCHMARK_ID) --output-dir $(RQ4_COMPARISON_DIR)
 
 rq4-compare:
-	uv run python scripts/rq4_compare.py --runs-file $(RQ4_COMPARISON_DIR)/rq4_runs.csv --summary-file $(RQ4_COMPARISON_DIR)/rq4_summary.json --manifest $(RQ4_COMPARISON_DIR)/rq4_manifest.json --output-dir $(RQ4_COMPARISON_DIR)
+	uv run python scripts/rq4_compare.py --per-user-dir $(RQ4_COMPARISON_DIR)/per_user --manifest $(RQ4_COMPARISON_DIR)/rq4_manifest.json --output-dir $(RQ4_COMPARISON_DIR)
 
 rq4-report:
 	uv run python scripts/rq4_report.py --benchmark-id $(RQ4_BENCHMARK_ID) --comparison-dir $(RQ4_COMPARISON_DIR) --output-dir $(RQ4_OUTPUT_DIR)

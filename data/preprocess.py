@@ -56,54 +56,91 @@ def load_explicit_ratings(path: Path) -> pd.DataFrame:
 
 
 def build_engagement_lookup(explicit: pd.DataFrame) -> pd.DataFrame:
+    """Build engagement lookup with temporal alignment.
+
+    Returns one row per explicit watch event with (user_id, item_id, created_at, engagement_score).
+    Used by attach_engagement_score for temporal join.
+    """
     explicit = explicit.copy()
     if "engagement_score" not in explicit.columns:
         explicit["engagement_score"] = (
             explicit["watch_percentage"].astype(float).clip(lower=0, upper=100) / 100.0
         )
-    return (
-        explicit.groupby(["user_id", "item_id"], as_index=False)
-        .agg(engagement_score=("engagement_score", "max"))
-    )
+    return explicit[["user_id", "item_id", "created_at", "engagement_score"]].copy()
 
 
 def attach_engagement_score(
     interactions: pd.DataFrame,
     engagement_lookup: pd.DataFrame,
 ) -> pd.DataFrame:
-    result = interactions.merge(
-        engagement_lookup,
-        on=["user_id", "item_id"],
-        how="left",
-        validate="one_to_one",
+    """Attach engagement score using temporal alignment.
+
+    For each implicit interaction, finds the most recent explicit watch event
+    for the same (user_id, item_id) with timestamp <= interaction timestamp.
+    If no such event exists, engagement_score = 0.0.
+    Also adds has_watch_signal (True if any explicit watch exists for this pair).
+    """
+    if engagement_lookup.empty:
+        result = interactions.copy()
+        result["engagement_score"] = 0.0
+        result["has_watch_signal"] = False
+        return result
+
+    # Sort both by (user_id, item_id, created_at) for merge_asof
+    interactions_sorted = interactions.sort_values(
+        ["user_id", "item_id", "created_at"], kind="stable"
+    ).reset_index(drop=True)
+
+    engagement_sorted = engagement_lookup.sort_values(
+        ["user_id", "item_id", "created_at"], kind="stable"
+    ).reset_index(drop=True)
+
+    # merge_asof: for each interaction row, find the latest engagement event
+    # with same (user_id, item_id) and engagement.created_at <= interaction.created_at
+    merged = pd.merge_asof(
+        interactions_sorted,
+        engagement_sorted.rename(columns={"created_at": "engagement_at", "engagement_score": "engagement_score_raw"}),
+        left_on="created_at",
+        right_on="engagement_at",
+        by=["user_id", "item_id"],
+        direction="backward",
     )
-    result["engagement_score"] = (
-        result["engagement_score"].fillna(0.0).clip(lower=0.0, upper=1.0)
+
+    merged["engagement_score"] = merged["engagement_score_raw"].fillna(0.0).clip(lower=0.0, upper=1.0)
+
+    # has_watch_signal: True if ANY explicit watch exists for this (user_id, item_id)
+    watched_pairs = set(zip(engagement_lookup["user_id"], engagement_lookup["item_id"]))
+    merged["has_watch_signal"] = merged.apply(
+        lambda row: (row["user_id"], row["item_id"]) in watched_pairs, axis=1
     )
-    return result
+
+    merged = merged.drop(columns=["engagement_at", "engagement_score_raw"], errors="ignore")
+    return merged
 
 
 def build_user_sequences(interactions: pd.DataFrame) -> pd.DataFrame:
     if interactions.empty:
         return pd.DataFrame(
-            columns=["user_idx", "user_id", "item_seq_idx", "engagement_seq"]
+            columns=["user_idx", "user_id", "item_seq_idx", "engagement_seq", "has_watch_signal"]
         )
 
     rows = []
     ordered = interactions.sort_values(["user_idx", "created_at", "item_idx"], kind="stable")
     for user_idx, group in ordered.groupby("user_idx", sort=True):
+        has_watch = bool(group["has_watch_signal"].any()) if "has_watch_signal" in group.columns else False
         rows.append(
             {
                 "user_idx": int(user_idx),
                 "user_id": group["user_id"].iloc[0],
                 "item_seq_idx": group["item_idx"].tolist(),
                 "engagement_seq": group["engagement_score"].astype(float).tolist(),
+                "has_watch_signal": has_watch,
             }
         )
 
     return pd.DataFrame(
         rows,
-        columns=["user_idx", "user_id", "item_seq_idx", "engagement_seq"],
+        columns=["user_idx", "user_id", "item_seq_idx", "engagement_seq", "has_watch_signal"],
     )
 
 
@@ -565,6 +602,7 @@ def main() -> None:
             "item_id",
             "created_at",
             "engagement_score",
+            "has_watch_signal",
             "sequence_order",
         ]
     ]

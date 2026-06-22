@@ -34,6 +34,7 @@ VARIANT_ORDER = {"V0": 0, "V1": 1, "V2": 2, "V3": 3}
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="RQ4: collect ablation results from MLflow.")
     parser.add_argument("--benchmark-id", required=True)
+    parser.add_argument("--manifest", default=None, help="Frozen rq4 manifest (validates exact runs)")
     parser.add_argument("--output-dir", default=None)
     return parser
 
@@ -80,6 +81,46 @@ def main() -> None:
 
     if not selected:
         raise RuntimeError(f"No reportable runs found for benchmark {args.benchmark_id}")
+
+    # Validate against frozen manifest if provided
+    if args.manifest:
+        frozen = json.loads(Path(args.manifest).read_text())
+        expected_variants = set(frozen["variants"])
+        expected_seeds = {int(s) for s in frozen["neural_seeds"]}
+        expected_runs = len(expected_variants) * len(expected_seeds)
+
+        actual_variants = {r["variant"] for r in selected}
+        actual_seeds = {r["seed"] for r in selected}
+        actual_pairs = {(r["variant"], r["seed"]) for r in selected}
+
+        errors = []
+        if actual_variants != expected_variants:
+            missing_v = sorted(expected_variants - actual_variants)
+            extra_v = sorted(actual_variants - expected_variants)
+            if missing_v:
+                errors.append(f"Missing variants: {missing_v}")
+            if extra_v:
+                errors.append(f"Extra variants: {extra_v}")
+        if actual_seeds != expected_seeds:
+            missing_s = sorted(expected_seeds - actual_seeds)
+            extra_s = sorted(actual_seeds - expected_seeds)
+            if missing_s:
+                errors.append(f"Missing seeds: {missing_s}")
+            if extra_s:
+                errors.append(f"Extra seeds: {extra_s}")
+        if len(actual_pairs) != expected_runs:
+            errors.append(f"Expected {expected_runs} runs, got {len(actual_pairs)}")
+        # Check for duplicates
+        pair_counts = {}
+        for r in selected:
+            key = (r["variant"], r["seed"])
+            pair_counts[key] = pair_counts.get(key, 0) + 1
+        dupes = {k: v for k, v in pair_counts.items() if v > 1}
+        if dupes:
+            errors.append(f"Duplicate (variant, seed): {dupes}")
+
+        if errors:
+            raise RuntimeError("Manifest validation failed:\n" + "\n".join(f"  - {e}" for e in errors))
 
     output_dir = Path(args.output_dir) if args.output_dir else Path("experiments") / "rq4" / args.benchmark_id
     output_dir.mkdir(parents=True, exist_ok=True)

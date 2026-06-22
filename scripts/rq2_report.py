@@ -83,6 +83,23 @@ def main() -> None:
     if not selected:
         raise RuntimeError(f"No reportable runs found for benchmark {args.benchmark_id}")
 
+    # Validate seed consistency
+    by_alpha_pair: dict[float, set[int]] = {}
+    pair_counts: dict[tuple[float, int], int] = {}
+    for r in selected:
+        by_alpha_pair.setdefault(r["alpha"], set()).add(r["seed"])
+        key = (r["alpha"], r["seed"])
+        pair_counts[key] = pair_counts.get(key, 0) + 1
+
+    dupes = {k: v for k, v in pair_counts.items() if v > 1}
+    if dupes:
+        raise RuntimeError(f"Duplicate (alpha, seed) runs: {dupes}")
+
+    seed_sets = list(by_alpha_pair.values())
+    if len(set(frozenset(s) for s in seed_sets)) > 1:
+        details = {alpha: sorted(seeds) for alpha, seeds in by_alpha_pair.items()}
+        raise RuntimeError(f"All alphas must have the same seed set. Got: {details}")
+
     by_alpha: dict[float, list[float]] = {}
     for r in selected:
         by_alpha.setdefault(r["alpha"], []).append(r["val_ndcg_at_10"])
