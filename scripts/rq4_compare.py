@@ -42,7 +42,7 @@ SECONDARY_COMPARISONS = [("V3", "V1"), ("V3", "V2")]
 BOOTSTRAP_N = 10000
 PERMUTATION_N = 10000
 RNG_SEED = 42
-PRACTICAL_THRESHOLD = 0.01  # 1% NDCG@10 improvement
+PRACTICAL_THRESHOLD = 0.01  # absolute NDCG@10 improvement threshold
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -139,7 +139,7 @@ def _permutation_test(deltas: np.ndarray, n_perm: int = PERMUTATION_N,
         perm_mean = abs((deltas * signs).mean())
         if perm_mean >= observed_mean:
             count += 1
-    return count / n_perm
+    return (count + 1) / (n_perm + 1)
 
 
 def _cohens_d(deltas: np.ndarray) -> float:
@@ -217,7 +217,7 @@ def _run_comparison(per_user: pd.DataFrame, comp_variant: str, base_variant: str
         "base_mean": base_mean,
         "mean_difference": mean_diff,
         "relative_improvement": relative_imp,
-        "practically_significant": bool(abs(mean_diff) >= PRACTICAL_THRESHOLD),
+        "practically_significant": bool(mean_diff >= PRACTICAL_THRESHOLD),
         "wins": wins,
         "ties": ties,
         "losses": losses,

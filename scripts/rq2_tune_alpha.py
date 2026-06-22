@@ -66,6 +66,7 @@ def _run_single(args, alpha: float, seed: int) -> dict:
     model_kwargs = dict(base_cfg["model_kwargs"])
     train_kwargs = dict(base_cfg["train_kwargs"])
     train_kwargs["confidence_alpha"] = alpha
+    train_kwargs["batch_size"] = 128
 
     max_len = train_kwargs.get("max_len", 50)
     batch_size = train_kwargs.get("batch_size", 256)

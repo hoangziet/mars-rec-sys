@@ -63,16 +63,16 @@ RQ4_SEEDS ?= 42 123 2024 3407 9999 7 21 77 314 1337
 RQ4_BENCHMARK_ID ?= rq4-ablation
 RQ4_OUTPUT_DIR ?= experiments/rq4/$(RQ4_BENCHMARK_ID)
 RQ4_COMPARISON_DIR ?= experiments/rq4/$(RQ4_BENCHMARK_ID)
-RQ4_MANIFEST ?= $(RQ4_COMPARISON_DIR)/rq4_manifest.json
+RQ4_MANIFEST ?= $(RQ4_COMPARISON_DIR)/rq4_protocol_manifest.json
 
 rq4-ablation:
 	uv run python scripts/rq4_ablation.py --best-alpha $(RQ2_BEST_ALPHA) --best-variant $(RQ3_BEST_VARIANT) --seeds $(RQ4_SEEDS) --benchmark-id $(RQ4_BENCHMARK_ID)
 
 rq4-collect:
-	uv run python scripts/rq4_collect.py --benchmark-id $(RQ4_BENCHMARK_ID) --manifest $(RQ4_MANIFEST) --output-dir $(RQ4_COMPARISON_DIR)
+	uv run python scripts/rq4_collect.py --benchmark-id $(RQ4_BENCHMARK_ID) --protocol $(RQ4_MANIFEST) --output-dir $(RQ4_COMPARISON_DIR)
 
 rq4-compare:
-	uv run python scripts/rq4_compare.py --per-user-dir $(RQ4_COMPARISON_DIR)/per_user --manifest $(RQ4_COMPARISON_DIR)/rq4_manifest.json --output-dir $(RQ4_COMPARISON_DIR)
+	uv run python scripts/rq4_compare.py --per-user-dir $(RQ4_COMPARISON_DIR)/per_user --manifest $(RQ4_COMPARISON_DIR)/rq4_result_manifest.json --output-dir $(RQ4_COMPARISON_DIR)
 
 rq4-subgroup:
 	uv run python scripts/rq4_subgroup.py --per-user-dir $(RQ4_COMPARISON_DIR)/per_user --manifest $(RQ4_COMPARISON_DIR)/rq4_manifest.json --data-dir data/processed --output-dir $(RQ4_COMPARISON_DIR)

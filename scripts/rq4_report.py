@@ -84,8 +84,9 @@ def main() -> None:
 
     for fname in ["rq4_comparison.csv", "rq4_comparison.md"]:
         src = comparison_dir / fname
-        if src.exists():
-            shutil.copy2(src, output_dir / fname)
+        dst = output_dir / fname
+        if src.exists() and src.resolve() != dst.resolve():
+            shutil.copy2(src, dst)
 
     print(f"Final report: {output_dir / 'rq4_final_report.md'}")
 

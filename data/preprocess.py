@@ -42,7 +42,7 @@ def load_explicit_ratings(path: Path) -> pd.DataFrame:
 
     explicit["created_at"] = pd.to_datetime(explicit["created_at"], errors="coerce")
     explicit = explicit.dropna(
-        subset=["user_id", "item_id", "watch_percentage"]
+        subset=["user_id", "item_id", "watch_percentage", "created_at"]
     ).copy()
 
     explicit["user_id"] = explicit["user_id"].astype(int).astype(str)
@@ -86,14 +86,20 @@ def attach_engagement_score(
         result["has_watch_signal"] = False
         return result
 
-    # Sort both by (user_id, item_id, created_at) for merge_asof
-    interactions_sorted = interactions.sort_values(
-        ["user_id", "item_id", "created_at"], kind="stable"
-    ).reset_index(drop=True)
+    # Sort both by created_at for merge_asof (must be globally sorted)
+    interactions_sorted = interactions.assign(
+        _original_order=range(len(interactions))
+    ).sort_values("created_at", kind="stable").reset_index(drop=True)
 
-    engagement_sorted = engagement_lookup.sort_values(
-        ["user_id", "item_id", "created_at"], kind="stable"
-    ).reset_index(drop=True)
+    engagement_sorted = engagement_lookup.dropna(
+        subset=["created_at"]
+    ).sort_values("created_at", kind="stable").reset_index(drop=True)
+
+    if engagement_sorted.empty:
+        result = interactions_sorted.drop(columns=["_original_order"])
+        result["engagement_score"] = 0.0
+        result["has_watch_signal"] = False
+        return result.sort_values("_original_order").drop(columns=["_original_order"]) if "_original_order" in result.columns else result
 
     # merge_asof: for each interaction row, find the latest engagement event
     # with same (user_id, item_id) and engagement.created_at <= interaction.created_at
@@ -114,7 +120,10 @@ def attach_engagement_score(
         lambda row: (row["user_id"], row["item_id"]) in watched_pairs, axis=1
     )
 
-    merged = merged.drop(columns=["engagement_at", "engagement_score_raw"], errors="ignore")
+    # Restore original order
+    merged = merged.sort_values("_original_order", kind="stable")
+    merged = merged.drop(columns=["engagement_at", "engagement_score_raw", "_original_order"], errors="ignore")
+
     return merged
 
 
@@ -496,6 +505,11 @@ def build_preprocessing_report(
     repeat_events_removed: int,
     eligible_user_count: int,
     filtered_item_count: int,
+    n_interactions_total: int = 0,
+    n_with_watch_signal: int = 0,
+    n_watch_zero: int = 0,
+    n_watch_positive: int = 0,
+    coverage_pct: float = 0.0,
 ) -> dict:
     return {
         "orphan_implicit_count": orphan_implicit_count,
@@ -506,6 +520,13 @@ def build_preprocessing_report(
         "repeat_events_removed": repeat_events_removed,
         "eligible_user_count": eligible_user_count,
         "filtered_item_count": filtered_item_count,
+        "engagement_coverage": {
+            "total_interactions": n_interactions_total,
+            "with_watch_signal": n_with_watch_signal,
+            "watch_zero_pct": n_watch_zero,
+            "watch_positive": n_watch_positive,
+            "coverage_pct": round(coverage_pct, 2),
+        },
     }
 
 
@@ -545,6 +566,14 @@ def main() -> None:
 
     interactions = implicit_dedup[implicit_dedup["item_id"].isin(catalog_item_ids)].copy()
     interactions = attach_engagement_score(interactions, engagement_lookup)
+
+    # Coverage stats
+    n_interactions_total = len(interactions)
+    n_with_watch_signal = int(interactions["has_watch_signal"].sum()) if "has_watch_signal" in interactions.columns else 0
+    n_watch_zero = int((interactions["engagement_score"] == 0.0).sum())
+    n_watch_positive = int((interactions["engagement_score"] > 0.0).sum())
+    coverage_pct = n_with_watch_signal / n_interactions_total * 100 if n_interactions_total > 0 else 0.0
+
     interactions = apply_iterative_k_core_filter(
         interactions,
         min_user_interactions=min_user_interactions,
@@ -627,6 +656,11 @@ def main() -> None:
         repeat_events_removed=repeat_events_removed,
         eligible_user_count=len(user_id_map),
         filtered_item_count=len(item_id_map),
+        n_interactions_total=n_interactions_total,
+        n_with_watch_signal=n_with_watch_signal,
+        n_watch_zero=n_watch_zero,
+        n_watch_positive=n_watch_positive,
+        coverage_pct=coverage_pct,
     )
 
     save_processed_outputs(
