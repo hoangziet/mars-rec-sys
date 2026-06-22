@@ -111,8 +111,9 @@ def _run_single(args, variant_name: str, seed: int) -> dict:
     val_loss_loader = get_val_loss_loader("gsasrec", data_dir / "splits" / "val_sequences.csv", stats, batch_size=batch_size, max_len=max_len, num_neg=train_kwargs.get("num_neg", 1), seed=seed)
 
     run_name = build_run_name("gsasrec", seed, variant=variant_name.lower())
+    run_output_dir = Path(args.output_dir) / "rq3" / args.benchmark_id / variant_name / f"seed_{seed}"
 
-    trainer = Trainer("gsasrec", device, args.output_dir, use_mlflow=True, mlflow_config={
+    trainer = Trainer("gsasrec", device, str(run_output_dir), use_mlflow=True, mlflow_config={
         "experiment_name": EXPERIMENT_NAME, "run_name": run_name, "log_artifacts": True,
         "phase": "tuning", "variant": variant_name.lower(), "git_commit": get_git_commit(), "reportable": True,
     })

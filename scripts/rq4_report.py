@@ -53,6 +53,11 @@ def main() -> None:
     if thresholds_path.exists():
         thresholds = json.loads(thresholds_path.read_text())
 
+    subgroup_path = comparison_dir / "rq4_subgroup_analysis.md"
+    subgroup_content = None
+    if subgroup_path.exists():
+        subgroup_content = subgroup_path.read_text()
+
     with open(output_dir / "rq4_final_report.md", "w") as f:
         f.write("# RQ4 Final Ablation Report\n\n")
         f.write(f"Benchmark: {args.benchmark_id}\n\n")
@@ -60,18 +65,22 @@ def main() -> None:
         f.write("## Primary Findings\n\n")
         for r in primary:
             sig = "statistically significant" if r.get("significant") == "True" else "not significant"
-            f.write(f"- **{r['comparison']}**: {sig} (Holm p = {r.get('holm_p', '-')})\n")
-            f.write(f"  - Mean difference: {float(r['mean_diff']):.6f}\n")
-            f.write(f"  - 95% CI: [{r['ci95_low']}, {r['ci95_high']}]\n\n")
+            f.write(f"- **{r['comparison']}**: {sig} (Holm p = {r.get('holm_adjusted_p', '-')})\n")
+            f.write(f"  - Mean difference: {float(r['mean_difference']):.6f}\n")
+            f.write(f"  - 95% bootstrap CI: [{r['bootstrap_ci_low']}, {r['bootstrap_ci_high']}]\n")
+            f.write(f"  - Cohen's d: {float(r.get('cohens_d', 0)):.3f}\n\n")
 
         f.write("## Secondary Findings (Descriptive)\n\n")
         for r in secondary:
-            f.write(f"- **{r['comparison']}**: mean diff = {float(r['mean_diff']):.6f}\n")
+            f.write(f"- **{r['comparison']}**: mean diff = {float(r['mean_difference']):.6f}, Cohen's d = {float(r.get('cohens_d', 0)):.3f}\n")
 
         if thresholds:
             f.write("\n## Subgroup Thresholds\n\n")
             for k, v in thresholds.items():
                 f.write(f"- {k}: {v}\n")
+
+        if subgroup_content:
+            f.write(f"\n{subgroup_content}\n")
 
     for fname in ["rq4_comparison.csv", "rq4_comparison.md"]:
         src = comparison_dir / fname

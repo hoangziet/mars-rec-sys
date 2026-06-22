@@ -42,6 +42,7 @@ SECONDARY_COMPARISONS = [("V3", "V1"), ("V3", "V2")]
 BOOTSTRAP_N = 10000
 PERMUTATION_N = 10000
 RNG_SEED = 42
+PRACTICAL_THRESHOLD = 0.01  # 1% NDCG@10 improvement
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -73,7 +74,10 @@ def _load_per_user(per_user_dir: Path, variants: list[str], seeds: list[int]) ->
 
 def _join_by_user(per_user: pd.DataFrame, comp_variant: str, base_variant: str,
                   metric: str) -> pd.DataFrame:
-    """Join two variants by (seed, user_idx, target_item), compute delta."""
+    """Join two variants by (seed, user_idx, target_item), then average delta per user across seeds.
+
+    Returns one row per user with averaged delta.
+    """
     comp = per_user[per_user["variant"] == comp_variant][["seed", "user_idx", "target_item", metric]].copy()
     base = per_user[per_user["variant"] == base_variant][["seed", "user_idx", "target_item", metric]].copy()
     comp = comp.rename(columns={metric: "comp_metric"})
@@ -83,8 +87,27 @@ def _join_by_user(per_user: pd.DataFrame, comp_variant: str, base_variant: str,
     if len(merged) == 0:
         raise RuntimeError(f"No matching users between {comp_variant} and {base_variant}")
 
+    # Validate no dropped users
+    comp_users = set(zip(comp["user_idx"], comp["target_item"]))
+    base_users = set(zip(base["user_idx"], base["target_item"]))
+    common_users = comp_users & base_users
+    if len(common_users) != len(comp_users) or len(common_users) != len(base_users):
+        raise RuntimeError(
+            f"User mismatch: comp has {len(comp_users)}, base has {len(base_users)}, "
+            f"common={len(common_users)}"
+        )
+
     merged["delta"] = merged["comp_metric"] - merged["base_metric"]
-    return merged
+
+    # Average delta per user across seeds
+    user_avg = merged.groupby(["user_idx", "target_item"]).agg(
+        delta=("delta", "mean"),
+        comp_metric=("comp_metric", "mean"),
+        base_metric=("base_metric", "mean"),
+        n_seeds=("seed", "nunique"),
+    ).reset_index()
+
+    return user_avg
 
 
 def _bootstrap_ci(deltas: np.ndarray, n_bootstrap: int = BOOTSTRAP_N,
@@ -194,6 +217,7 @@ def _run_comparison(per_user: pd.DataFrame, comp_variant: str, base_variant: str
         "base_mean": base_mean,
         "mean_difference": mean_diff,
         "relative_improvement": relative_imp,
+        "practically_significant": bool(abs(mean_diff) >= PRACTICAL_THRESHOLD),
         "wins": wins,
         "ties": ties,
         "losses": losses,
@@ -252,6 +276,7 @@ def main() -> None:
     fields = [
         "comparison", "comparison_type", "comp_variant", "base_variant",
         "n_users", "comp_mean", "base_mean", "mean_difference", "relative_improvement",
+        "practically_significant",
         "wins", "ties", "losses",
         "bootstrap_ci_low", "bootstrap_ci_high",
         "permutation_p", "cohens_d",
@@ -270,15 +295,17 @@ def main() -> None:
         f.write(f"User-level paired bootstrap CI ({BOOTSTRAP_N} resamples)\n")
         f.write(f"User-level paired permutation test ({PERMUTATION_N} sign-flips)\n")
         f.write("Multiple-comparison correction: Holm (primary comparisons only)\n")
-        f.write("Family-wise significance level: α = 0.05\n\n")
+        f.write("Family-wise significance level: α = 0.05\n")
+        f.write(f"Practical significance threshold: Δ ≥ {PRACTICAL_THRESHOLD}\n\n")
 
         f.write("## Primary comparisons (Holm-corrected)\n\n")
-        f.write("| Comparison | Comp | Base | Δ | Rel | 95% CI (bootstrap) | W/T/L | Perm p | Holm p | Cohen's d | Sig |\n")
-        f.write("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |\n")
+        f.write("| Comparison | Comp | Base | Δ | Rel | Practical | 95% CI (bootstrap) | W/T/L | Perm p | Holm p | Cohen's d | Sig |\n")
+        f.write("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |\n")
         for r in primary_results:
             ci = f"[{r['bootstrap_ci_low']:.4f}, {r['bootstrap_ci_high']:.4f}]"
             wtl = f"{r['wins']}/{r['ties']}/{r['losses']}"
             rel = f"{r['relative_improvement']*100:.2f}%" if r["relative_improvement"] is not None else "-"
+            pract = "✅" if r.get("practically_significant") else "-"
             sig = "✅" if r["significant"] else "-"
             f.write(
                 f"| {r['comparison']} "
@@ -286,6 +313,7 @@ def main() -> None:
                 f"| {r['base_mean']:.4f} "
                 f"| {r['mean_difference']:.6f} "
                 f"| {rel} "
+                f"| {pract} "
                 f"| {ci} "
                 f"| {wtl} "
                 f"| {_format_p_value(r['permutation_p'])} "

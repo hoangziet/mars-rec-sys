@@ -134,12 +134,14 @@ def _run_single(args, variant: str, seed: int, variant_cfg: dict) -> dict:
 
     result = trainer.train(model=model, train_loader=train_loader, val_loader=val_loader, test_loader=test_loader, optimizer=optimizer, epochs=train_kwargs["epochs"], criterion_fn=criterion_fn, eval_fn=eval_fn, gradient_clip=train_kwargs.get("gradient_clip", 5.0), val_loss_loader=val_loss_loader, early_stop_patience=train_kwargs.get("early_stop_patience", 10), early_stop_min_delta=train_kwargs.get("early_stop_min_delta", 1e-4), scheduler=scheduler, mlflow_params=mlflow_cfg)
 
-    _export_per_user(model, test_loader, device, variant, seed, args.output_dir, args.benchmark_id)
+    # Get run_id from Trainer's active run before it closes
+    run_id = trainer._mlflow_run.info.run_id if trainer._mlflow_run else None
+    _export_per_user(model, test_loader, device, variant, seed, args.output_dir, args.benchmark_id, run_id)
 
     return result
 
 
-def _export_per_user(model, test_loader, device, variant, seed, output_dir, benchmark_id):
+def _export_per_user(model, test_loader, device, variant, seed, output_dir, benchmark_id, run_id=None):
     from pipeline.metrics import evaluate_sequential_detailed
     import csv as csv_mod
     import mlflow as mlflow_mod
@@ -158,8 +160,10 @@ def _export_per_user(model, test_loader, device, variant, seed, output_dir, benc
         writer.writeheader()
         writer.writerows(per_user)
 
-    # Log to MLflow
-    mlflow_mod.log_artifact(str(path), artifact_path="per_user")
+    # Log to MLflow using client (works after run closes)
+    if run_id:
+        client = mlflow_mod.tracking.MlflowClient()
+        client.log_artifact(run_id, str(path), artifact_path="per_user")
 
     return path
 
