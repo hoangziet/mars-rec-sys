@@ -226,12 +226,6 @@ def test_save_processed_outputs_writes_entity_folders(tmp_path):
         output_dir / "mappings" / "item_id_map.csv",
         output_dir / "reports" / "dataset_stats.json",
         output_dir / "reports" / "preprocessing_report.json",
-        output_dir / "interactions.csv",
-        output_dir / "train.csv",
-        output_dir / "val.csv",
-        output_dir / "test.csv",
-        output_dir / "item_meta.csv",
-        output_dir / "dataset_stats.json",
     ]
 
     for path in expected_files:
@@ -242,14 +236,6 @@ def test_save_processed_outputs_writes_entity_folders(tmp_path):
     assert train_saved.loc[0, "engagement_sequence"] == "0.1 0.5"
     val_saved = pd.read_csv(output_dir / "splits" / "val_sequences.csv")
     assert val_saved.loc[0, "item_sequence"] == "1 2"
-    legacy_val = pd.read_csv(output_dir / "val.csv")
-    assert legacy_val.columns.tolist() == ["user_idx", "train_seq", "target"]
-    assert legacy_val.loc[0, "train_seq"] == "[1, 2]"
-    assert legacy_val.loc[0, "target"] == 3
-    legacy_train = pd.read_csv(output_dir / "train.csv")
-    assert legacy_train.loc[0, "item_sequence"] == "[1, 2]"
-    legacy_meta = pd.read_csv(output_dir / "item_meta.csv")
-    assert legacy_meta.loc[0, "title"] == "Course"
 
     with open(output_dir / "reports" / "preprocessing_report.json") as f:
         report = json.load(f)

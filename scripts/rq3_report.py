@@ -81,10 +81,9 @@ def main() -> None:
         variant = tags.get("metadata_variant", "?")
         seed = int(run.data.params.get("seed", "0"))
         val_ndcg = run.data.metrics.get(PRIMARY_METRIC)
-        test_ndcg = run.data.metrics.get("test_NDCG_at_10")
         if val_ndcg is None:
             continue
-        selected.append({"variant": variant, "seed": seed, "val_ndcg_at_10": val_ndcg, "test_NDCG_at_10": test_ndcg})
+        selected.append({"variant": variant, "seed": seed, "val_ndcg_at_10": val_ndcg})
 
     if not selected:
         raise RuntimeError(f"No reportable runs found for benchmark {args.benchmark_id}")

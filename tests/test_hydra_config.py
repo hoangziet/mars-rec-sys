@@ -28,7 +28,7 @@ def test_sasrec_config_values():
 
 def test_gsasrec_config_values():
     cfg = _compose(["model=gsasrec"])
-    assert cfg.model.train_kwargs.num_neg == 32
+    assert cfg.model.model_kwargs.num_neg == 32
     assert cfg.model.model_kwargs.t == 0.5
 
 

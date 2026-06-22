@@ -5,19 +5,20 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from pipeline.training_grid import enforce_final_grid
 from scripts import rq2_report, rq3_report
 
 
-def test_rq2_tune_forces_batch_size_128(monkeypatch):
-    from training.configs import build_model_config
-    cfg = build_model_config("gsasrec")
-    train_kwargs = dict(cfg["train_kwargs"])
-    train_kwargs["confidence_alpha"] = 0.5
-    train_kwargs["batch_size"] = 256
-
-    # protocol rule: tuning must align with final batch size
-    train_kwargs["batch_size"] = 128
-    assert train_kwargs["batch_size"] == 128
+def test_rq2_tune_forces_batch_size_128():
+    """Final-grid batch_size is forced to 128, ignoring input value."""
+    train_kwargs = {"batch_size": 256, "epochs": 30, "lr": 1e-3}
+    out = enforce_final_grid(train_kwargs)
+    assert out["batch_size"] == 128
+    # Other fields preserved
+    assert out["epochs"] == 30
+    assert out["lr"] == 1e-3
+    # Original is not mutated
+    assert train_kwargs["batch_size"] == 256
 
 
 def test_rq2_report_requires_exact_alpha_grid():

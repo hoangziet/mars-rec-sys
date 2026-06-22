@@ -27,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from pipeline.builder import build_criterion_fn, build_eval_fn, build_model, build_train_loader
 from pipeline.loaders import get_eval_loader, get_val_loss_loader, load_stats
 from pipeline.optim import build_optimizer, build_scheduler
+from pipeline.training_grid import enforce_final_grid
 from training.configs import build_model_config
 from training.mlflow_contract import build_run_name, build_training_tags
 from training.mlflow_utils import collect_common_run_metadata, configure_mlflow, get_git_commit
@@ -81,9 +82,8 @@ def _run_single(args, variant: str, seed: int, variant_cfg: dict, benchmark_id: 
 
     base_cfg = build_model_config(variant_cfg["config_name"])
     model_kwargs = dict(base_cfg["model_kwargs"])
-    train_kwargs = dict(base_cfg["train_kwargs"])
+    train_kwargs = enforce_final_grid(base_cfg["train_kwargs"])
     train_kwargs["confidence_alpha"] = variant_cfg["confidence_alpha"]
-    train_kwargs["batch_size"] = 128
 
     if variant_cfg["config_name"] == "gsasrec_metadata":
         encoder_cfg = model_kwargs.get("item_encoder", {})
@@ -100,14 +100,14 @@ def _run_single(args, variant: str, seed: int, variant_cfg: dict, benchmark_id: 
     batch_size = train_kwargs.get("batch_size", 256)
 
     model = build_model("gsasrec", stats["n_items"], stats["n_users"], model_kwargs, max_len, data_dir=data_dir).to(device)
-    train_loader = build_train_loader("gsasrec", data_dir, stats, train_kwargs)
+    train_loader = build_train_loader("gsasrec", data_dir, stats, train_kwargs, model_kwargs=model_kwargs)
     val_loader = get_eval_loader(data_dir / "splits" / "val_sequences.csv", stats, batch_size=batch_size, max_len=max_len)
     test_loader = get_eval_loader(data_dir / "splits" / "test_sequences.csv", stats, batch_size=batch_size, max_len=max_len)
     optimizer = build_optimizer("gsasrec", model, train_kwargs)
     scheduler = build_scheduler(optimizer, train_kwargs, len(train_loader))
     criterion_fn = build_criterion_fn("gsasrec", train_kwargs)
     eval_fn = build_eval_fn("gsasrec")
-    val_loss_loader = get_val_loss_loader("gsasrec", data_dir / "splits" / "val_sequences.csv", stats, batch_size=batch_size, max_len=max_len, num_neg=train_kwargs.get("num_neg", 1), seed=seed)
+    val_loss_loader = get_val_loss_loader("gsasrec", data_dir / "splits" / "val_sequences.csv", stats, batch_size=batch_size, max_len=max_len, num_neg=model_kwargs.get("num_neg", train_kwargs.get("num_neg", 1)), seed=seed)
 
     run_name = build_run_name("gsasrec", seed, variant=variant.lower())
     run_output_dir = Path(args.output_dir) / "rq4" / benchmark_id / variant / f"seed_{seed}"
