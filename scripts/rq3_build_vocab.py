@@ -14,14 +14,17 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
 
+import pandas as pd
 import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from pipeline.loaders import parse_seq
 from pipeline.metadata_utils import MetadataVocab, build_metadata_tensors, load_item_metadata
 
 
@@ -31,11 +34,21 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--vocab-output", default="data/processed/item_features/metadata_vocab.json")
     parser.add_argument("--tensors-output", default="data/processed/item_features/metadata_tensors.pt")
     parser.add_argument("--n-items", type=int, default=None)
+    parser.add_argument("--train-sequences", default="data/processed/splits/train_sequences.csv")
     return parser
 
 
 def parse_args() -> argparse.Namespace:
     return build_parser().parse_args()
+
+
+def _get_train_item_idx(train_csv: str) -> set[int]:
+    """Collect the set of item_idx that appear in the training sequences."""
+    df = pd.read_csv(train_csv)
+    items: set[int] = set()
+    for seq_str in df["item_sequence"]:
+        items.update(parse_seq(seq_str))
+    return items
 
 
 def main() -> None:
@@ -54,15 +67,27 @@ def main() -> None:
     print(f"Loading metadata for {n_items} items...")
     df = load_item_metadata(args.input, n_items)
 
-    print("Building vocabulary...")
-    vocab = MetadataVocab.build(df)
+    train_csv = Path(args.train_sequences)
+    if train_csv.exists():
+        train_items = _get_train_item_idx(str(train_csv))
+        train_item_sha256 = hashlib.sha256(
+            str(sorted(train_items)).encode()
+        ).hexdigest()
+        fit_label = f"{len(train_items)} train items"
+    else:
+        train_items = None
+        train_item_sha256 = None
+        fit_label = "all items (no train sequences found)"
+
+    print(f"Building vocabulary (fit on {fit_label})...")
+    vocab = MetadataVocab.build(df, train_item_idx=train_items)
 
     print("Building tensors...")
     tensors = build_metadata_tensors(vocab, df, n_items)
 
     vocab_path = Path(args.vocab_output)
     vocab_path.parent.mkdir(parents=True, exist_ok=True)
-    vocab.save(vocab_path)
+    vocab.save(vocab_path, train_item_sha256=train_item_sha256)
     print(f"Saved vocab: {vocab_path}")
 
     tensors_path = Path(args.tensors_output)

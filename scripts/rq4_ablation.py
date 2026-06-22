@@ -99,7 +99,7 @@ def _run_single(args, variant: str, seed: int, variant_cfg: dict, benchmark_id: 
     max_len = train_kwargs.get("max_len", 50)
     batch_size = train_kwargs.get("batch_size", 256)
 
-    model = build_model("gsasrec", stats["n_items"], stats["n_users"], model_kwargs, max_len).to(device)
+    model = build_model("gsasrec", stats["n_items"], stats["n_users"], model_kwargs, max_len, data_dir=data_dir).to(device)
     train_loader = build_train_loader("gsasrec", data_dir, stats, train_kwargs)
     val_loader = get_eval_loader(data_dir / "splits" / "val_sequences.csv", stats, batch_size=batch_size, max_len=max_len)
     test_loader = get_eval_loader(data_dir / "splits" / "test_sequences.csv", stats, batch_size=batch_size, max_len=max_len)

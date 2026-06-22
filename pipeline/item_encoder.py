@@ -31,11 +31,14 @@ class ItemEncoder(nn.Module):
 
         struct_dim = 0
         if self.use_structured:
-            self._struct_fields = list(metadata_tensors.keys())
+            # duration_missing is a side-buffer consumed by the duration branch
+            # in forward(); it is not a stand-alone input field, so it must be
+            # excluded from the projection/embedding setup loop.
+            self._struct_fields = [f for f in metadata_tensors.keys() if f != "duration_missing"]
             self._sub_dim = hidden_dim // 4
 
             for field, tensor in metadata_tensors.items():
-                self.register_buffer(f"meta_{field}", tensor)
+                self.register_buffer(f"meta_{field}", tensor, persistent=False)
 
             for field in self._struct_fields:
                 tensor = metadata_tensors[field]
@@ -55,7 +58,7 @@ class ItemEncoder(nn.Module):
         if self.use_text:
             self._text_dim = hidden_dim // 2
             text_dim = self._text_dim
-            self.register_buffer("text_emb", text_embeddings)
+            self.register_buffer("text_emb", text_embeddings, persistent=False)
             self.text_proj = nn.Linear(text_embeddings.size(1), self._text_dim)
 
         total_dim = hidden_dim + struct_dim + text_dim
@@ -82,6 +85,11 @@ class ItemEncoder(nn.Module):
                 if field == "duration":
                     proj = getattr(self, f"proj_{field}")
                     encoded = proj(field_vals.unsqueeze(-1))
+                    if hasattr(self, "meta_duration_missing"):
+                        # Zero out the duration encoding for items whose duration
+                        # is missing, so they don't contribute signal.
+                        missing = self.meta_duration_missing[item_ids]
+                        encoded = encoded * (~missing).float().unsqueeze(-1)
                 elif tensor.dim() == 1:
                     emb = getattr(self, f"emb_{field}")
                     encoded = emb(field_vals)
