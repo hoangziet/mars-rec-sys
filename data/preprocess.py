@@ -543,6 +543,8 @@ def build_preprocessing_report(
     n_missing_watch: int = 0,
     n_positive_watch: int = 0,
     coverage_pct: float = 0.0,
+    post_k_core_interactions: int = 0,
+    train_history_users_with_watch_signal: int = 0,
 ) -> dict:
     return {
         "orphan_implicit_count": orphan_implicit_count,
@@ -553,6 +555,8 @@ def build_preprocessing_report(
         "repeat_events_removed": repeat_events_removed,
         "eligible_user_count": eligible_user_count,
         "filtered_item_count": filtered_item_count,
+        "post_k_core_interactions": post_k_core_interactions,
+        "train_history_users_with_watch_signal": train_history_users_with_watch_signal,
         "engagement_coverage": {
             "total_interactions": n_interactions_total,
             "with_watch_signal": n_with_watch_signal,
@@ -673,6 +677,9 @@ def main() -> None:
     ]
 
     mapped_user_sequences = build_user_sequences(interactions)
+    train_history_watch_users = int(
+        sum(any(seq[:-2]) for seq in mapped_user_sequences["watch_signal_seq"])
+    )
     train_df, val_df, test_df = split_leave_one_out(mapped_user_sequences)
 
     item_metadata = _build_item_metadata(items, item_id_map)
@@ -698,6 +705,8 @@ def main() -> None:
         n_missing_watch=n_missing_watch,
         n_positive_watch=n_positive_watch,
         coverage_pct=coverage_pct,
+        post_k_core_interactions=len(interactions),
+        train_history_users_with_watch_signal=train_history_watch_users,
     )
 
     save_processed_outputs(
