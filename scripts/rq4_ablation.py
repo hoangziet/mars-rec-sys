@@ -3,19 +3,17 @@ scripts/rq4_ablation.py
 =======================
 RQ4: Run V0-V3 ablation across 10 seeds.
 
-Variants:
-    V0: Base gSASRec
-    V1: Base + Confidence (best alpha from RQ2)
-    V2: Base + Metadata (best config from RQ3)
-    V3: Base + Confidence + Metadata
+Reads all config from a frozen protocol manifest.
+Training parameters cannot be overridden at CLI.
 
 Usage:
-    uv run python scripts/rq4_ablation.py --best-alpha 0.5 --best-variant M3
+    uv run python scripts/rq4_ablation.py --protocol experiments/rq4/rq4-ablation/rq4_protocol_manifest.json
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import random
 import sys
 from pathlib import Path
@@ -35,24 +33,6 @@ from training.mlflow_utils import collect_common_run_metadata, configure_mlflow,
 from training.trainer import Trainer
 
 EXPERIMENT_NAME = "mars_final_ablation"
-DEFAULT_SEEDS = [42, 123, 2024, 3407, 9999, 7, 21, 77, 314, 1337]
-
-
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="RQ4: final ablation runner.")
-    parser.add_argument("--data-dir", default="data/processed")
-    parser.add_argument("--output-dir", default="experiments")
-    parser.add_argument("--best-alpha", type=float, required=True)
-    parser.add_argument("--best-variant", required=True, choices=["M0", "M1", "M2", "M3"])
-    parser.add_argument("--variants", nargs="+", default=["V0", "V1", "V2", "V3"], choices=["V0", "V1", "V2", "V3"])
-    parser.add_argument("--seeds", nargs="+", type=int, default=DEFAULT_SEEDS)
-    parser.add_argument("--benchmark-id", default="rq4-ablation")
-    return parser
-
-
-def parse_args() -> argparse.Namespace:
-    return build_parser().parse_args()
-
 
 METADATA_FLAGS = {
     "M0": (False, False),
@@ -60,6 +40,18 @@ METADATA_FLAGS = {
     "M2": (False, True),
     "M3": (True, True),
 }
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="RQ4: final ablation runner.")
+    parser.add_argument("--protocol", required=True, help="Path to rq4_protocol_manifest.json")
+    parser.add_argument("--data-dir", default="data/processed")
+    parser.add_argument("--output-dir", default="experiments")
+    return parser
+
+
+def parse_args() -> argparse.Namespace:
+    return build_parser().parse_args()
 
 
 def _get_variant_config(variant: str, best_alpha: float, best_variant: str) -> dict:
@@ -76,7 +68,7 @@ def _get_variant_config(variant: str, best_alpha: float, best_variant: str) -> d
         raise ValueError(f"Unknown variant: {variant}")
 
 
-def _run_single(args, variant: str, seed: int, variant_cfg: dict) -> dict:
+def _run_single(args, variant: str, seed: int, variant_cfg: dict, benchmark_id: str, protocol: dict) -> dict:
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -97,7 +89,6 @@ def _run_single(args, variant: str, seed: int, variant_cfg: dict) -> dict:
         encoder_cfg = model_kwargs.get("item_encoder", {})
         encoder_cfg["use_structured"] = variant_cfg["use_structured"]
         encoder_cfg["use_text"] = variant_cfg["use_text"]
-        # Resolve metadata paths from data_dir
         encoder_cfg["metadata_vocab_path"] = str(data_dir / "item_features" / "metadata_vocab.json")
         encoder_cfg["metadata_csv_path"] = str(data_dir / "item_features" / "item_metadata.csv")
         encoder_cfg["text_emb_path"] = str(data_dir / "item_features" / "text_embeddings.pt")
@@ -119,7 +110,7 @@ def _run_single(args, variant: str, seed: int, variant_cfg: dict) -> dict:
     val_loss_loader = get_val_loss_loader("gsasrec", data_dir / "splits" / "val_sequences.csv", stats, batch_size=batch_size, max_len=max_len, num_neg=train_kwargs.get("num_neg", 1), seed=seed)
 
     run_name = build_run_name("gsasrec", seed, variant=variant.lower())
-    run_output_dir = Path(args.output_dir) / "rq4" / args.benchmark_id / variant / f"seed_{seed}"
+    run_output_dir = Path(args.output_dir) / "rq4" / benchmark_id / variant / f"seed_{seed}"
 
     trainer = Trainer("gsasrec", device, str(run_output_dir), use_mlflow=True, mlflow_config={
         "experiment_name": EXPERIMENT_NAME, "run_name": run_name, "log_artifacts": True,
@@ -129,14 +120,14 @@ def _run_single(args, variant: str, seed: int, variant_cfg: dict) -> dict:
     mlflow_cfg["tags"] = build_training_tags(model_name="gsasrec", phase="final", variant=variant.lower(), git_commit=get_git_commit(), reportable=True)
     mlflow_cfg["tags"]["ablation_variant"] = variant
     mlflow_cfg["tags"]["rq"] = "rq4"
-    mlflow_cfg["tags"]["benchmark_id"] = args.benchmark_id
+    mlflow_cfg["tags"]["benchmark_id"] = benchmark_id
     mlflow_cfg["tags"]["confidence_alpha"] = str(variant_cfg["confidence_alpha"])
+    mlflow_cfg["tags"]["protocol_version"] = protocol.get("benchmark_id", "unknown")
 
     result = trainer.train(model=model, train_loader=train_loader, val_loader=val_loader, test_loader=test_loader, optimizer=optimizer, epochs=train_kwargs["epochs"], criterion_fn=criterion_fn, eval_fn=eval_fn, gradient_clip=train_kwargs.get("gradient_clip", 5.0), val_loss_loader=val_loss_loader, early_stop_patience=train_kwargs.get("early_stop_patience", 10), early_stop_min_delta=train_kwargs.get("early_stop_min_delta", 1e-4), scheduler=scheduler, mlflow_params=mlflow_cfg)
 
-    # Get run_id from Trainer's active run before it closes
     run_id = trainer._mlflow_run.info.run_id if trainer._mlflow_run else None
-    _export_per_user(model, test_loader, device, variant, seed, args.output_dir, args.benchmark_id, run_id)
+    _export_per_user(model, test_loader, device, variant, seed, args.output_dir, benchmark_id, run_id)
 
     return result
 
@@ -160,7 +151,6 @@ def _export_per_user(model, test_loader, device, variant, seed, output_dir, benc
         writer.writeheader()
         writer.writerows(per_user)
 
-    # Log to MLflow using client (works after run closes)
     if run_id:
         client = mlflow_mod.tracking.MlflowClient()
         client.log_artifact(run_id, str(path), artifact_path="per_user")
@@ -171,18 +161,28 @@ def _export_per_user(model, test_loader, device, variant, seed, output_dir, benc
 def main() -> None:
     args = parse_args()
     configure_mlflow(mlflow_module=mlflow)
-    total = len(args.variants) * len(args.seeds)
-    print(f"RQ4 ablation: {len(args.variants)} variants x {len(args.seeds)} seeds = {total} runs")
-    print(f"Best alpha: {args.best_alpha}")
-    print(f"Best metadata variant: {args.best_variant}")
-    for i, variant in enumerate(args.variants):
-        variant_cfg = _get_variant_config(variant, args.best_alpha, args.best_variant)
-        for j, seed in enumerate(args.seeds):
-            run_num = i * len(args.seeds) + j + 1
+
+    protocol = json.loads(Path(args.protocol).read_text())
+    best_alpha = float(protocol["best_alpha"])
+    best_variant = protocol["best_metadata_variant"]
+    seeds = [int(s) for s in protocol["neural_seeds"]]
+    variants_list = protocol["variants"]
+    benchmark_id = protocol["benchmark_id"]
+
+    total = len(variants_list) * len(seeds)
+    print(f"RQ4 ablation: {len(variants_list)} variants x {len(seeds)} seeds = {total} runs")
+    print(f"Protocol: {args.protocol}")
+    print(f"Best alpha: {best_alpha}")
+    print(f"Best metadata variant: {best_variant}")
+    print(f"Benchmark ID: {benchmark_id}")
+    for i, variant in enumerate(variants_list):
+        variant_cfg = _get_variant_config(variant, best_alpha, best_variant)
+        for j, seed in enumerate(seeds):
+            run_num = i * len(seeds) + j + 1
             print(f"\n[{run_num}/{total}] {variant}, seed={seed}")
-            _run_single(args, variant, seed, variant_cfg)
+            _run_single(args, variant, seed, variant_cfg, benchmark_id, protocol)
     print(f"\nDone. Results logged to MLflow experiment '{EXPERIMENT_NAME}'.")
-    print(f"Run: make rq4-compare BENCHMARK_ID={args.benchmark_id}")
+    print(f"Run: make rq4-collect")
 
 
 if __name__ == "__main__":

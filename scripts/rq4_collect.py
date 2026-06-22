@@ -94,6 +94,7 @@ def main() -> None:
         expected_variants = set(protocol["variants"])
         expected_seeds = {int(s) for s in protocol["neural_seeds"]}
         expected_runs = len(expected_variants) * len(expected_seeds)
+        expected_alpha = float(protocol["best_alpha"])
 
         actual_variants = {r["variant"] for r in selected}
         actual_seeds = {r["seed"] for r in selected}
@@ -123,6 +124,28 @@ def main() -> None:
         dupes = {k: v for k, v in pair_counts.items() if v > 1}
         if dupes:
             errors.append(f"Duplicate (variant, seed): {dupes}")
+
+        # Validate tags against protocol
+        for r in selected:
+            tags = {}
+            for run in client.search_runs([experiment.experiment_id]):
+                if run.info.run_id == r["run_id"]:
+                    tags = run.data.tags
+                    break
+            run_alpha = float(tags.get("confidence_alpha", "nan"))
+            if abs(run_alpha - expected_alpha) > 1e-9:
+                variant = r["variant"]
+                if variant in ("V1", "V3"):
+                    errors.append(f"{r['variant']} seed={r['seed']}: expected alpha={expected_alpha}, got {run_alpha}")
+
+        # Require all secondary metrics
+        for r in selected:
+            missing_metrics = []
+            for m in ["test_Recall_at_10", "test_NDCG_at_20", "test_Recall_at_20"]:
+                if r.get(m) is None:
+                    missing_metrics.append(m)
+            if missing_metrics:
+                errors.append(f"{r['variant']} seed={r['seed']}: missing metrics {missing_metrics}")
 
         if errors:
             raise RuntimeError("Protocol validation failed:\n" + "\n".join(f"  - {e}" for e in errors))
