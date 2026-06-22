@@ -2,11 +2,12 @@ BENCHMARK_MODELS = sasrec gsasrec gru4rec bert4rec bprmf popularity itemcf
 RQ1_SEEDS = 42 123 2024 3407 9999
 BENCHMARK_ID ?= rq1-v1
 SMOKE_BENCHMARK_ID ?= rq1-smoke
+DATA_DIR ?= data/processed
 REPORT_OUTPUT_DIR ?= experiments/benchmark/$(BENCHMARK_ID)/reports
 STATS_OUTPUT_DIR ?= experiments/benchmark/$(BENCHMARK_ID)/stats
 PREPROCESSING_VERSION ?= mars-preprocess-v1
 
-.PHONY: preprocess rq1-smoke rq1-full rq1-report rq1-compare test rq2-tune rq2-report rq3-precompute rq3-tune rq3-report rq4-ablation rq4-collect rq4-compare rq4-subgroup rq4-report
+.PHONY: preprocess rq1-smoke rq1-full rq1-report rq1-compare test rq2-tune rq2-report rq3-precompute rq3-tune rq3-report rq4-init rq4-ablation rq4-collect rq4-compare rq4-subgroup rq4-report
 
 preprocess:
 	uv run python data/preprocess.py
@@ -65,6 +66,9 @@ RQ4_OUTPUT_DIR ?= experiments/rq4/$(RQ4_BENCHMARK_ID)
 RQ4_COMPARISON_DIR ?= experiments/rq4/$(RQ4_BENCHMARK_ID)
 RQ4_MANIFEST ?= $(RQ4_COMPARISON_DIR)/rq4_protocol_manifest.json
 
+rq4-init:
+	uv run python scripts/rq4_init_protocol.py --benchmark-id $(RQ4_BENCHMARK_ID) --best-alpha $(RQ2_BEST_ALPHA) --best-variant $(RQ3_BEST_VARIANT) --seeds $(RQ4_SEEDS) --rq2-benchmark-id $(RQ2_BENCHMARK_ID) --rq3-benchmark-id $(RQ3_BENCHMARK_ID) --preprocessing-version $(PREPROCESSING_VERSION) --output-dir $(RQ4_COMPARISON_DIR)
+
 rq4-ablation:
 	uv run python scripts/rq4_ablation.py --best-alpha $(RQ2_BEST_ALPHA) --best-variant $(RQ3_BEST_VARIANT) --seeds $(RQ4_SEEDS) --benchmark-id $(RQ4_BENCHMARK_ID)
 
@@ -75,7 +79,7 @@ rq4-compare:
 	uv run python scripts/rq4_compare.py --per-user-dir $(RQ4_COMPARISON_DIR)/per_user --manifest $(RQ4_COMPARISON_DIR)/rq4_result_manifest.json --output-dir $(RQ4_COMPARISON_DIR)
 
 rq4-subgroup:
-	uv run python scripts/rq4_subgroup.py --per-user-dir $(RQ4_COMPARISON_DIR)/per_user --manifest $(RQ4_COMPARISON_DIR)/rq4_manifest.json --data-dir data/processed --output-dir $(RQ4_COMPARISON_DIR)
+	uv run python scripts/rq4_subgroup.py --per-user-dir $(RQ4_COMPARISON_DIR)/per_user --manifest $(RQ4_COMPARISON_DIR)/rq4_result_manifest.json --data-dir $(DATA_DIR) --output-dir $(RQ4_COMPARISON_DIR)
 
 rq4-report:
 	uv run python scripts/rq4_report.py --benchmark-id $(RQ4_BENCHMARK_ID) --comparison-dir $(RQ4_COMPARISON_DIR) --output-dir $(RQ4_OUTPUT_DIR)
