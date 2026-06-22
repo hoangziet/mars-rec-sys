@@ -66,6 +66,66 @@ def _get_git_long_commit() -> str:
         return "unknown"
 
 
+def verify_protocol_hashes(manifest: dict, data_dir: Path, configs_glob: str) -> None:
+    """Recompute and verify the SHA256 hashes recorded in the protocol manifest.
+
+    Hashes that were None at init time (e.g. data not yet preprocessed) are
+    skipped. When a recorded hash is non-None and the recomputed value
+    disagrees, the run is rejected with a clear remediation message.
+    """
+    data_dir = Path(data_dir)
+
+    expected_data = manifest.get("data_manifest_sha256")
+    if expected_data:
+        data_report = data_dir / "reports" / "preprocessing_report.json"
+        if not data_report.exists():
+            raise RuntimeError(
+                f"data_manifest_sha256 was frozen to {expected_data[:12]}... "
+                f"but preprocessing_report.json is missing at {data_report}. "
+                f"Re-run data/preprocess.py or re-init the protocol."
+            )
+        actual = _sha256_file(data_report)
+        if actual != expected_data:
+            raise RuntimeError(
+                f"data_manifest_sha256 mismatch: manifest has {expected_data[:12]}..., "
+                f"current file has {actual[:12]}... "
+                f"Re-run data/preprocess.py or re-init the protocol."
+            )
+
+    expected_config = manifest.get("config_sha256")
+    if expected_config:
+        if not Path(configs_glob).parent.parent.exists() and not glob.glob(configs_glob):
+            raise RuntimeError(
+                f"config_sha256 was frozen to {expected_config[:12]}... "
+                f"but no config files match {configs_glob!r}. "
+                f"Restore the configs or re-init the protocol."
+            )
+        actual = _sha256_concat(configs_glob)
+        if actual != expected_config:
+            raise RuntimeError(
+                f"config_sha256 mismatch: manifest has {expected_config[:12]}..., "
+                f"current configs have {actual[:12]}... "
+                f"Restore the original configs or re-init the protocol."
+            )
+
+    expected_text = manifest.get("text_artifact_sha256")
+    if expected_text:
+        text_path = data_dir / "item_features" / "text_embeddings.pt"
+        if not text_path.exists():
+            raise RuntimeError(
+                f"text_artifact_sha256 was frozen to {expected_text[:12]}... "
+                f"but text_embeddings.pt is missing at {text_path}. "
+                f"Re-run rq3-precompute or re-init the protocol."
+            )
+        actual = _sha256_file(text_path)
+        if actual != expected_text:
+            raise RuntimeError(
+                f"text_artifact_sha256 mismatch: manifest has {expected_text[:12]}..., "
+                f"current file has {actual[:12]}... "
+                f"Re-run rq3-precompute or re-init the protocol."
+            )
+
+
 def main() -> None:
     args = parse_args()
 

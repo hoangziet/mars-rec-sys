@@ -81,7 +81,7 @@ def main(cfg: DictConfig) -> None:
         model_name, stats["n_items"], stats["n_users"], model_kwargs, max_len
     ).to(device)
 
-    train_loader = build_train_loader(model_name, data_dir, stats, train_kwargs)
+    train_loader = build_train_loader(model_name, data_dir, stats, train_kwargs, model_kwargs=model_kwargs)
     val_loader = get_eval_loader(
         data_dir / "splits" / "val_sequences.csv", stats, batch_size=batch_size, max_len=max_len
     )
@@ -100,7 +100,7 @@ def main(cfg: DictConfig) -> None:
         stats,
         batch_size=batch_size,
         max_len=max_len,
-        num_neg=train_kwargs.get("num_neg", 1),
+        num_neg=model_kwargs.get("num_neg", train_kwargs.get("num_neg", 1)),
         seed=cfg.seed,
     )
 

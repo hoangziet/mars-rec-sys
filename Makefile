@@ -65,9 +65,18 @@ RQ4_BENCHMARK_ID ?= rq4-ablation
 RQ4_OUTPUT_DIR ?= experiments/rq4/$(RQ4_BENCHMARK_ID)
 RQ4_COMPARISON_DIR ?= experiments/rq4/$(RQ4_BENCHMARK_ID)
 RQ4_MANIFEST ?= $(RQ4_COMPARISON_DIR)/rq4_protocol_manifest.json
+RQ2_WINNERS ?= $(RQ2_OUTPUT_DIR)/rq2_best_alpha.json
+RQ3_WINNERS ?= $(RQ3_OUTPUT_DIR)/rq3_best_variant.json
 
 rq4-init:
-	uv run python scripts/rq4_init_protocol.py --benchmark-id $(RQ4_BENCHMARK_ID) --best-alpha $(RQ2_BEST_ALPHA) --best-variant $(RQ3_BEST_VARIANT) --seeds $(RQ4_SEEDS) --rq2-benchmark-id $(RQ2_BENCHMARK_ID) --rq3-benchmark-id $(RQ3_BENCHMARK_ID) --preprocessing-version $(PREPROCESSING_VERSION) --output-dir $(RQ4_COMPARISON_DIR)
+	uv run python scripts/rq4_init_protocol.py \
+		--benchmark-id $(RQ4_BENCHMARK_ID) \
+		--rq2-winners $(RQ2_WINNERS) \
+		--rq3-winners $(RQ3_WINNERS) \
+		--seeds $(RQ4_SEEDS) \
+		--data-dir $(DATA_DIR) \
+		--preprocessing-version $(PREPROCESSING_VERSION) \
+		--output-dir $(RQ4_COMPARISON_DIR)
 
 rq4-ablation:
 	uv run python scripts/rq4_ablation.py --protocol $(RQ4_MANIFEST)

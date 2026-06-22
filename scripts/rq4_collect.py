@@ -27,6 +27,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from scripts.rq4_init_protocol import verify_protocol_hashes
 from training.mlflow_utils import configure_mlflow
 
 EXPERIMENT_NAME = "mars_final_ablation"
@@ -168,6 +169,16 @@ def main() -> None:
     # Validate against protocol manifest if provided
     if args.protocol:
         protocol = json.loads(Path(args.protocol).read_text())
+
+        # Reject collect if data/config/text artifacts drifted since the
+        # protocol was frozen. Catches the case where someone re-runs collect
+        # on a different machine with regenerated embeddings, etc.
+        verify_protocol_hashes(
+            manifest=protocol,
+            data_dir=Path("data/processed"),
+            configs_glob="configs/model/*.yaml",
+        )
+
         expected_variants = set(protocol["variants"])
         expected_seeds = {int(s) for s in protocol["neural_seeds"]}
         expected_runs = len(expected_variants) * len(expected_seeds)
