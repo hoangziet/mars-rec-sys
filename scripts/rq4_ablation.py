@@ -30,8 +30,9 @@ from pipeline.optim import build_optimizer, build_scheduler
 from pipeline.training_grid import enforce_final_grid
 from training.configs import build_model_config
 from training.mlflow_contract import build_run_name, build_training_tags
-from training.mlflow_utils import collect_common_run_metadata, configure_mlflow, get_git_commit
+from training.mlflow_utils import collect_common_run_metadata, configure_mlflow
 from training.trainer import Trainer
+from scripts.rq4_init_protocol import verify_protocol_hashes
 
 EXPERIMENT_NAME = "mars_final_ablation"
 
@@ -176,17 +177,16 @@ def main() -> None:
     variants_list = protocol["variants"]
     benchmark_id = protocol["benchmark_id"]
 
-    # Provenance check: refuse to train if the code has drifted since the
-    # protocol was frozen.  "unknown" git_commit means the manifest was
-    # created in an environment without git; skip the check in that case.
-    expected_commit = protocol.get("git_commit")
-    actual_commit = get_git_commit()
-    if expected_commit and expected_commit != "unknown" and actual_commit != expected_commit:
-        raise RuntimeError(
-            f"git_commit mismatch: protocol has {expected_commit[:12]}, "
-            f"current HEAD is {actual_commit[:12]}. "
-            f"Use `git checkout` to the right commit, or re-init protocol."
-        )
+    # Provenance check: recompute SHA256 of the preprocessing report, config
+    # bundle, and text embedding artifact. Refuse to train if any of them
+    # drifted since the protocol was frozen. The git_commit field is kept
+    # for traceability but is no longer enforced here (it is replaced by
+    # the more meaningful content hashes below).
+    verify_protocol_hashes(
+        manifest=protocol,
+        data_dir=Path(args.data_dir),
+        configs_glob="configs/model/*.yaml",
+    )
 
     total = len(variants_list) * len(seeds)
     print(f"RQ4 ablation: {len(variants_list)} variants x {len(seeds)} seeds = {total} runs")

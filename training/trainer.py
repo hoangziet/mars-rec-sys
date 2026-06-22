@@ -420,7 +420,7 @@ class Trainer:
 
         # If most batches had non-finite gradients the model has diverged.
         # Return NaN so the outer loop triggers early stopping.
-        if nan_batches > 0 and nan_batches >= total_batches // 2:
+        if nan_batches > 0 and nan_batches * 2 > total_batches:
             return float("nan")
 
         return total_loss / max(n_samples, 1)

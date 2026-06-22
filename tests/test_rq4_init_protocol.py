@@ -156,3 +156,114 @@ def test_init_rejects_existing_manifest(tmp_path):
             rq4_init_protocol.main()
     finally:
         sys.argv = saved
+
+
+# ---------------------------------------------------------------------------
+# verify_protocol_hashes: runtime enforcement of data/config/text provenance
+# ---------------------------------------------------------------------------
+
+
+def _make_full_data_dir(tmp_path: Path) -> Path:
+    """Build a data_dir containing reports/preprocessing_report.json and
+    item_features/text_embeddings.pt, plus a configs/model/*.yaml.
+    Returns the data_dir.
+    """
+    (tmp_path / "reports").mkdir(parents=True)
+    (tmp_path / "reports" / "preprocessing_report.json").write_text("{}")
+    (tmp_path / "item_features").mkdir(parents=True)
+    (tmp_path / "item_features" / "text_embeddings.pt").write_bytes(b"abc")
+    configs_dir = tmp_path / "configs" / "model"
+    configs_dir.mkdir(parents=True)
+    (configs_dir / "x.yaml").write_text("a: 1\n")
+    return tmp_path
+
+
+def test_verify_protocol_hashes_passes_when_all_match(tmp_path):
+    data_dir = _make_full_data_dir(tmp_path)
+
+    manifest = {
+        "data_manifest_sha256": rq4_init_protocol._sha256_file(
+            data_dir / "reports" / "preprocessing_report.json"
+        ),
+        "config_sha256": rq4_init_protocol._sha256_concat(
+            str(data_dir / "configs" / "model" / "*.yaml")
+        ),
+        "text_artifact_sha256": rq4_init_protocol._sha256_file(
+            data_dir / "item_features" / "text_embeddings.pt"
+        ),
+    }
+    rq4_init_protocol.verify_protocol_hashes(
+        manifest=manifest,
+        data_dir=data_dir,
+        configs_glob=str(data_dir / "configs" / "model" / "*.yaml"),
+    )
+
+
+def test_verify_protocol_hashes_raises_on_data_drift(tmp_path):
+    data_dir = _make_full_data_dir(tmp_path)
+    manifest = {
+        "data_manifest_sha256": "0" * 64,
+        "config_sha256": rq4_init_protocol._sha256_concat(
+            str(data_dir / "configs" / "model" / "*.yaml")
+        ),
+        "text_artifact_sha256": rq4_init_protocol._sha256_file(
+            data_dir / "item_features" / "text_embeddings.pt"
+        ),
+    }
+    with pytest.raises(RuntimeError, match="data_manifest_sha256 mismatch"):
+        rq4_init_protocol.verify_protocol_hashes(
+            manifest=manifest,
+            data_dir=data_dir,
+            configs_glob=str(data_dir / "configs" / "model" / "*.yaml"),
+        )
+
+
+def test_verify_protocol_hashes_raises_on_config_drift(tmp_path):
+    data_dir = _make_full_data_dir(tmp_path)
+    manifest = {
+        "data_manifest_sha256": rq4_init_protocol._sha256_file(
+            data_dir / "reports" / "preprocessing_report.json"
+        ),
+        "config_sha256": "0" * 64,
+        "text_artifact_sha256": rq4_init_protocol._sha256_file(
+            data_dir / "item_features" / "text_embeddings.pt"
+        ),
+    }
+    with pytest.raises(RuntimeError, match="config_sha256 mismatch"):
+        rq4_init_protocol.verify_protocol_hashes(
+            manifest=manifest,
+            data_dir=data_dir,
+            configs_glob=str(data_dir / "configs" / "model" / "*.yaml"),
+        )
+
+
+def test_verify_protocol_hashes_raises_on_text_artifact_drift(tmp_path):
+    data_dir = _make_full_data_dir(tmp_path)
+    manifest = {
+        "data_manifest_sha256": rq4_init_protocol._sha256_file(
+            data_dir / "reports" / "preprocessing_report.json"
+        ),
+        "config_sha256": rq4_init_protocol._sha256_concat(
+            str(data_dir / "configs" / "model" / "*.yaml")
+        ),
+        "text_artifact_sha256": "0" * 64,
+    }
+    with pytest.raises(RuntimeError, match="text_artifact_sha256 mismatch"):
+        rq4_init_protocol.verify_protocol_hashes(
+            manifest=manifest,
+            data_dir=data_dir,
+            configs_glob=str(data_dir / "configs" / "model" / "*.yaml"),
+        )
+
+
+def test_verify_protocol_hashes_skips_unrecorded_hashes(tmp_path):
+    """If a hash was None at init time (e.g. data not preprocessed yet), the
+    verifier must skip it instead of erroring."""
+    manifest = {
+        "data_manifest_sha256": None,
+        "config_sha256": None,
+        "text_artifact_sha256": None,
+    }
+    rq4_init_protocol.verify_protocol_hashes(
+        manifest=manifest, data_dir=tmp_path, configs_glob=str(tmp_path / "missing" / "*.yaml")
+    )

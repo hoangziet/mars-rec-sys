@@ -63,16 +63,21 @@ def main() -> None:
         f.write(f"Benchmark: {args.benchmark_id}\n\n")
 
         f.write("## Primary Findings\n\n")
-        f.write("Primary findings are only considered improvements when mean_difference > 0, the bootstrap lower bound is > 0, Holm-adjusted p < 0.05, and the practical-significance threshold is met.\n\n")
+        f.write(
+            "Each primary finding reports the effect size (Δ, relative %), the 95% bootstrap CI, "
+            "the permutation p-value with Holm correction, Cohen's d, and a significance label "
+            "derived from the permutation p-value. Practical significance is left to the reader: "
+            "inspect the 95% CI against your domain's noise floor; this report does not enforce a binary threshold.\n\n"
+        )
         for r in primary:
+            label = r.get("significance_label", "inconclusive")
             sig = "statistically significant" if r.get("significant") == "True" else "not significant"
-            pract_raw = r.get("practically_significant", "False")
-            pract = (pract_raw == "True" or pract_raw is True)
-            f.write(f"- **{r['comparison']}**: {sig} (Holm p = {r.get('holm_adjusted_p', '-')})\n")
+            f.write(f"- **{r['comparison']}**: {sig} — {label} (Holm p = {r.get('holm_adjusted_p', '-')})\n")
             f.write(f"  - Mean difference: {float(r['mean_difference']):.6f}\n")
+            f.write(f"  - Relative improvement: {r.get('relative_improvement_pct', '-')}% (Δ/|baseline| = {float(r['mean_difference']):.6f})\n")
             f.write(f"  - 95% bootstrap CI: [{r['bootstrap_ci_low']}, {r['bootstrap_ci_high']}]\n")
             f.write(f"  - Cohen's d: {float(r.get('cohens_d', 0)):.3f}\n")
-            f.write(f"  - Practical significance threshold met: {pract}\n\n")
+            f.write(f"  - Wins / ties / losses (users): {r.get('wins', '-')} / {r.get('ties', '-')} / {r.get('losses', '-')}\n\n")
 
         f.write("## Secondary Findings (Descriptive)\n\n")
         for r in secondary:

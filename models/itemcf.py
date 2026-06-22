@@ -17,6 +17,29 @@ import scipy.sparse as sp
 from pathlib import Path
 from tqdm import tqdm
 
+
+def _parse_seq(s):
+    if isinstance(s, list):
+        return s
+    text = str(s).strip()
+    if text.startswith("["):
+        return ast.literal_eval(text)
+    return [int(token) for token in text.split()] if text else []
+
+
+def _load_training_events(csv_path: str | Path) -> pd.DataFrame:
+    df = pd.read_csv(csv_path)
+    if "item_idx" in df.columns:
+        return df[["user_idx", "item_idx"]].copy()
+    if "item_sequence" not in df.columns:
+        raise ValueError("Expected either 'item_idx' or 'item_sequence' column")
+
+    rows = []
+    for row in df.itertuples(index=False):
+        for item_idx in _parse_seq(row.item_sequence):
+            rows.append({"user_idx": int(row.user_idx), "item_idx": int(item_idx)})
+    return pd.DataFrame(rows, columns=["user_idx", "item_idx"])
+
 class ItemCFRecommender:
     def __init__(self, top_k_sim=20):
         self.top_k_sim = top_k_sim
@@ -30,7 +53,7 @@ class ItemCFRecommender:
         self.n_items = stats["n_items"]
         n_users = stats["n_users"]
 
-        df = pd.read_csv(interactions_csv)
+        df = _load_training_events(interactions_csv)
 
         for _, row in df.iterrows():
             uid = int(row["user_idx"])
@@ -118,9 +141,3 @@ class ItemCFRecommender:
             raw = json.load(f)
         self.user_history = {int(k): v for k, v in raw.items()}
         self.n_items = max(self.sim_matrix.keys())
-
-
-def _parse_seq(s):
-    if isinstance(s, list):
-        return s
-    return ast.literal_eval(str(s))

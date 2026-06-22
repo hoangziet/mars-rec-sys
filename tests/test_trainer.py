@@ -93,3 +93,31 @@ def test_trainer_saves_checkpoint_when_loss_finite(tmp_path):
 
     assert (tmp_path / "best_model.pt").exists()
     assert tracker.test_results  # not empty
+
+
+def test_train_one_epoch_allows_less_than_half_nan_batches(tmp_path):
+    """1/3 non-finite batches should not trip the divergence guard."""
+    torch.manual_seed(0)
+    model = _NaNModel()
+    trainer = Trainer("threshold_test", "cpu", run_dir=tmp_path, use_mlflow=False)
+    optimizer = torch.optim.SGD(model.parameters(), 0.01)
+    loader = _make_loader(n=3)
+
+    calls = {"count": 0}
+
+    def criterion(model, batch, device):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return torch.tensor(float("nan"))
+        return model(batch["input_seq"]).sum()
+
+    train_loss = trainer._train_one_epoch(
+        model=model,
+        loader=loader,
+        optimizer=optimizer,
+        criterion_fn=criterion,
+        gradient_clip=5.0,
+        scheduler=None,
+    )
+
+    assert torch.isfinite(torch.tensor(train_loss)).item()

@@ -20,6 +20,7 @@ from scripts.train_all import (
     build_heuristic_save_target,
     get_seeds_for_model,
     parse_args as parse_train_all_args,
+    run_heuristic_model,
 )
 from training.trainer import Trainer
 
@@ -162,3 +163,106 @@ def test_report_cli_no_longer_exposes_dataset_version(monkeypatch):
     )
     args = parse_report_args()
     assert not hasattr(args, "dataset_version")
+
+
+def test_run_heuristic_model_fits_from_train_split(monkeypatch, tmp_path):
+    captured = {}
+
+    class _FakePopularity:
+        def __init__(self):
+            self.item_counts = {1: 1}
+
+        def fit(self, csv_path):
+            captured["fit_path"] = Path(csv_path)
+
+        def save(self, path):
+            captured["save_path"] = Path(path)
+
+    class _FakeRun:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class _FakeMlflow:
+        def set_experiment(self, *_args, **_kwargs):
+            return None
+
+        def start_run(self, *_args, **_kwargs):
+            return _FakeRun()
+
+        def log_params(self, *_args, **_kwargs):
+            return None
+
+        def set_tags(self, *_args, **_kwargs):
+            return None
+
+        def log_metrics(self, *_args, **_kwargs):
+            return None
+
+    monkeypatch.setattr("models.popularity.PopularityRecommender", _FakePopularity)
+    monkeypatch.setattr("scripts.train_all.evaluate_popularity", lambda *_args, **_kwargs: {"NDCG@10": 0.1})
+    monkeypatch.setattr("scripts.train_all.print_results", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("scripts.train_all.configure_mlflow", lambda **_kwargs: None)
+    monkeypatch.setitem(sys.modules, "mlflow", _FakeMlflow())
+
+    data_dir = tmp_path / "processed"
+    (data_dir / "splits").mkdir(parents=True)
+    (data_dir / "reports").mkdir(parents=True)
+    (data_dir / "splits" / "train_sequences.csv").write_text("user_idx,item_sequence\n1,1 2 3\n")
+    (data_dir / "splits" / "val_sequences.csv").write_text("user_idx,item_sequence,target_item\n1,1 2 3,4\n")
+    (data_dir / "splits" / "test_sequences.csv").write_text("user_idx,item_sequence,target_item\n1,1 2 3 4,5\n")
+    (data_dir / "reports" / "dataset_stats.json").write_text('{"n_items": 5, "n_users": 1}')
+
+    run_heuristic_model(
+        model_name="popularity",
+        data_dir=data_dir,
+        stats={"n_items": 5, "n_users": 1},
+        output_dir=str(tmp_path / "out"),
+        benchmark_id="rq1-smoke",
+        protocol_version="rq1-v1",
+        preprocessing_version="mars-preprocess-v1",
+        model_kwargs={},
+        train_kwargs={},
+        seed=42,
+    )
+
+    assert captured["fit_path"] == data_dir / "splits" / "train_sequences.csv"
+
+
+def test_popularity_recommender_fits_train_sequence_csv(tmp_path):
+    from models.popularity import PopularityRecommender
+
+    csv_path = tmp_path / "train_sequences.csv"
+    csv_path.write_text(
+        "user_idx,item_sequence\n"
+        "1,1 2 3\n"
+        "2,2 3\n"
+    )
+
+    model = PopularityRecommender()
+    model.fit(csv_path)
+
+    assert model.item_counts[1] == 1
+    assert model.item_counts[2] == 2
+    assert model.item_counts[3] == 2
+
+
+def test_itemcf_recommender_fits_train_sequence_csv(tmp_path):
+    from models.itemcf import ItemCFRecommender
+
+    csv_path = tmp_path / "train_sequences.csv"
+    stats_path = tmp_path / "dataset_stats.json"
+    csv_path.write_text(
+        "user_idx,item_sequence\n"
+        "1,1 2 3\n"
+        "2,2 3\n"
+    )
+    stats_path.write_text('{"n_items": 3, "n_users": 2}')
+
+    model = ItemCFRecommender(top_k_sim=2)
+    model.fit(csv_path, stats_path=stats_path)
+
+    assert model.user_history[1] == [1, 2, 3]
+    assert model.user_history[2] == [2, 3]

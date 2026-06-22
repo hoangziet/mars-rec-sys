@@ -14,6 +14,15 @@ import pandas as pd
 from collections import Counter
 from pathlib import Path
 
+
+def _parse_seq(s):
+    if isinstance(s, list):
+        return s
+    text = str(s).strip()
+    if text.startswith("["):
+        return ast.literal_eval(text)
+    return [int(token) for token in text.split()] if text else []
+
 class PopularityRecommender:
     def __init__(self):
         self.item_counts = {}
@@ -21,7 +30,15 @@ class PopularityRecommender:
 
     def fit(self, interactions_csv):
         df = pd.read_csv(interactions_csv)
-        self.item_counts = Counter(df["item_idx"].tolist())
+        if "item_idx" in df.columns:
+            item_ids = df["item_idx"].tolist()
+        elif "item_sequence" in df.columns:
+            item_ids = []
+            for seq in df["item_sequence"]:
+                item_ids.extend(_parse_seq(seq))
+        else:
+            raise ValueError("Expected either 'item_idx' or 'item_sequence' column")
+        self.item_counts = Counter(item_ids)
         self.sorted_items = [item for item, _ in self.item_counts.most_common()]
         print(f"Fit complete: {len(self.item_counts):,} items")
         print(f"   Top 5: {self.sorted_items[:5]}")
@@ -59,9 +76,3 @@ class PopularityRecommender:
         self.sorted_items = [
             item for item, _ in Counter(self.item_counts).most_common()
         ]
-
-
-def _parse_seq(s):
-    if isinstance(s, list):
-        return s
-    return ast.literal_eval(str(s))
