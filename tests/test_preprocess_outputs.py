@@ -98,6 +98,7 @@ def test_split_leave_one_out_emits_new_sequence_schema():
         "sequence_length",
         "target_item",
         "target_engagement",
+        "target_has_watch_signal",
     ]
     assert test_df.columns.tolist() == val_df.columns.tolist()
     assert train_df.loc[0, "item_sequence"] == [101, 102]
