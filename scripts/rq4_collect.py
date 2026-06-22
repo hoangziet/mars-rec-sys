@@ -4,12 +4,14 @@ scripts/rq4_collect.py
 RQ4: Collect ablation results from MLflow into local CSV/JSON.
 
 Produces:
-    rq4_runs.csv      — one row per (variant, seed)
-    rq4_summary.json  — per-variant summary with validation_rank
-    rq4_manifest.json — variant/seed metadata for rq4_compare
+    rq4_runs.csv          — one row per (variant, seed)
+    rq4_summary.json      — per-variant summary with validation_rank
+    rq4_result_manifest.json — result metadata for rq4_compare
+
+Validates against protocol manifest if --protocol is provided.
 
 Usage:
-    uv run python scripts/rq4_collect.py --benchmark-id rq4-ablation
+    uv run python scripts/rq4_collect.py --benchmark-id rq4-ablation --protocol experiments/rq4/rq4-ablation/rq4_protocol_manifest.json
 """
 
 from __future__ import annotations
@@ -67,6 +69,8 @@ def main() -> None:
         val_ndcg = run.data.metrics.get("best_val_ndcg_at_10")
         test_ndcg = run.data.metrics.get("test_NDCG_at_10")
         test_recall = run.data.metrics.get("test_Recall_at_10")
+        test_ndcg20 = run.data.metrics.get("test_NDCG_at_20")
+        test_recall20 = run.data.metrics.get("test_Recall_at_20")
         if val_ndcg is None or test_ndcg is None:
             continue
         selected.append({
@@ -77,6 +81,8 @@ def main() -> None:
             "best_val_ndcg_at_10": val_ndcg,
             "test_NDCG_at_10": test_ndcg,
             "test_Recall_at_10": test_recall,
+            "test_NDCG_at_20": test_ndcg20,
+            "test_Recall_at_20": test_recall20,
         })
 
     if not selected:
@@ -125,7 +131,8 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Write rq4_runs.csv
-    run_fields = ["variant", "seed", "run_id", "run_name", "best_val_ndcg_at_10", "test_NDCG_at_10", "test_Recall_at_10"]
+    run_fields = ["variant", "seed", "run_id", "run_name", "best_val_ndcg_at_10",
+                   "test_NDCG_at_10", "test_Recall_at_10", "test_NDCG_at_20", "test_Recall_at_20"]
     with open(output_dir / "rq4_runs.csv", "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=run_fields)
         writer.writeheader()

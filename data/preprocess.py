@@ -114,11 +114,8 @@ def attach_engagement_score(
 
     merged["engagement_score"] = merged["engagement_score_raw"].fillna(0.0).clip(lower=0.0, upper=1.0)
 
-    # has_watch_signal: True if ANY explicit watch exists for this (user_id, item_id)
-    watched_pairs = set(zip(engagement_lookup["user_id"], engagement_lookup["item_id"]))
-    merged["has_watch_signal"] = merged.apply(
-        lambda row: (row["user_id"], row["item_id"]) in watched_pairs, axis=1
-    )
+    # has_watch_signal: True if temporal match found (engagement_at is not NaT)
+    merged["has_watch_signal"] = merged["engagement_at"].notna()
 
     # Restore original order
     merged = merged.sort_values("_original_order", kind="stable")
@@ -507,8 +504,9 @@ def build_preprocessing_report(
     filtered_item_count: int,
     n_interactions_total: int = 0,
     n_with_watch_signal: int = 0,
-    n_watch_zero: int = 0,
-    n_watch_positive: int = 0,
+    n_observed_zero: int = 0,
+    n_missing_watch: int = 0,
+    n_positive_watch: int = 0,
     coverage_pct: float = 0.0,
 ) -> dict:
     return {
@@ -523,8 +521,9 @@ def build_preprocessing_report(
         "engagement_coverage": {
             "total_interactions": n_interactions_total,
             "with_watch_signal": n_with_watch_signal,
-            "watch_zero_pct": n_watch_zero,
-            "watch_positive": n_watch_positive,
+            "observed_zero_watch": n_observed_zero,
+            "missing_watch": n_missing_watch,
+            "positive_watch": n_positive_watch,
             "coverage_pct": round(coverage_pct, 2),
         },
     }
@@ -569,9 +568,11 @@ def main() -> None:
 
     # Coverage stats
     n_interactions_total = len(interactions)
-    n_with_watch_signal = int(interactions["has_watch_signal"].sum()) if "has_watch_signal" in interactions.columns else 0
-    n_watch_zero = int((interactions["engagement_score"] == 0.0).sum())
-    n_watch_positive = int((interactions["engagement_score"] > 0.0).sum())
+    has_watch = interactions["has_watch_signal"].astype(bool)
+    n_with_watch_signal = int(has_watch.sum())
+    n_observed_zero = int((has_watch & (interactions["engagement_score"] == 0.0)).sum())
+    n_missing_watch = int((~has_watch).sum())
+    n_positive_watch = int((has_watch & (interactions["engagement_score"] > 0.0)).sum())
     coverage_pct = n_with_watch_signal / n_interactions_total * 100 if n_interactions_total > 0 else 0.0
 
     interactions = apply_iterative_k_core_filter(
@@ -658,8 +659,9 @@ def main() -> None:
         filtered_item_count=len(item_id_map),
         n_interactions_total=n_interactions_total,
         n_with_watch_signal=n_with_watch_signal,
-        n_watch_zero=n_watch_zero,
-        n_watch_positive=n_watch_positive,
+        n_observed_zero=n_observed_zero,
+        n_missing_watch=n_missing_watch,
+        n_positive_watch=n_positive_watch,
         coverage_pct=coverage_pct,
     )
 
