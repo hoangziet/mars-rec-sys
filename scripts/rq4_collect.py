@@ -45,6 +45,83 @@ def parse_args() -> argparse.Namespace:
     return build_parser().parse_args()
 
 
+def _attach_tags_to_selected(client, experiment_id, selected):
+    """Fetch tags from MLflow for each selected run and attach to dict."""
+    run_tag_cache = {}
+    for mlf_run in client.search_runs([experiment_id]):
+        run_tag_cache[mlf_run.info.run_id] = mlf_run.data.tags
+    for r in selected:
+        r["tags"] = run_tag_cache.get(r["run_id"], {})
+    return selected
+
+
+def _validate_run_tags(selected, expected_alpha, best_metadata_variant, metadata_variants):
+    """Validate that each run's tags match the expected config per variant.
+
+    Returns a list of error strings (empty if all valid).  Each selected run
+    must have its tags attached (see ``_attach_tags_to_selected``).
+    """
+    errors = []
+    variant_flags = metadata_variants.get(best_metadata_variant, {})
+    expected_structured = str(bool(variant_flags.get("use_structured", True))).lower()
+    expected_text = str(bool(variant_flags.get("use_text", True))).lower()
+
+    for r in selected:
+        tags = r.get("tags", {})
+        variant = r["variant"]
+
+        run_alpha_str = tags.get("confidence_alpha")
+        if run_alpha_str is None:
+            errors.append(
+                f"{variant} seed={r['seed']}: missing confidence_alpha tag"
+            )
+        else:
+            try:
+                run_alpha = float(run_alpha_str)
+            except (ValueError, TypeError):
+                errors.append(
+                    f"{variant} seed={r['seed']}: confidence_alpha tag is not numeric: {run_alpha_str!r}"
+                )
+            else:
+                if variant in ("V0", "V2"):
+                    if abs(run_alpha) > 1e-9:
+                        errors.append(
+                            f"{variant} seed={r['seed']}: expected alpha=0.0, got {run_alpha}"
+                        )
+                elif variant in ("V1", "V3"):
+                    if abs(run_alpha - expected_alpha) > 1e-9:
+                        errors.append(
+                            f"{variant} seed={r['seed']}: expected alpha={expected_alpha}, got {run_alpha}"
+                        )
+
+        if variant in ("V2", "V3"):
+            actual_structured = tags.get("use_structured", "missing")
+            actual_text = tags.get("use_text", "missing")
+            if actual_structured != expected_structured:
+                errors.append(
+                    f"{variant} seed={r['seed']}: expected use_structured={expected_structured}, "
+                    f"got {actual_structured}"
+                )
+            if actual_text != expected_text:
+                errors.append(
+                    f"{variant} seed={r['seed']}: expected use_text={expected_text}, "
+                    f"got {actual_text}"
+                )
+        else:
+            actual_structured = tags.get("use_structured")
+            actual_text = tags.get("use_text")
+            if actual_structured is not None and actual_structured != "false":
+                errors.append(
+                    f"{variant} seed={r['seed']}: expected use_structured=false, got {actual_structured}"
+                )
+            if actual_text is not None and actual_text != "false":
+                errors.append(
+                    f"{variant} seed={r['seed']}: expected use_text=false, got {actual_text}"
+                )
+
+    return errors
+
+
 def main() -> None:
     args = parse_args()
     configure_mlflow(mlflow_module=mlflow)
@@ -126,17 +203,17 @@ def main() -> None:
             errors.append(f"Duplicate (variant, seed): {dupes}")
 
         # Validate tags against protocol
-        for r in selected:
-            tags = {}
-            for run in client.search_runs([experiment.experiment_id]):
-                if run.info.run_id == r["run_id"]:
-                    tags = run.data.tags
-                    break
-            run_alpha = float(tags.get("confidence_alpha", "nan"))
-            if abs(run_alpha - expected_alpha) > 1e-9:
-                variant = r["variant"]
-                if variant in ("V1", "V3"):
-                    errors.append(f"{r['variant']} seed={r['seed']}: expected alpha={expected_alpha}, got {run_alpha}")
+        _attach_tags_to_selected(client, experiment.experiment_id, selected)
+        best_metadata_variant = protocol.get("best_metadata_variant", "M3")
+        metadata_variants = protocol.get("metadata_variants", {})
+        errors.extend(
+            _validate_run_tags(
+                selected,
+                expected_alpha,
+                best_metadata_variant,
+                metadata_variants,
+            )
+        )
 
         # Require all secondary metrics
         for r in selected:

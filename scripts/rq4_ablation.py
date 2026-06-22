@@ -122,7 +122,14 @@ def _run_single(args, variant: str, seed: int, variant_cfg: dict, benchmark_id: 
     mlflow_cfg["tags"]["rq"] = "rq4"
     mlflow_cfg["tags"]["benchmark_id"] = benchmark_id
     mlflow_cfg["tags"]["confidence_alpha"] = str(variant_cfg["confidence_alpha"])
+    mlflow_cfg["tags"]["use_structured"] = str(variant_cfg["use_structured"]).lower()
+    mlflow_cfg["tags"]["use_text"] = str(variant_cfg["use_text"]).lower()
     mlflow_cfg["tags"]["protocol_version"] = protocol.get("benchmark_id", "unknown")
+    mlflow_cfg["tags"]["protocol_sha256"] = protocol.get("protocol_sha256", "unknown")
+    mlflow_cfg["tags"]["data_manifest_sha256"] = protocol.get("data_manifest_sha256", "unknown")
+    mlflow_cfg["tags"]["config_sha256"] = protocol.get("config_sha256", "unknown")
+    if protocol.get("text_artifact_sha256"):
+        mlflow_cfg["tags"]["text_artifact_sha256"] = protocol["text_artifact_sha256"]
 
     result = trainer.train(model=model, train_loader=train_loader, val_loader=val_loader, test_loader=test_loader, optimizer=optimizer, epochs=train_kwargs["epochs"], criterion_fn=criterion_fn, eval_fn=eval_fn, gradient_clip=train_kwargs.get("gradient_clip", 5.0), val_loss_loader=val_loss_loader, early_stop_patience=train_kwargs.get("early_stop_patience", 10), early_stop_min_delta=train_kwargs.get("early_stop_min_delta", 1e-4), scheduler=scheduler, mlflow_params=mlflow_cfg)
 
@@ -168,6 +175,18 @@ def main() -> None:
     seeds = [int(s) for s in protocol["neural_seeds"]]
     variants_list = protocol["variants"]
     benchmark_id = protocol["benchmark_id"]
+
+    # Provenance check: refuse to train if the code has drifted since the
+    # protocol was frozen.  "unknown" git_commit means the manifest was
+    # created in an environment without git; skip the check in that case.
+    expected_commit = protocol.get("git_commit")
+    actual_commit = get_git_commit()
+    if expected_commit and expected_commit != "unknown" and actual_commit != expected_commit:
+        raise RuntimeError(
+            f"git_commit mismatch: protocol has {expected_commit[:12]}, "
+            f"current HEAD is {actual_commit[:12]}. "
+            f"Use `git checkout` to the right commit, or re-init protocol."
+        )
 
     total = len(variants_list) * len(seeds)
     print(f"RQ4 ablation: {len(variants_list)} variants x {len(seeds)} seeds = {total} runs")
