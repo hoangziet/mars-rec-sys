@@ -76,6 +76,7 @@ def test_split_leave_one_out_emits_new_sequence_schema():
                 "user_idx": 7,
                 "item_seq_idx": [101, 102, 103, 104],
                 "engagement_seq": [0.1, 0.2, 0.3, 0.4],
+                "watch_signal_seq": [True, True, True, False],
             }
         ]
     )
@@ -86,12 +87,14 @@ def test_split_leave_one_out_emits_new_sequence_schema():
         "user_idx",
         "item_sequence",
         "engagement_sequence",
+        "watch_signal_sequence",
         "sequence_length",
     ]
     assert val_df.columns.tolist() == [
         "user_idx",
         "item_sequence",
         "engagement_sequence",
+        "watch_signal_sequence",
         "sequence_length",
         "target_item",
         "target_engagement",
@@ -255,3 +258,60 @@ def test_save_processed_outputs_writes_entity_folders(tmp_path):
     assert report["engagement_pairs"] == 3
     assert report["min_user_interactions"] == 5
     assert report["min_item_interactions"] == 3
+
+
+def test_repeated_interactions_are_not_dropped_as_user_item_duplicates():
+    implicit = pd.DataFrame(
+        {
+            "user_id": ["1", "1", "1"],
+            "item_id": ["10", "10", "20"],
+            "created_at": pd.to_datetime(["2024-01-01", "2024-01-02", "2024-01-03"]),
+        }
+    )
+    implicit_sorted = implicit.sort_values("created_at", kind="stable")
+
+    dedup = implicit_sorted.drop_duplicates(
+        subset=["user_id", "item_id", "created_at"],
+        keep="first",
+    )
+
+    assert len(dedup) == 3
+
+
+def test_build_user_sequences_preserves_watch_signal_sequence():
+    interactions = pd.DataFrame(
+        {
+            "user_idx": [1, 1, 1],
+            "user_id": ["u1", "u1", "u1"],
+            "item_idx": [10, 11, 12],
+            "created_at": pd.to_datetime(["2024-01-01", "2024-01-02", "2024-01-03"]),
+            "engagement_score": [0.0, 0.4, 0.0],
+            "has_watch_signal": [True, True, False],
+        }
+    )
+
+    result = preprocess.build_user_sequences(interactions)
+    row = result.iloc[0]
+
+    assert row["engagement_seq"] == [0.0, 0.4, 0.0]
+    assert row["watch_signal_seq"] == [True, True, False]
+
+
+def test_split_leave_one_out_writes_watch_signal_sequence():
+    user_sequences = pd.DataFrame(
+        [
+            {
+                "user_id": "u1",
+                "user_idx": 1,
+                "item_seq_idx": [1, 2, 3, 4],
+                "engagement_seq": [0.0, 0.2, 0.3, 0.0],
+                "watch_signal_seq": [True, True, True, False],
+            }
+        ]
+    )
+
+    train_df, val_df, test_df = preprocess.split_leave_one_out(user_sequences)
+
+    assert train_df.loc[0, "watch_signal_sequence"] == [True, True]
+    assert val_df.loc[0, "watch_signal_sequence"] == [True, True]
+    assert test_df.loc[0, "watch_signal_sequence"] == [True, True, True]
