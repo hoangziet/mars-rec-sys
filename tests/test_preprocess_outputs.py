@@ -32,6 +32,42 @@ def test_attach_engagement_score_uses_zero_for_missing_explicit_pair():
     assert result.loc[result["item_id"] == "20", "engagement_score"].item() == 0.0
 
 
+def test_attach_engagement_score_multi_user_temporal():
+    """merge_asof must handle multiple users with different timestamp ranges."""
+    implicit = pd.DataFrame(
+        {
+            "user_id": ["1", "1", "2", "2"],
+            "item_id": ["10", "20", "10", "30"],
+            "created_at": pd.to_datetime(
+                ["2024-01-01", "2024-01-02", "2024-01-01", "2024-01-03"]
+            ),
+        }
+    )
+    lookup = pd.DataFrame(
+        {
+            "user_id": ["1", "2"],
+            "item_id": ["10", "10"],
+            "created_at": pd.to_datetime(["2024-01-01", "2024-01-02"]),
+            "engagement_score": [0.8, 0.6],
+        }
+    )
+
+    result = preprocess.attach_engagement_score(implicit, lookup)
+
+    # user 1, item 10: explicit at 01-01 <= implicit at 01-01 → 0.8
+    r1 = result[(result["user_id"] == "1") & (result["item_id"] == "10")]
+    assert r1["engagement_score"].item() == 0.8
+    # user 1, item 20: no explicit → 0.0
+    r2 = result[(result["user_id"] == "1") & (result["item_id"] == "20")]
+    assert r2["engagement_score"].item() == 0.0
+    # user 2, item 10: explicit at 01-02 > implicit at 01-01 → 0.0
+    r3 = result[(result["user_id"] == "2") & (result["item_id"] == "10")]
+    assert r3["engagement_score"].item() == 0.0
+    # user 2, item 30: no explicit → 0.0
+    r4 = result[(result["user_id"] == "2") & (result["item_id"] == "30")]
+    assert r4["engagement_score"].item() == 0.0
+
+
 def test_split_leave_one_out_emits_new_sequence_schema():
     user_sequences = pd.DataFrame(
         [

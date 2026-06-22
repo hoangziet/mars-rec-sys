@@ -34,7 +34,7 @@ VARIANT_ORDER = {"V0": 0, "V1": 1, "V2": 2, "V3": 3}
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="RQ4: collect ablation results from MLflow.")
     parser.add_argument("--benchmark-id", required=True)
-    parser.add_argument("--manifest", default=None, help="Frozen rq4 manifest (validates exact runs)")
+    parser.add_argument("--protocol", default=None, help="Protocol manifest (validates exact runs, created before training)")
     parser.add_argument("--output-dir", default=None)
     return parser
 
@@ -82,11 +82,11 @@ def main() -> None:
     if not selected:
         raise RuntimeError(f"No reportable runs found for benchmark {args.benchmark_id}")
 
-    # Validate against frozen manifest if provided
-    if args.manifest:
-        frozen = json.loads(Path(args.manifest).read_text())
-        expected_variants = set(frozen["variants"])
-        expected_seeds = {int(s) for s in frozen["neural_seeds"]}
+    # Validate against protocol manifest if provided
+    if args.protocol:
+        protocol = json.loads(Path(args.protocol).read_text())
+        expected_variants = set(protocol["variants"])
+        expected_seeds = {int(s) for s in protocol["neural_seeds"]}
         expected_runs = len(expected_variants) * len(expected_seeds)
 
         actual_variants = {r["variant"] for r in selected}
@@ -110,7 +110,6 @@ def main() -> None:
                 errors.append(f"Extra seeds: {extra_s}")
         if len(actual_pairs) != expected_runs:
             errors.append(f"Expected {expected_runs} runs, got {len(actual_pairs)}")
-        # Check for duplicates
         pair_counts = {}
         for r in selected:
             key = (r["variant"], r["seed"])
@@ -120,7 +119,7 @@ def main() -> None:
             errors.append(f"Duplicate (variant, seed): {dupes}")
 
         if errors:
-            raise RuntimeError("Manifest validation failed:\n" + "\n".join(f"  - {e}" for e in errors))
+            raise RuntimeError("Protocol validation failed:\n" + "\n".join(f"  - {e}" for e in errors))
 
     output_dir = Path(args.output_dir) if args.output_dir else Path("experiments") / "rq4" / args.benchmark_id
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -179,7 +178,7 @@ def main() -> None:
         "n_seeds": len(all_seeds),
         "n_variants": len(all_variants),
     }
-    with open(output_dir / "rq4_manifest.json", "w") as f:
+    with open(output_dir / "rq4_result_manifest.json", "w") as f:
         json.dump(manifest, f, indent=2)
 
     print(f"Collected {len(selected)} runs across {len(by_variant)} variants")

@@ -103,10 +103,13 @@ def _assign_subgroup(row, subgroups: dict) -> dict:
 
 
 def _compute_subgroup_metrics(per_user: pd.DataFrame, group_col: str) -> list[dict]:
-    """Compute mean NDCG@10 per (subgroup, variant)."""
+    """Compute mean NDCG@10 per (subgroup, variant), averaging per user across seeds first."""
     results = []
-    for group_val in sorted(per_user[group_col].unique()):
-        subset = per_user[per_user[group_col] == group_val]
+    # Average per user across seeds first
+    user_avg = per_user.groupby(["variant", "user_idx", "target_item", group_col])[PRIMARY_METRIC].mean().reset_index()
+
+    for group_val in sorted(user_avg[group_col].unique()):
+        subset = user_avg[user_avg[group_col] == group_val]
         for variant in sorted(subset["variant"].unique()):
             v_subset = subset[subset["variant"] == variant]
             values = v_subset[PRIMARY_METRIC].values
@@ -163,11 +166,10 @@ def main() -> None:
     for variant in variants:
         for seed in seeds:
             path = per_user_dir / f"{variant}_s{seed}.csv"
-            if path.exists():
-                df = pd.read_csv(path)
-                frames.append(df)
-    if not frames:
-        raise RuntimeError(f"No per-user files found in {per_user_dir}")
+            if not path.exists():
+                raise FileNotFoundError(f"Missing per-user file: {path}")
+            df = pd.read_csv(path)
+            frames.append(df)
     per_user = pd.concat(frames, ignore_index=True)
 
     print(f"Loaded {len(per_user)} per-user rows across {len(variants)} variants x {len(seeds)} seeds")
