@@ -38,7 +38,7 @@ RQ2_BENCHMARK_ID ?= rq2-alpha-tune
 RQ2_OUTPUT_DIR ?= experiments/rq2/$(RQ2_BENCHMARK_ID)
 
 rq2-tune:
-	uv run python scripts/rq2_tune_alpha.py --alphas $(RQ2_ALPHAS) --seeds $(RQ2_SEEDS) --benchmark-id $(RQ2_BENCHMARK_ID)
+	uv run python scripts/rq2_tune_alpha.py --alphas $(RQ2_ALPHAS) --seeds $(RQ2_SEEDS) --benchmark-id $(RQ2_BENCHMARK_ID) --data-dir $(DATA_DIR)
 
 rq2-report:
 	uv run python scripts/rq2_report.py --benchmark-id $(RQ2_BENCHMARK_ID) --output-dir $(RQ2_OUTPUT_DIR)
@@ -50,11 +50,11 @@ RQ3_BENCHMARK_ID ?= rq3-metadata-tune
 RQ3_OUTPUT_DIR ?= experiments/rq3/$(RQ3_BENCHMARK_ID)
 
 rq3-precompute:
-	uv run python scripts/rq3_build_vocab.py
+	uv run python scripts/rq3_build_vocab.py --data-dir $(DATA_DIR)
 	uv run python scripts/rq3_precompute_embeddings.py
 
 rq3-tune:
-	uv run python scripts/rq3_tune_metadata.py --variants $(RQ3_VARIANTS) --seeds $(RQ3_SEEDS) --benchmark-id $(RQ3_BENCHMARK_ID)
+	uv run python scripts/rq3_tune_metadata.py --variants $(RQ3_VARIANTS) --seeds $(RQ3_SEEDS) --benchmark-id $(RQ3_BENCHMARK_ID) --data-dir $(DATA_DIR)
 
 rq3-report:
 	uv run python scripts/rq3_report.py --benchmark-id $(RQ3_BENCHMARK_ID) --output-dir $(RQ3_OUTPUT_DIR)

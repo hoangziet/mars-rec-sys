@@ -139,7 +139,7 @@ def _validate_provenance_tags(selected: list[dict], tags_by_run: dict[str, dict]
         seed = r["seed"]
         prefix = f"{variant} seed={seed}"
 
-        for key in ("protocol_sha256", "data_manifest_sha256", "config_sha256"):
+        for key in ("protocol_sha256", "dataset_manifest_sha256", "config_sha256"):
             expected = protocol.get(key)
             if expected is None:
                 continue
@@ -173,6 +173,11 @@ def _validate_provenance_tags(selected: list[dict], tags_by_run: dict[str, dict]
                     f"{prefix}: git_commit mismatch — "
                     f"expected {git_expected[:12]}, got {git_actual[:12]}"
                 )
+
+        # Every final run must have per_user_complete=true
+        # (the runner sets it after per-user CSV is committed to disk)
+        if tags.get("per_user_complete") != "true":
+            errors.append(f"{prefix}: per_user_complete is not true")
 
     return errors
 
@@ -353,7 +358,7 @@ def main() -> None:
         "n_variants": len(all_variants),
     }
     if args.protocol:
-        for key in ("protocol_sha256", "data_manifest_sha256", "config_sha256",
+        for key in ("protocol_sha256", "dataset_manifest_sha256", "config_sha256",
                      "text_artifact_sha256", "git_commit"):
             val = protocol.get(key)
             if val is not None:

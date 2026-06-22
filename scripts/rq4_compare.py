@@ -389,7 +389,7 @@ def main() -> None:
         f.write("Multiple-comparison correction: Holm (primary comparisons only)\n")
         f.write("Family-wise significance level: α = 0.05\n")
         f.write("Practical-significance threshold: not enforced. Report Δ, rel%, [95% CI].\n")
-        f.write("Apply your own practical-significance rule based on the CI.\n\n")
+        f.write("Significance label is derived from Holm-adjusted p-value and bootstrap CI direction.\n\n")
 
         f.write("## Primary comparisons (Holm-corrected)\n\n")
         f.write("| Comparison | Comp | Base | Δ | Rel % | 95% CI (bootstrap) | W/T/L | Perm p | Holm p | Cohen's d | Label | Sig |\n")

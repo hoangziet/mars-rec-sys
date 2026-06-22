@@ -36,25 +36,20 @@ from training.trainer import NoValidCheckpointError, Trainer
 from scripts.rq4_init_protocol import verify_protocol_hashes
 
 
-def _enforce_git_commit_match(protocol: dict, allow_mismatch: bool) -> None:
+def _enforce_git_commit_match(protocol: dict) -> None:
     """Fail unless HEAD matches the protocol's git_commit and the tree is clean.
 
     Content hashes (data, config, text) protect against drifted files, but
     they don't cover model code, training logic, or evaluation code. Git is
     the only source of truth for that. Final experiments require an exact
     commit match and a clean working tree.
-
-    Pass ``--allow-git-mismatch`` to override (e.g. for a cherry-picked
-    doc-only commit).
     """
     expected_commit = protocol.get("git_commit")
     if not expected_commit or expected_commit == "unknown":
-        if not allow_mismatch:
-            raise RuntimeError(
-                "Protocol manifest has no git_commit — re-init with a real commit, "
-                "or pass --allow-git-mismatch."
-            )
-        return
+        raise RuntimeError(
+            "Protocol manifest has no git_commit — cannot verify the code "
+            "used to train. Re-init the protocol with a real commit."
+        )
 
     actual_commit = subprocess.check_output(
         ["git", "rev-parse", "HEAD"], text=True
@@ -73,18 +68,13 @@ def _enforce_git_commit_match(protocol: dict, allow_mismatch: bool) -> None:
     if dirty:
         mismatches.append(f"working tree is dirty ({len(dirty.splitlines())} files)")
 
-    if mismatches and not allow_mismatch:
+    if mismatches:
         raise RuntimeError(
             "Git provenance check failed — the working directory differs from "
-            "the frozen protocol. Use --allow-git-mismatch if you are certain "
-            "the changes (e.g. docs-only) do not affect training.\n"
+            "the frozen protocol. Commit, stash, or checkout the protocol's "
+            "commit before running final experiments.\n"
             + "\n".join(f"  - {m}" for m in mismatches)
         )
-
-    if mismatches and allow_mismatch:
-        print("WARNING: git mismatch allowed via --allow-git-mismatch")
-        for m in mismatches:
-            print(f"  - {m}")
 
 EXPERIMENT_NAME = "mars_final_ablation"
 
@@ -101,8 +91,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--protocol", required=True, help="Path to rq4_protocol_manifest.json")
     parser.add_argument("--data-dir", default="data/processed")
     parser.add_argument("--output-dir", default="experiments")
-    parser.add_argument("--allow-git-mismatch", action="store_true",
-                        help="Skip the git_commit and clean-tree checks (e.g. cherry-picked doc-only commit)")
     return parser
 
 
@@ -169,10 +157,10 @@ def _run_single(args, variant: str, seed: int, variant_cfg: dict, benchmark_id: 
 
     trainer = Trainer("gsasrec", device, str(run_output_dir), use_mlflow=True, mlflow_config={
         "experiment_name": EXPERIMENT_NAME, "run_name": run_name, "log_artifacts": True,
-        "phase": "final", "variant": variant.lower(), "git_commit": get_git_commit(), "reportable": True,
+        "phase": "final", "variant": variant.lower(), "git_commit": get_git_commit(), "reportable": False,
     })
     mlflow_cfg = collect_common_run_metadata(model_name="gsasrec", seed=seed, phase="final", git_commit=get_git_commit(), extra_params={**model_kwargs, **train_kwargs})
-    mlflow_cfg["tags"] = build_training_tags(model_name="gsasrec", phase="final", variant=variant.lower(), git_commit=get_git_commit(), reportable=True)
+    mlflow_cfg["tags"] = build_training_tags(model_name="gsasrec", phase="final", variant=variant.lower(), git_commit=get_git_commit(), reportable=False)
     mlflow_cfg["tags"]["ablation_variant"] = variant
     mlflow_cfg["tags"]["rq"] = "rq4"
     mlflow_cfg["tags"]["benchmark_id"] = benchmark_id
@@ -181,27 +169,38 @@ def _run_single(args, variant: str, seed: int, variant_cfg: dict, benchmark_id: 
     mlflow_cfg["tags"]["use_text"] = str(variant_cfg["use_text"]).lower()
     mlflow_cfg["tags"]["protocol_version"] = protocol.get("benchmark_id", "unknown")
     mlflow_cfg["tags"]["protocol_sha256"] = protocol.get("protocol_sha256", "unknown")
-    mlflow_cfg["tags"]["data_manifest_sha256"] = protocol.get("data_manifest_sha256", "unknown")
+    mlflow_cfg["tags"]["dataset_manifest_sha256"] = protocol.get("dataset_manifest_sha256", "unknown")
     mlflow_cfg["tags"]["config_sha256"] = protocol.get("config_sha256", "unknown")
     if protocol.get("text_artifact_sha256"):
         mlflow_cfg["tags"]["text_artifact_sha256"] = protocol["text_artifact_sha256"]
+    # per_user_complete starts false — only set to true after export succeeds
+    mlflow_cfg["tags"]["per_user_complete"] = "false"
 
     try:
         result = trainer.train(model=model, train_loader=train_loader, val_loader=val_loader, test_loader=test_loader, optimizer=optimizer, epochs=train_kwargs["epochs"], criterion_fn=criterion_fn, eval_fn=eval_fn, gradient_clip=train_kwargs.get("gradient_clip", 5.0), val_loss_loader=val_loss_loader, early_stop_patience=train_kwargs.get("early_stop_patience", 10), early_stop_min_delta=train_kwargs.get("early_stop_min_delta", 1e-4), scheduler=scheduler, mlflow_params=mlflow_cfg)
     except NoValidCheckpointError:
-        # Training produced no valid checkpoint — MLflow already marked FAILED.
-        # Do NOT export per-user results for this (variant, seed) pair.
         print(f"  {variant} seed={seed}: skipping per-user export (no valid checkpoint)")
         return None
     except Exception:
-        # Any other error (OOM, shape mismatch, etc.) is a real bug —
-        # mark the MLflow run as FAILED and re-raise.
         if trainer._use_mlflow and trainer._mlflow_run:
             trainer._mlflow.end_run(status="FAILED")
         raise
 
+    # Training succeeded — now export per-user results.  Only after
+    # per-user export succeeds do we mark the run as reportable.
     run_id = trainer._mlflow_run.info.run_id if trainer._mlflow_run else None
-    _export_per_user(model, test_loader, device, variant, seed, args.output_dir, benchmark_id, run_id)
+    try:
+        _export_per_user(model, test_loader, device, variant, seed, args.output_dir, benchmark_id, run_id)
+    except Exception:
+        if trainer._use_mlflow and run_id:
+            mlflow.tracking.MlflowClient().set_terminated(run_id, status="FAILED")
+        raise
+
+    # Per-user export succeeded — mark the run as complete and reportable.
+    if run_id:
+        client = mlflow.tracking.MlflowClient()
+        client.set_tag(run_id, "per_user_complete", "true")
+        client.set_tag(run_id, "reportable", "true")
 
     return result
 
@@ -254,7 +253,7 @@ def main() -> None:
         configs_glob="configs/model/*.yaml",
     )
 
-    _enforce_git_commit_match(protocol, allow_mismatch=args.allow_git_mismatch)
+    _enforce_git_commit_match(protocol)
 
     total = len(variants_list) * len(seeds)
     print(f"RQ4 ablation: {len(variants_list)} variants x {len(seeds)} seeds = {total} runs")
@@ -262,13 +261,27 @@ def main() -> None:
     print(f"Best alpha: {best_alpha}")
     print(f"Best metadata variant: {best_variant}")
     print(f"Benchmark ID: {benchmark_id}")
+
+    failed_runs: list[tuple[str, int]] = []
     for i, variant in enumerate(variants_list):
         variant_cfg = _get_variant_config(variant, best_alpha, best_variant)
         for j, seed in enumerate(seeds):
             run_num = i * len(seeds) + j + 1
             print(f"\n[{run_num}/{total}] {variant}, seed={seed}")
-            _run_single(args, variant, seed, variant_cfg, benchmark_id, protocol)
-    print(f"\nDone. Results logged to MLflow experiment '{EXPERIMENT_NAME}'.")
+            result = _run_single(args, variant, seed, variant_cfg, benchmark_id, protocol)
+            if result is None:
+                failed_runs.append((variant, seed))
+
+    if failed_runs:
+        n_failed = len(failed_runs)
+        print(f"\nINCOMPLETE: {n_failed}/{total} runs failed to produce valid checkpoints.")
+        print(f"  Failed: {failed_runs}")
+        raise RuntimeError(
+            f"RQ4 campaign incomplete: {n_failed} runs failed. "
+            f"Run `rq4-collect` to verify which seeds are missing."
+        )
+
+    print(f"\nDone. {total} runs completed. Results logged to MLflow experiment '{EXPERIMENT_NAME}'.")
     print(f"Run: make rq4-collect")
 
 

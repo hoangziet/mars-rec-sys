@@ -623,6 +623,37 @@ def save_processed_outputs(
     with open(reports_dir / "preprocessing_report.json", "w") as f:
         json.dump(preprocessing_report, f, indent=2)
 
+    # Write dataset manifest — one SHA256 per artifact that the models
+    # actually read.  This is used by rq4_init_protocol to freeze
+    # provenance down to the exact byte-level content of every processed file.
+    _write_dataset_manifest(output_dir)
+
+
+def _write_dataset_manifest(output_dir: Path) -> None:
+    """Write dataset_manifest.json with SHA256 of every processed artifact."""
+    import hashlib
+
+    manifest: dict[str, str] = {}
+    file_paths = [
+        "splits/train_sequences.csv",
+        "splits/val_sequences.csv",
+        "splits/test_sequences.csv",
+        "mappings/item_id_map.csv",
+        "mappings/user_id_map.csv",
+        "item_features/item_metadata.csv",
+        "interactions/interactions.csv",
+        "reports/dataset_stats.json",
+    ]
+    for rel in file_paths:
+        path = output_dir / rel
+        if path.exists():
+            manifest[rel] = hashlib.sha256(path.read_bytes()).hexdigest()
+
+    manifest_path = output_dir / "reports" / "dataset_manifest.json"
+    manifest_path.write_text(json.dumps(
+        {"files": manifest}, indent=2, sort_keys=True,
+    ) + "\n")
+
 
 def build_dataset_stats(
     n_users: int,
