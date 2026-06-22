@@ -7,6 +7,7 @@ Usage:
     uv run python data/preprocess.py
 """
 
+import ast
 import csv
 import json
 from pathlib import Path
@@ -186,6 +187,78 @@ def _empty_temporal_stats() -> dict:
         "median_delta_seconds": None,
         "p25_delta_seconds": None,
         "p75_delta_seconds": None,
+    }
+
+
+def _coerce_signal_seq(value) -> list:
+    if isinstance(value, list):
+        return value
+    if value is None or (isinstance(value, float) and pd.isna(value)) or value == "":
+        return []
+    text = str(value).strip()
+    if text.startswith("["):
+        return [int(x) for x in ast.literal_eval(text)]
+    return [int(token) for token in text.split()]
+
+
+def compute_per_split_coverage(
+    train_df: pd.DataFrame,
+    val_df: pd.DataFrame,
+    test_df: pd.DataFrame,
+) -> dict:
+    """Compute watch-signal coverage per split.
+
+    - train_history: per-user train history events (sequence)
+    - val_target: per-user val target item
+    - test_target: per-user test target item
+
+    Returns counts and percentages.
+    """
+
+    def _history_with_watch(df: pd.DataFrame) -> tuple[int, int]:
+        total = len(df)
+        with_watch = 0
+        for _, row in df.iterrows():
+            seq = _coerce_signal_seq(row.get("watch_signal_sequence"))
+            if any(v == 1 or v is True for v in seq):
+                with_watch += 1
+        return with_watch, total
+
+    def _target_with_watch(df: pd.DataFrame) -> tuple[int, int]:
+        if df.empty:
+            return 0, 0
+        if "watch_signal_sequence" in df.columns:
+            target_signal = df["watch_signal_sequence"].apply(
+                lambda s: (
+                    s[-1]
+                    if isinstance(s, list) and s
+                    else (int(_coerce_signal_seq(s)[-1]) if _coerce_signal_seq(s) else 0)
+                )
+            )
+            has_watch = (target_signal == 1).sum()
+        elif "target_engagement" in df.columns:
+            has_watch = (df["target_engagement"] > 0).sum()
+        else:
+            has_watch = 0
+        return int(has_watch), len(df)
+
+    train_with, train_total = _history_with_watch(train_df)
+    val_with, val_total = _target_with_watch(val_df)
+    test_with, test_total = _target_with_watch(test_df)
+
+    def _pct(numerator: int, denominator: int) -> float:
+        return round(100.0 * numerator / denominator, 2) if denominator else 0.0
+
+    return {
+        "train_history_with_watch": train_with,
+        "train_history_total": train_total,
+        "train_history_pct": _pct(train_with, train_total),
+        "val_target_with_watch": val_with,
+        "val_target_total": val_total,
+        "val_target_pct": _pct(val_with, val_total),
+        "test_target_with_watch": test_with,
+        "test_target_total": test_total,
+        "test_target_pct": _pct(test_with, test_total),
     }
 
 
@@ -611,6 +684,7 @@ def build_preprocessing_report(
     post_k_core_interactions: int = 0,
     train_history_users_with_watch_signal: int = 0,
     temporal_stats: dict | None = None,
+    per_split_coverage: dict | None = None,
 ) -> dict:
     return {
         "orphan_implicit_count": orphan_implicit_count,
@@ -632,6 +706,7 @@ def build_preprocessing_report(
             "coverage_pct": round(coverage_pct, 2),
         },
         "temporal_join_stats": temporal_stats or _empty_temporal_stats(),
+        "per_split_coverage": per_split_coverage or {},
     }
 
 
@@ -749,6 +824,7 @@ def main() -> None:
         sum(any(seq[:-2]) for seq in mapped_user_sequences["watch_signal_seq"])
     )
     train_df, val_df, test_df = split_leave_one_out(mapped_user_sequences)
+    per_split_coverage = compute_per_split_coverage(train_df, val_df, test_df)
 
     item_metadata = _build_item_metadata(items, item_id_map)
     dataset_stats = build_dataset_stats(
@@ -776,6 +852,7 @@ def main() -> None:
         post_k_core_interactions=len(interactions),
         train_history_users_with_watch_signal=train_history_watch_users,
         temporal_stats=temporal_stats,
+        per_split_coverage=per_split_coverage,
     )
 
     save_processed_outputs(

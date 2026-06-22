@@ -377,3 +377,28 @@ def test_attach_engagement_score_records_temporal_stats():
         assert "explicit_before_pct" in stats
         assert "explicit_after_pct" in stats
         assert "median_delta_seconds" in stats
+
+
+def test_split_leave_one_out_emits_per_split_coverage(tmp_path):
+    """Coverage should be reported per split: train_history, val_target, test_target."""
+    train_df = pd.DataFrame(
+        [
+            {
+                "user_idx": 1,
+                "item_sequence": [10, 20, 30, 40],
+                "engagement_sequence": [0.0, 0.5, 0.0, 0.7],
+                "watch_signal_sequence": [0, 1, 0, 1],
+                "sequence_length": 4,
+                "target_item": 40,
+                "target_engagement": 0.7,
+            }
+        ]
+    )
+
+    coverage = preprocess.compute_per_split_coverage(train_df, train_df, train_df)
+
+    assert coverage["train_history_with_watch"] == 1
+    assert coverage["val_target_with_watch"] == 1
+    assert coverage["test_target_with_watch"] == 1
+    assert coverage["train_history_total"] == 1
+    assert coverage["train_history_pct"] == 100.0
