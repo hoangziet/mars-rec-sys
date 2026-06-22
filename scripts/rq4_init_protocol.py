@@ -75,6 +75,21 @@ def verify_protocol_hashes(manifest: dict, data_dir: Path, configs_glob: str) ->
     """
     data_dir = Path(data_dir)
 
+    # --- Self-hash: guard against tampering of the manifest itself ---
+    protocol_expected = manifest.get("protocol_sha256")
+    if protocol_expected:
+        body = {k: v for k, v in manifest.items() if k != "protocol_sha256"}
+        actual = hashlib.sha256(
+            json.dumps(body, sort_keys=True, indent=2).encode()
+        ).hexdigest()
+        if actual != protocol_expected:
+            raise RuntimeError(
+                f"protocol_sha256 mismatch: the manifest content has changed "
+                f"since the protocol was frozen. This usually means a field "
+                f"was manually edited without re-running rq4_init_protocol. "
+                f"Expected {protocol_expected[:12]}..., got {actual[:12]}..."
+            )
+
     expected_data = manifest.get("data_manifest_sha256")
     if expected_data:
         data_report = data_dir / "reports" / "preprocessing_report.json"

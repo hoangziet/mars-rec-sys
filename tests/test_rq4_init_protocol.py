@@ -1,3 +1,4 @@
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -267,3 +268,78 @@ def test_verify_protocol_hashes_skips_unrecorded_hashes(tmp_path):
     rq4_init_protocol.verify_protocol_hashes(
         manifest=manifest, data_dir=tmp_path, configs_glob=str(tmp_path / "missing" / "*.yaml")
     )
+
+
+# ---------------------------------------------------------------------------
+# protocol_sha256 self-hash verification
+# ---------------------------------------------------------------------------
+
+
+def test_verify_protocol_hashes_validates_self_hash(tmp_path):
+    """After init writes protocol_sha256, the verifier must check it matches
+    a recomputation of the manifest contents (excluding the field itself)."""
+    data_dir = _make_full_data_dir(tmp_path)
+    report_hash = rq4_init_protocol._sha256_file(
+        data_dir / "reports" / "preprocessing_report.json"
+    )
+    config_hash = rq4_init_protocol._sha256_concat(
+        str(data_dir / "configs" / "model" / "*.yaml")
+    )
+    text_hash = rq4_init_protocol._sha256_file(
+        data_dir / "item_features" / "text_embeddings.pt"
+    )
+
+    manifest_no_self = {
+        "benchmark_id": "test",
+        "best_alpha": 0.5,
+        "best_metadata_variant": "M3",
+        "data_manifest_sha256": report_hash,
+        "config_sha256": config_hash,
+        "text_artifact_sha256": text_hash,
+    }
+    manifest_no_self["protocol_sha256"] = hashlib.sha256(
+        json.dumps(manifest_no_self, sort_keys=True, indent=2).encode()
+    ).hexdigest()
+
+    rq4_init_protocol.verify_protocol_hashes(
+        manifest=manifest_no_self,
+        data_dir=data_dir,
+        configs_glob=str(data_dir / "configs" / "model" / "*.yaml"),
+    )
+
+
+def test_verify_protocol_hashes_raises_on_tampered_self_hash(tmp_path):
+    """If someone edits best_alpha without recomputing protocol_sha256,
+    the verifier must reject the manifest."""
+    data_dir = _make_full_data_dir(tmp_path)
+    report_hash = rq4_init_protocol._sha256_file(
+        data_dir / "reports" / "preprocessing_report.json"
+    )
+    config_hash = rq4_init_protocol._sha256_concat(
+        str(data_dir / "configs" / "model" / "*.yaml")
+    )
+    text_hash = rq4_init_protocol._sha256_file(
+        data_dir / "item_features" / "text_embeddings.pt"
+    )
+
+    manifest_no_self = {
+        "benchmark_id": "test",
+        "best_alpha": 0.5,
+        "best_metadata_variant": "M3",
+        "data_manifest_sha256": report_hash,
+        "config_sha256": config_hash,
+        "text_artifact_sha256": text_hash,
+    }
+    manifest_no_self["protocol_sha256"] = hashlib.sha256(
+        json.dumps(manifest_no_self, sort_keys=True, indent=2).encode()
+    ).hexdigest()
+
+    # Tamper: change alpha but keep the old self-hash
+    manifest_no_self["best_alpha"] = 2.0
+
+    with pytest.raises(RuntimeError, match="protocol_sha256 mismatch"):
+        rq4_init_protocol.verify_protocol_hashes(
+            manifest=manifest_no_self,
+            data_dir=data_dir,
+            configs_glob=str(data_dir / "configs" / "model" / "*.yaml"),
+        )

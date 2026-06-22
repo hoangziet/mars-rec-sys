@@ -82,7 +82,7 @@ rq4-ablation:
 	uv run python scripts/rq4_ablation.py --protocol $(RQ4_MANIFEST)
 
 rq4-collect:
-	uv run python scripts/rq4_collect.py --benchmark-id $(RQ4_BENCHMARK_ID) --protocol $(RQ4_MANIFEST) --output-dir $(RQ4_COMPARISON_DIR)
+	uv run python scripts/rq4_collect.py --benchmark-id $(RQ4_BENCHMARK_ID) --protocol $(RQ4_MANIFEST) --data-dir $(DATA_DIR) --output-dir $(RQ4_COMPARISON_DIR)
 
 rq4-compare:
 	uv run python scripts/rq4_compare.py --per-user-dir $(RQ4_COMPARISON_DIR)/per_user --manifest $(RQ4_COMPARISON_DIR)/rq4_result_manifest.json --output-dir $(RQ4_COMPARISON_DIR)

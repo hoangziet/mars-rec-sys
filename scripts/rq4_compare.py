@@ -252,16 +252,6 @@ def _run_comparison(per_user: pd.DataFrame, comp_variant: str, base_variant: str
     mean_diff = float(deltas.mean())
     relative_imp = (mean_diff / base_mean) if base_mean != 0 else None
 
-    # Significance classification (uses the raw permutation p-value, not Holm)
-    if perm_p >= 0.05:
-        significance_label = "inconclusive"
-    elif mean_diff > 0:
-        significance_label = "significant_improvement"
-    elif mean_diff < 0:
-        significance_label = "significant_degradation"
-    else:
-        significance_label = "tie"
-
     return {
         "comparison": f"{comp_variant} vs {base_variant}",
         "comp_variant": comp_variant,
@@ -275,7 +265,6 @@ def _run_comparison(per_user: pd.DataFrame, comp_variant: str, base_variant: str
             round(100.0 * mean_diff / base_mean, 2) if base_mean != 0 else None
         ),
         "abs_mean_difference": abs(mean_diff),
-        "significance_label": significance_label,
         "wins": wins,
         "ties": ties,
         "losses": losses,
@@ -289,6 +278,44 @@ def _run_comparison(per_user: pd.DataFrame, comp_variant: str, base_variant: str
         "holm_adjusted_p": None,
         "significant": None,
     }
+
+
+def _assign_significance_label(
+    result: dict,
+    holm_adjusted_p: float | None,
+    is_primary: bool = True,
+) -> None:
+    """Assign the final significance_label after Holm correction.
+
+    Primary comparisons use the Holm-adjusted p-value and bootstrap CI to
+    distinguish reliable improvement / degradation from inconclusive. The
+    label must be computed here, not inside _run_comparison, because the
+    Holm correction happens after all three primary comparisons are run.
+
+    Secondary comparisons are always descriptive (no multiple-comparison
+    correction) and prefix the label with ``descriptive_``.
+    """
+    mean_diff = float(result["mean_difference"])
+    ci_low = float(result["bootstrap_ci_low"])
+    ci_high = float(result["bootstrap_ci_high"])
+
+    if is_primary and holm_adjusted_p is not None and holm_adjusted_p < 0.05:
+        if mean_diff > 0 and ci_low > 0:
+            result["significance_label"] = "reliable_improvement"
+        elif mean_diff < 0 and ci_high < 0:
+            result["significance_label"] = "reliable_degradation"
+        else:
+            result["significance_label"] = "inconclusive"
+    elif is_primary:
+        result["significance_label"] = "inconclusive"
+    else:
+        # Secondary: descriptive only, no correction
+        if mean_diff > 0 and ci_low > 0:
+            result["significance_label"] = "descriptive_improvement"
+        elif mean_diff < 0 and ci_high < 0:
+            result["significance_label"] = "descriptive_degradation"
+        else:
+            result["significance_label"] = "descriptive_inconclusive"
 
 
 def main() -> None:
@@ -320,12 +347,15 @@ def main() -> None:
         for r, adj, sig in zip(primary_results, adjusted, reject):
             r["holm_adjusted_p"] = float(adj)
             r["significant"] = bool(sig)
+            # assign label AFTER Holm + CI check
+            _assign_significance_label(r, holm_adjusted_p=float(adj), is_primary=True)
 
     # Secondary comparisons
     secondary_results = []
     for comp_variant, base_variant in SECONDARY_COMPARISONS:
         result = _run_comparison(per_user, comp_variant, base_variant, expected_seeds, rng)
         result["comparison_type"] = "secondary"
+        _assign_significance_label(result, holm_adjusted_p=None, is_primary=False)
         secondary_results.append(result)
 
     all_results = primary_results + secondary_results

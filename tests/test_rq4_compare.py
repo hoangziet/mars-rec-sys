@@ -92,9 +92,10 @@ def test_check_key_set_equality_passes_on_match():
     rq4_compare._check_key_set_equality(per_user, ["V0", "V1"])
 
 
-# ---- _run_comparison: significance_label ----
+# ---- _run_comparison: raw stats only, no label ----
 
-def test_run_comparison_returns_significance_label():
+def test_run_comparison_does_not_return_significance_label():
+    """_run_comparison returns raw stats; label is assigned later (after Holm)."""
     rows = []
     for user in range(10):
         target = 100 + user
@@ -104,11 +105,49 @@ def test_run_comparison_returns_significance_label():
     per_user = pd.DataFrame(rows)
     rng = np.random.default_rng(42)
     result = rq4_compare._run_comparison(per_user, "V1", "V0", {42, 43}, rng)
-    assert "significance_label" in result
-    assert result["significance_label"] in {
-        "significant_improvement", "significant_degradation",
-        "inconclusive", "tie",
-    }
+    assert "significance_label" not in result
+    assert "permutation_p" in result
+    assert "mean_difference" in result
+    assert "bootstrap_ci_low" in result
+    assert "bootstrap_ci_high" in result
+
+
+# ---- _assign_significance_label (called in main after Holm) ----
+
+def test_assign_primary_label_improvement():
+    """Holm-adjusted p < 0.05 + mean_diff > 0 + CI_low > 0 → reliable_improvement."""
+    result = {"mean_difference": 0.01, "bootstrap_ci_low": 0.002, "bootstrap_ci_high": 0.018}
+    rq4_compare._assign_significance_label(result, holm_adjusted_p=0.03, is_primary=True)
+    assert result["significance_label"] == "reliable_improvement"
+
+
+def test_assign_primary_label_degradation():
+    result = {"mean_difference": -0.01, "bootstrap_ci_low": -0.018, "bootstrap_ci_high": -0.001}
+    rq4_compare._assign_significance_label(result, holm_adjusted_p=0.02, is_primary=True)
+    assert result["significance_label"] == "reliable_degradation"
+
+
+def test_assign_primary_label_inconclusive_p_value():
+    result = {"mean_difference": 0.01, "bootstrap_ci_low": 0.002, "bootstrap_ci_high": 0.018}
+    rq4_compare._assign_significance_label(result, holm_adjusted_p=0.10, is_primary=True)
+    assert result["significance_label"] == "inconclusive"
+
+
+def test_assign_primary_label_inconclusive_ci_crosses_zero():
+    result = {"mean_difference": 0.01, "bootstrap_ci_low": -0.001, "bootstrap_ci_high": 0.021}
+    rq4_compare._assign_significance_label(result, holm_adjusted_p=0.03, is_primary=True)
+    assert result["significance_label"] == "inconclusive"
+
+
+def test_assign_secondary_label_descriptive_only():
+    """Secondary comparisons never get 'reliable_*' — they are always descriptive."""
+    result = {"mean_difference": 0.01, "bootstrap_ci_low": 0.002, "bootstrap_ci_high": 0.018}
+    rq4_compare._assign_significance_label(result, holm_adjusted_p=0.03, is_primary=False)
+    assert result["significance_label"] == "descriptive_improvement"
+
+    result2 = {"mean_difference": -0.001, "bootstrap_ci_low": -0.008, "bootstrap_ci_high": 0.006}
+    rq4_compare._assign_significance_label(result2, holm_adjusted_p=None, is_primary=False)
+    assert result2["significance_label"] == "descriptive_inconclusive"
 
 
 def test_run_comparison_drops_practically_significant():

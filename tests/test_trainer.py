@@ -1,6 +1,7 @@
 import sys
 from pathlib import Path
 
+import pytest
 import torch
 import torch.nn as nn
 
@@ -41,8 +42,12 @@ def _make_loader(n=2, input_dim=4):
     return _FakeLoader(n=n, input_dim=input_dim)
 
 
-def test_trainer_skips_test_when_no_valid_checkpoint(tmp_path):
-    """When all training is non-finite, trainer must NOT save checkpoint or run test."""
+def test_trainer_raises_when_no_valid_checkpoint(tmp_path):
+    """When all training is non-finite, trainer must raise RuntimeError.
+
+    The caller (rq4_ablation etc.) must catch this and skip per-user
+    export / downstream reporting for that seed.
+    """
     model = _NaNModel()
     trainer = Trainer("nan_test", "cpu", run_dir=tmp_path, use_mlflow=False)
 
@@ -53,21 +58,18 @@ def test_trainer_skips_test_when_no_valid_checkpoint(tmp_path):
         return {"NDCG@10": float("nan"), "Recall@10": float("nan")}
 
     loader = _make_loader()
-    tracker = trainer.train(
-        model=model, train_loader=loader, val_loader=loader,
-        test_loader=loader,
-        optimizer=torch.optim.SGD(model.parameters(), 0.01),
-        epochs=2, criterion_fn=nan_criterion, eval_fn=nan_eval,
-    )
+    with pytest.raises(RuntimeError, match="No valid checkpoint"):
+        trainer.train(
+            model=model, train_loader=loader, val_loader=loader,
+            test_loader=loader,
+            optimizer=torch.optim.SGD(model.parameters(), 0.01),
+            epochs=2, criterion_fn=nan_criterion, eval_fn=nan_eval,
+        )
 
     # No checkpoint saved
     assert not (tmp_path / "best_model.pt").exists()
-    # Test results empty
-    assert tracker.test_results == {}
     # Metrics still saved (for traceability)
     assert (tmp_path / "metrics.json").exists()
-    # No epoch logged as "best" (best_epoch stays -1)
-    assert tracker.best_epoch == -1
 
 
 def test_trainer_saves_checkpoint_when_loss_finite(tmp_path):

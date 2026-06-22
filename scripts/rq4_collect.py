@@ -38,6 +38,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="RQ4: collect ablation results from MLflow.")
     parser.add_argument("--benchmark-id", required=True)
     parser.add_argument("--protocol", default=None, help="Protocol manifest (validates exact runs, created before training)")
+    parser.add_argument("--data-dir", default="data/processed", help="Processed data directory (must match training data dir)")
     parser.add_argument("--output-dir", default=None)
     return parser
 
@@ -123,6 +124,46 @@ def _validate_run_tags(selected, expected_alpha, best_metadata_variant, metadata
     return errors
 
 
+def _validate_provenance_tags(selected: list[dict], protocol: dict) -> list[str]:
+    """Each MLflow run must carry the exact provenance hashes from the protocol.
+
+    A run with outdated or missing provenance tags was trained with a
+    different data/config/artifact version and must not be included.
+    """
+    errors = []
+    for r in selected:
+        tags = r.get("tags", {})
+        variant = r["variant"]
+        seed = r["seed"]
+        prefix = f"{variant} seed={seed}"
+
+        for key in ("protocol_sha256", "data_manifest_sha256", "config_sha256"):
+            expected = protocol.get(key)
+            if expected is None:
+                continue
+            actual = tags.get(key)
+            if actual is None:
+                errors.append(f"{prefix}: missing tag {key}")
+            elif actual != expected:
+                errors.append(
+                    f"{prefix}: {key} mismatch — "
+                    f"expected {expected[:12]}..., got {actual[:12]}..."
+                )
+
+        text_expected = protocol.get("text_artifact_sha256")
+        if text_expected:
+            text_actual = tags.get("text_artifact_sha256")
+            if text_actual is None:
+                errors.append(f"{prefix}: missing tag text_artifact_sha256")
+            elif text_actual != text_expected:
+                errors.append(
+                    f"{prefix}: text_artifact_sha256 mismatch — "
+                    f"expected {text_expected[:12]}..., got {text_actual[:12]}..."
+                )
+
+    return errors
+
+
 def main() -> None:
     args = parse_args()
     configure_mlflow(mlflow_module=mlflow)
@@ -175,7 +216,7 @@ def main() -> None:
         # on a different machine with regenerated embeddings, etc.
         verify_protocol_hashes(
             manifest=protocol,
-            data_dir=Path("data/processed"),
+            data_dir=Path(args.data_dir),
             configs_glob="configs/model/*.yaml",
         )
 
@@ -226,6 +267,9 @@ def main() -> None:
             )
         )
 
+        # Each MLflow run must carry provenance hashes matching the protocol
+        errors.extend(_validate_provenance_tags(selected, protocol))
+
         # Require all secondary metrics
         for r in selected:
             missing_metrics = []
@@ -269,8 +313,6 @@ def main() -> None:
             "val_ndcg_at_10": {
                 "mean": float(np.mean(val_vals)),
                 "std": float(np.std(val_vals, ddof=1)) if len(val_vals) > 1 else 0.0,
-                "ci95_low": None,
-                "ci95_high": None,
             },
             "test_ndcg_at_10": {
                 "mean": float(np.mean(test_vals)),
@@ -296,6 +338,12 @@ def main() -> None:
         "n_seeds": len(all_seeds),
         "n_variants": len(all_variants),
     }
+    if args.protocol:
+        for key in ("protocol_sha256", "data_manifest_sha256", "config_sha256",
+                     "text_artifact_sha256", "git_commit"):
+            val = protocol.get(key)
+            if val is not None:
+                manifest[key] = val
     with open(output_dir / "rq4_result_manifest.json", "w") as f:
         json.dump(manifest, f, indent=2)
 
