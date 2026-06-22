@@ -97,6 +97,10 @@ def _run_single(args, variant: str, seed: int, variant_cfg: dict) -> dict:
         encoder_cfg = model_kwargs.get("item_encoder", {})
         encoder_cfg["use_structured"] = variant_cfg["use_structured"]
         encoder_cfg["use_text"] = variant_cfg["use_text"]
+        # Resolve metadata paths from data_dir
+        encoder_cfg["metadata_vocab_path"] = str(data_dir / "item_features" / "metadata_vocab.json")
+        encoder_cfg["metadata_csv_path"] = str(data_dir / "item_features" / "item_metadata.csv")
+        encoder_cfg["text_emb_path"] = str(data_dir / "item_features" / "text_embeddings.pt")
         model_kwargs["item_encoder"] = encoder_cfg
     else:
         model_kwargs.pop("item_encoder", None)
@@ -115,8 +119,9 @@ def _run_single(args, variant: str, seed: int, variant_cfg: dict) -> dict:
     val_loss_loader = get_val_loss_loader("gsasrec", data_dir / "splits" / "val_sequences.csv", stats, batch_size=batch_size, max_len=max_len, num_neg=train_kwargs.get("num_neg", 1), seed=seed)
 
     run_name = build_run_name("gsasrec", seed, variant=variant.lower())
+    run_output_dir = Path(args.output_dir) / "rq4" / args.benchmark_id / variant / f"seed_{seed}"
 
-    trainer = Trainer("gsasrec", device, args.output_dir, use_mlflow=True, mlflow_config={
+    trainer = Trainer("gsasrec", device, str(run_output_dir), use_mlflow=True, mlflow_config={
         "experiment_name": EXPERIMENT_NAME, "run_name": run_name, "log_artifacts": True,
         "phase": "final", "variant": variant.lower(), "git_commit": get_git_commit(), "reportable": True,
     })
@@ -129,21 +134,22 @@ def _run_single(args, variant: str, seed: int, variant_cfg: dict) -> dict:
 
     result = trainer.train(model=model, train_loader=train_loader, val_loader=val_loader, test_loader=test_loader, optimizer=optimizer, epochs=train_kwargs["epochs"], criterion_fn=criterion_fn, eval_fn=eval_fn, gradient_clip=train_kwargs.get("gradient_clip", 5.0), val_loss_loader=val_loss_loader, early_stop_patience=train_kwargs.get("early_stop_patience", 10), early_stop_min_delta=train_kwargs.get("early_stop_min_delta", 1e-4), scheduler=scheduler, mlflow_params=mlflow_cfg)
 
-    _export_per_user(model, test_loader, device, variant, seed, args.output_dir)
+    _export_per_user(model, test_loader, device, variant, seed, args.output_dir, args.benchmark_id)
 
     return result
 
 
-def _export_per_user(model, test_loader, device, variant, seed, output_dir):
+def _export_per_user(model, test_loader, device, variant, seed, output_dir, benchmark_id):
     from pipeline.metrics import evaluate_sequential_detailed
     import csv as csv_mod
+    import mlflow as mlflow_mod
 
     _, per_user = evaluate_sequential_detailed(model, test_loader, device)
     for row in per_user:
         row["variant"] = variant
         row["seed"] = seed
 
-    user_dir = Path(output_dir) / "per_user"
+    user_dir = Path(output_dir) / "rq4" / benchmark_id / "per_user"
     user_dir.mkdir(parents=True, exist_ok=True)
     path = user_dir / f"{variant}_s{seed}.csv"
     fields = ["variant", "seed", "user_idx", "target_item", "rank", "hit_at_10", "ndcg_at_10", "hit_at_20", "ndcg_at_20"]
@@ -151,6 +157,10 @@ def _export_per_user(model, test_loader, device, variant, seed, output_dir):
         writer = csv_mod.DictWriter(f, fieldnames=fields)
         writer.writeheader()
         writer.writerows(per_user)
+
+    # Log to MLflow
+    mlflow_mod.log_artifact(str(path), artifact_path="per_user")
+
     return path
 
 

@@ -88,6 +88,10 @@ def _run_single(args, variant_name: str, seed: int) -> dict:
         if not variant["use_text"]:
             encoder_cfg["use_text"] = False
         if encoder_cfg.get("use_structured") or encoder_cfg.get("use_text"):
+            # Resolve metadata paths from data_dir
+            encoder_cfg["metadata_vocab_path"] = str(data_dir / "item_features" / "metadata_vocab.json")
+            encoder_cfg["metadata_csv_path"] = str(data_dir / "item_features" / "item_metadata.csv")
+            encoder_cfg["text_emb_path"] = str(data_dir / "item_features" / "text_embeddings.pt")
             model_kwargs["item_encoder"] = encoder_cfg
         else:
             model_kwargs.pop("item_encoder", None)
