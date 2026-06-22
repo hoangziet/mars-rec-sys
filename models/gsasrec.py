@@ -173,7 +173,13 @@ class GSASRec(nn.Module):
         padding_mask = input_seq == self.pad_token
         for block in self.blocks:
             x = block(x, attn_mask=causal_mask, padding_mask=padding_mask)
-        return self.final_ln(x)
+            # Re-zero at padding positions: when a padded query has all keys
+            # masked, attention softmax becomes all -inf → NaN, which then
+            # propagates through the residual to valid positions in later blocks.
+            x = x.masked_fill(pad_hidden_mask, 0.0)
+        x = self.final_ln(x)
+        x = x.masked_fill(pad_hidden_mask, 0.0)
+        return x
 
     def _last_hidden(self, input_seq: torch.Tensor) -> torch.Tensor:
         """Extract hidden state at the last non-padding position. Returns (B, D)."""
