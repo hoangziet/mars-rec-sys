@@ -320,8 +320,12 @@ class FullSortEvalDataset(Dataset):
 
     For each user, provides a boolean ``history_mask`` of shape ``(n_items+1,)``
     where ``True`` marks items the model should not be credited for recommending
-    (padding token + items in the user's training history).  The target item is
-    explicitly kept unmasked so the model can rank it against the full catalog.
+    (padding token + items in the user's training history).
+
+    Under **next-distinct-course** semantics, the target item is by construction
+    NOT in the user's prior history (preprocessing dedups by (user_id, item_id)
+    keeping the first encounter). The history mask therefore does NOT need a
+    special "unmask target" step — the target is naturally rankable.
 
     Evaluation protocol: rank target item among all ``n_items`` items after
     applying the history mask (setting masked logits to ``-inf``).
@@ -356,10 +360,9 @@ class FullSortEvalDataset(Dataset):
         n = len(self.users)
         history_masks = torch.zeros(n, n_items + 1, dtype=torch.bool)
         history_masks[:, 0] = True  # padding token always masked
-        for i, (seq, tgt) in enumerate(zip(self.seqs, self.targets)):
+        for i, seq in enumerate(self.seqs):
             for item in seq:
                 history_masks[i, item] = True
-            history_masks[i, tgt] = False  # target must remain rankable
         self._history_masks = history_masks
 
     def __len__(self) -> int:
