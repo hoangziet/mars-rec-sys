@@ -10,6 +10,8 @@ Functions:
     build_train_loader() — return a training DataLoader
 """
 
+import hashlib
+import json
 from pathlib import Path
 
 import torch
@@ -20,6 +22,84 @@ from pipeline.metrics import (
     evaluate_bprmf,
     evaluate_sequential,
 )
+
+
+# ---------------------------------------------------------------------------
+# Text embedding manifest validation
+# ---------------------------------------------------------------------------
+
+
+def _sha256_file(path) -> str:
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def _validate_text_embedding_manifest(
+    embeddings_path,
+    manifest: dict,
+    item_id_map_path,
+    metadata_csv_path,
+    n_items: int,
+) -> None:
+    """Fail-fast validation of precomputed text embeddings against manifest.
+
+    Checks:
+        - Embeddings file exists and is loadable
+        - Shape matches n_items+1 x embedding_dim
+        - Row 0 (padding) is exactly zero
+        - No NaN or Inf values
+        - item_id_map_sha256 matches current item_id_map.csv
+        - metadata_sha256 matches current item_metadata.csv
+    """
+    embeddings_path = Path(embeddings_path)
+    item_id_map_path = Path(item_id_map_path)
+    metadata_csv_path = Path(metadata_csv_path)
+
+    if not embeddings_path.exists():
+        raise RuntimeError(f"Text embeddings file not found: {embeddings_path}")
+    if not item_id_map_path.exists():
+        raise RuntimeError(f"item_id_map.csv not found: {item_id_map_path}")
+    if not metadata_csv_path.exists():
+        raise RuntimeError(f"item_metadata.csv not found: {metadata_csv_path}")
+
+    emb = torch.load(embeddings_path, weights_only=True)
+    expected_shape = (manifest["n_items"] + 1, manifest["embedding_dim"])
+    if tuple(emb.shape) != expected_shape:
+        raise RuntimeError(
+            f"Embeddings shape mismatch: expected {expected_shape}, got {tuple(emb.shape)}"
+        )
+    if emb.shape[0] - 1 != n_items:
+        raise RuntimeError(
+            f"Embeddings n_items mismatch: manifest says {manifest['n_items']}, "
+            f"caller says {n_items}"
+        )
+
+    if not torch.all(emb[0] == 0).item():
+        raise RuntimeError(
+            f"Embeddings padding row 0 is not zero. This will leak signal into "
+            f"padding positions. Recompute with rq3_precompute_embeddings.py."
+        )
+
+    if torch.isnan(emb).any().item() or torch.isinf(emb).any().item():
+        raise RuntimeError("Embeddings contain NaN or Inf values. Recompute.")
+
+    actual_map_sha = _sha256_file(item_id_map_path)
+    expected_map_sha = manifest.get("item_id_map_sha256")
+    if expected_map_sha and actual_map_sha != expected_map_sha:
+        raise RuntimeError(
+            f"item_id_map_sha256 mismatch: manifest has {expected_map_sha[:12]}..., "
+            f"current file has {actual_map_sha[:12]}... "
+            f"This usually means item indices have changed since embeddings were computed. "
+            f"Recompute with rq3_precompute_embeddings.py."
+        )
+
+    actual_meta_sha = _sha256_file(metadata_csv_path)
+    expected_meta_sha = manifest.get("metadata_sha256")
+    if expected_meta_sha and actual_meta_sha != expected_meta_sha:
+        raise RuntimeError(
+            f"metadata_sha256 mismatch: manifest has {expected_meta_sha[:12]}..., "
+            f"current file has {actual_meta_sha[:12]}... "
+            f"Recompute with rq3_precompute_embeddings.py."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -56,7 +136,23 @@ def build_model(
 
             text_emb = None
             if encoder_cfg.get("use_text", False):
-                text_emb = torch.load(encoder_cfg["text_emb_path"], weights_only=True)
+                text_emb_path = Path(encoder_cfg["text_emb_path"])
+                manifest_path = text_emb_path.with_name("text_embeddings_manifest.json")
+                if manifest_path.exists():
+                    manifest = json.loads(manifest_path.read_text())
+                    _validate_text_embedding_manifest(
+                        embeddings_path=text_emb_path,
+                        manifest=manifest,
+                        item_id_map_path=Path("data/processed/mappings/item_id_map.csv"),
+                        metadata_csv_path=Path(encoder_cfg.get("metadata_csv_path", "data/processed/item_features/item_metadata.csv")),
+                        n_items=n_items,
+                    )
+                else:
+                    raise RuntimeError(
+                        f"Text embeddings manifest not found: {manifest_path}. "
+                        f"Re-run `make rq3-precompute` to generate it."
+                    )
+                text_emb = torch.load(text_emb_path, weights_only=True)
 
             item_encoder = ItemEncoder(
                 n_items=n_items,

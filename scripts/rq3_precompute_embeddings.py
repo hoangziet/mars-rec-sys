@@ -89,16 +89,27 @@ def main() -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(full_embeddings, output_path)
 
-    meta_path = output_path.with_suffix(".meta.json")
-    meta_path.write_text(json.dumps({
-        "model_name": args.model_name,
-        "embedding_dim": emb_dim,
+    import hashlib
+    map_path = output_path.parent.parent / "mappings" / "item_id_map.csv"
+    meta_csv_path = output_path.parent / "item_metadata.csv"
+    item_id_map_sha256 = hashlib.sha256(map_path.read_bytes()).hexdigest() if map_path.exists() else None
+    metadata_sha256 = hashlib.sha256(meta_csv_path.read_bytes()).hexdigest() if meta_csv_path.exists() else None
+
+    manifest_path = output_path.with_name("text_embeddings_manifest.json")
+    manifest_path.write_text(json.dumps({
         "n_items": n_items,
+        "embedding_dim": emb_dim,
+        "padding_row": 0,
+        "item_id_map_sha256": item_id_map_sha256,
+        "metadata_sha256": metadata_sha256,
+        "encoder": args.model_name,
+        "encoder_revision": "main",
+        "text_template_version": "v1",
         "shape": list(full_embeddings.shape),
     }, indent=2))
 
     print(f"Saved: {output_path}  shape={full_embeddings.shape}")
-    print(f"Metadata: {meta_path}")
+    print(f"Manifest: {manifest_path}")
 
 
 if __name__ == "__main__":
