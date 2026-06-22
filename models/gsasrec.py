@@ -61,19 +61,17 @@ class GSASRecBlock(nn.Module):
         self.dropout2 = nn.Dropout(dropout)
 
     def forward(self, x, attn_mask=None, padding_mask=None):
-        # Same as SASRec: causal mask only, no explicit padding zeroing.
-        # padding_mask is accepted for API compatibility but is not applied.
         if self.norm_first:
             # Pre-LN
             residual = x
             z = self.ln1(x)
-            attn_out, _ = self.attn(z, z, z, attn_mask=attn_mask)
+            attn_out, _ = self.attn(z, z, z, attn_mask=attn_mask, key_padding_mask=padding_mask)
             x = residual + self.dropout1(attn_out)
             residual = x
             x = residual + self.dropout2(self.ffn(self.ln2(x)))
         else:
             # Post-LN
-            attn_out, _ = self.attn(x, x, x, attn_mask=attn_mask)
+            attn_out, _ = self.attn(x, x, x, attn_mask=attn_mask, key_padding_mask=padding_mask)
             x = self.ln1(x + self.dropout1(attn_out))
             x = self.ln2(x + self.dropout2(self.ffn(x)))
         return x
@@ -124,9 +122,13 @@ class GSASRec(nn.Module):
 
         if item_encoder is not None:
             self.item_emb = item_encoder
+            self.item_emb_is_embedding = False
         else:
             self.item_emb = nn.Embedding(n_items + 1, hidden_dim, padding_idx=0)
             nn.init.normal_(self.item_emb.weight, std=0.01)
+            with torch.no_grad():
+                self.item_emb.weight[0].zero_()
+            self.item_emb_is_embedding = True
         # 1-indexed positions; index 0 (padding_idx=0) → zero vector for padding tokens.
         self.pos_emb     = nn.Embedding(max_len + 1, hidden_dim, padding_idx=0)
         self.emb_dropout = nn.Dropout(dropout)
@@ -137,6 +139,8 @@ class GSASRec(nn.Module):
         self.final_ln = nn.LayerNorm(hidden_dim, eps=1e-8)
 
         nn.init.normal_(self.pos_emb.weight,  std=0.01)
+        with torch.no_grad():
+            self.pos_emb.weight[0].zero_()
 
     # ------------------------------------------------------------------
     # Encoder
@@ -156,6 +160,11 @@ class GSASRec(nn.Module):
             pos_ids = (pos_ids.float() + noise).clamp(min=0.0).long()
 
         x = self.item_emb(input_seq) * (self.hidden_dim ** 0.5) + self.pos_emb(pos_ids)
+
+        # Zero hidden at padding positions before attention (unifies behavior with ItemEncoder)
+        pad_hidden_mask = (input_seq == self.pad_token).unsqueeze(-1)
+        x = x.masked_fill(pad_hidden_mask, 0.0)
+
         x = self.emb_dropout(x)
 
         causal_mask = torch.triu(
