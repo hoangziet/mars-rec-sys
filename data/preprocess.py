@@ -3,6 +3,12 @@ data/preprocess.py
 ==================
 Preprocess raw interaction data into the canonical processed dataset layout.
 
+Task: **next distinct course recommendation** — predict the user's next NEW
+course (not the same course watched again). Interactions are deduplicated by
+(user_id, item_id) keeping the first encounter. Watch signal is attached via
+temporal alignment to explicit watch events (merge_asof, direction=backward),
+which is robust to multiple explicit watches of the same course.
+
 Usage:
     uv run python data/preprocess.py
 """
@@ -80,6 +86,14 @@ def attach_engagement_score(
     For each implicit interaction, finds the most recent explicit watch event
     for the same (user_id, item_id) with timestamp <= interaction timestamp.
     If no such event exists, engagement_score = 0.0 and has_watch_signal = False.
+
+    Watch-signal aggregation rule: under next-distinct-course semantics, each
+    implicit row corresponds to a distinct (user_id, item_id) (deduped upstream
+    in main()). The temporal merge_asof with direction="backward" therefore
+    returns the most recent explicit watch for that pair — multiple explicit
+    watches of the same course by the same user are naturally resolved to the
+    last one preceding the implicit interaction, with no extra aggregation
+    step required.
 
     When return_temporal_stats is True, also adds:
         - temporal_delta_seconds: explicit.created_at - implicit.created_at (NaT if no match)
@@ -428,6 +442,18 @@ def split_leave_one_out(
         watch_signal = row["watch_signal_seq"]
         n = len(seq)
 
+        # Invariant: next-distinct-course — all items in the sequence are unique
+        # (because preprocessing dedups by (user_id, item_id)). If the sequence
+        # has duplicates, something went wrong upstream.
+        if len(set(seq)) != len(seq):
+            user_id = row.get("user_id", "<unknown>")
+            raise ValueError(
+                f"User {user_id} sequence has duplicate items. "
+                f"This violates next-distinct-course semantics. "
+                f"Check preprocessing dedup. Duplicates: "
+                f"{[item for item in set(seq) if seq.count(item) > 1][:5]}"
+            )
+
         if n < MIN_BENCHMARK_SAFE_SEQUENCE_LEN:
             user_id = row.get("user_id", "<unknown>")
             raise ValueError(
@@ -736,8 +762,10 @@ def main() -> None:
     catalog_item_ids = set(items["item_id"].astype(str))
 
     implicit_sorted = implicit.sort_values("created_at", kind="stable")
+    # Next-distinct-course semantics: a user re-watching the same course is
+    # not a new interaction. Keep the FIRST encounter only.
     implicit_dedup = implicit_sorted.drop_duplicates(
-        subset=["user_id", "item_id", "created_at"],
+        subset=["user_id", "item_id"],
         keep="first",
     ).copy()
     repeat_events_removed = len(implicit) - len(implicit_dedup)
