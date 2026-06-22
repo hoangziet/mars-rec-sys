@@ -15,6 +15,8 @@ def _write_winners(tmp_path, alpha=0.5, variant="M3", rq2_bid="rq2-x", rq3_bid="
     rq2.write_text(json.dumps({"best_alpha": alpha, "benchmark_id": rq2_bid}))
     rq3 = tmp_path / "rq3_best_variant.json"
     rq3.write_text(json.dumps({"best_variant": variant, "benchmark_id": rq3_bid}))
+    (tmp_path / "reports").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "reports" / "dataset_manifest.json").write_text('{"files": {}}')
     return rq2, rq3
 
 
@@ -36,6 +38,7 @@ def test_init_reads_winners_from_json(tmp_path):
         "--rq2-winners", str(rq2),
         "--rq3-winners", str(rq3),
         "--output-dir", str(output),
+        "--data-dir", str(tmp_path),
         "--seeds", "42", "123",
     ])
 
@@ -73,25 +76,26 @@ def test_init_writes_sha256_hashes(tmp_path):
     assert len(manifest["protocol_sha256"]) == 64  # sha256 hex length
 
 
-def test_init_writes_data_manifest_hash_when_present(tmp_path):
+def test_init_writes_dataset_manifest_hash_when_present(tmp_path):
     rq2, rq3 = _write_winners(tmp_path)
     output = tmp_path / "out"
-    data_dir = tmp_path / "data"
-    reports_dir = data_dir / "reports"
-    reports_dir.mkdir(parents=True)
-    (reports_dir / "preprocessing_report.json").write_text("{}")
+    # _write_winners already creates reports/dataset_manifest.json in tmp_path
+    # Overwrite with richer content
+    (tmp_path / "reports" / "dataset_manifest.json").write_text(
+        '{"files": {"a": "abc123"}}'
+    )
     _run_with_argv([
         "rq4_init_protocol.py",
         "--benchmark-id", "test-rq4",
         "--rq2-winners", str(rq2),
         "--rq3-winners", str(rq3),
         "--output-dir", str(output),
-        "--data-dir", str(data_dir),
+        "--data-dir", str(tmp_path),
     ])
 
     manifest = json.loads((output / "rq4_protocol_manifest.json").read_text())
-    assert manifest["data_manifest_sha256"] is not None
-    assert len(manifest["data_manifest_sha256"]) == 64
+    assert manifest["dataset_manifest_sha256"] is not None
+    assert len(manifest["dataset_manifest_sha256"]) == 64
 
 
 def test_init_rejects_rq2_winner_missing_key(tmp_path):
@@ -165,12 +169,24 @@ def test_init_rejects_existing_manifest(tmp_path):
 
 
 def _make_full_data_dir(tmp_path: Path) -> Path:
-    """Build a data_dir containing reports/preprocessing_report.json and
+    """Build a data_dir containing reports/dataset_manifest.json and
     item_features/text_embeddings.pt, plus a configs/model/*.yaml.
     Returns the data_dir.
     """
     (tmp_path / "reports").mkdir(parents=True)
-    (tmp_path / "reports" / "preprocessing_report.json").write_text("{}")
+    # Write a real dataset_manifest.json with per-file hashes
+    import hashlib
+
+    files = {}
+    for fname in ("splits/train_sequences.csv", "splits/val_sequences.csv",
+                  "splits/test_sequences.csv", "mappings/item_id_map.csv"):
+        path = tmp_path / fname
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(fname)
+        files[fname] = hashlib.sha256(path.read_bytes()).hexdigest()
+    (tmp_path / "reports" / "dataset_manifest.json").write_text(
+        json.dumps({"files": files}, indent=2)
+    )
     (tmp_path / "item_features").mkdir(parents=True)
     (tmp_path / "item_features" / "text_embeddings.pt").write_bytes(b"abc")
     configs_dir = tmp_path / "configs" / "model"
@@ -183,8 +199,8 @@ def test_verify_protocol_hashes_passes_when_all_match(tmp_path):
     data_dir = _make_full_data_dir(tmp_path)
 
     manifest = {
-        "data_manifest_sha256": rq4_init_protocol._sha256_file(
-            data_dir / "reports" / "preprocessing_report.json"
+        "dataset_manifest_sha256": rq4_init_protocol._sha256_file(
+            data_dir / "reports" / "dataset_manifest.json"
         ),
         "config_sha256": rq4_init_protocol._sha256_concat(
             str(data_dir / "configs" / "model" / "*.yaml")
@@ -203,7 +219,7 @@ def test_verify_protocol_hashes_passes_when_all_match(tmp_path):
 def test_verify_protocol_hashes_raises_on_data_drift(tmp_path):
     data_dir = _make_full_data_dir(tmp_path)
     manifest = {
-        "data_manifest_sha256": "0" * 64,
+        "dataset_manifest_sha256": "0" * 64,
         "config_sha256": rq4_init_protocol._sha256_concat(
             str(data_dir / "configs" / "model" / "*.yaml")
         ),
@@ -211,7 +227,7 @@ def test_verify_protocol_hashes_raises_on_data_drift(tmp_path):
             data_dir / "item_features" / "text_embeddings.pt"
         ),
     }
-    with pytest.raises(RuntimeError, match="data_manifest_sha256 mismatch"):
+    with pytest.raises(RuntimeError, match="dataset_manifest_sha256 mismatch"):
         rq4_init_protocol.verify_protocol_hashes(
             manifest=manifest,
             data_dir=data_dir,
@@ -222,8 +238,8 @@ def test_verify_protocol_hashes_raises_on_data_drift(tmp_path):
 def test_verify_protocol_hashes_raises_on_config_drift(tmp_path):
     data_dir = _make_full_data_dir(tmp_path)
     manifest = {
-        "data_manifest_sha256": rq4_init_protocol._sha256_file(
-            data_dir / "reports" / "preprocessing_report.json"
+        "dataset_manifest_sha256": rq4_init_protocol._sha256_file(
+            data_dir / "reports" / "dataset_manifest.json"
         ),
         "config_sha256": "0" * 64,
         "text_artifact_sha256": rq4_init_protocol._sha256_file(
@@ -241,8 +257,8 @@ def test_verify_protocol_hashes_raises_on_config_drift(tmp_path):
 def test_verify_protocol_hashes_raises_on_text_artifact_drift(tmp_path):
     data_dir = _make_full_data_dir(tmp_path)
     manifest = {
-        "data_manifest_sha256": rq4_init_protocol._sha256_file(
-            data_dir / "reports" / "preprocessing_report.json"
+        "dataset_manifest_sha256": rq4_init_protocol._sha256_file(
+            data_dir / "reports" / "dataset_manifest.json"
         ),
         "config_sha256": rq4_init_protocol._sha256_concat(
             str(data_dir / "configs" / "model" / "*.yaml")
@@ -261,7 +277,7 @@ def test_verify_protocol_hashes_skips_unrecorded_hashes(tmp_path):
     """If a hash was None at init time (e.g. data not preprocessed yet), the
     verifier must skip it instead of erroring."""
     manifest = {
-        "data_manifest_sha256": None,
+        "dataset_manifest_sha256": None,
         "config_sha256": None,
         "text_artifact_sha256": None,
     }
@@ -280,7 +296,7 @@ def test_verify_protocol_hashes_validates_self_hash(tmp_path):
     a recomputation of the manifest contents (excluding the field itself)."""
     data_dir = _make_full_data_dir(tmp_path)
     report_hash = rq4_init_protocol._sha256_file(
-        data_dir / "reports" / "preprocessing_report.json"
+        data_dir / "reports" / "dataset_manifest.json"
     )
     config_hash = rq4_init_protocol._sha256_concat(
         str(data_dir / "configs" / "model" / "*.yaml")
@@ -293,7 +309,7 @@ def test_verify_protocol_hashes_validates_self_hash(tmp_path):
         "benchmark_id": "test",
         "best_alpha": 0.5,
         "best_metadata_variant": "M3",
-        "data_manifest_sha256": report_hash,
+        "dataset_manifest_sha256": report_hash,
         "config_sha256": config_hash,
         "text_artifact_sha256": text_hash,
     }
@@ -313,7 +329,7 @@ def test_verify_protocol_hashes_raises_on_tampered_self_hash(tmp_path):
     the verifier must reject the manifest."""
     data_dir = _make_full_data_dir(tmp_path)
     report_hash = rq4_init_protocol._sha256_file(
-        data_dir / "reports" / "preprocessing_report.json"
+        data_dir / "reports" / "dataset_manifest.json"
     )
     config_hash = rq4_init_protocol._sha256_concat(
         str(data_dir / "configs" / "model" / "*.yaml")
@@ -326,7 +342,7 @@ def test_verify_protocol_hashes_raises_on_tampered_self_hash(tmp_path):
         "benchmark_id": "test",
         "best_alpha": 0.5,
         "best_metadata_variant": "M3",
-        "data_manifest_sha256": report_hash,
+        "dataset_manifest_sha256": report_hash,
         "config_sha256": config_hash,
         "text_artifact_sha256": text_hash,
     }

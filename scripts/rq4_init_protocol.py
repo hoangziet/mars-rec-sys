@@ -90,20 +90,21 @@ def verify_protocol_hashes(manifest: dict, data_dir: Path, configs_glob: str) ->
                 f"Expected {protocol_expected[:12]}..., got {actual[:12]}..."
             )
 
-    expected_data = manifest.get("data_manifest_sha256")
+    expected_data = manifest.get("dataset_manifest_sha256")
     if expected_data:
-        data_report = data_dir / "reports" / "preprocessing_report.json"
+        data_report = data_dir / "reports" / "dataset_manifest.json"
         if not data_report.exists():
             raise RuntimeError(
-                f"data_manifest_sha256 was frozen to {expected_data[:12]}... "
-                f"but preprocessing_report.json is missing at {data_report}. "
+                f"dataset_manifest_sha256 was frozen to {expected_data[:12]}... "
+                f"but dataset_manifest.json is missing at {data_report}. "
                 f"Re-run data/preprocess.py or re-init the protocol."
             )
         actual = _sha256_file(data_report)
         if actual != expected_data:
             raise RuntimeError(
-                f"data_manifest_sha256 mismatch: manifest has {expected_data[:12]}..., "
+                f"dataset_manifest_sha256 mismatch: manifest has {expected_data[:12]}..., "
                 f"current file has {actual[:12]}... "
+                f"This means processed data has changed since the protocol was frozen. "
                 f"Re-run data/preprocess.py or re-init the protocol."
             )
 
@@ -184,11 +185,15 @@ def main() -> None:
 
     # Provenance SHA256s — these let rq4_ablation detect drift between
     # manifest creation time and training time.
-    data_manifest_path = data_dir / "reports" / "preprocessing_report.json"
-    if data_manifest_path.exists():
-        manifest["data_manifest_sha256"] = _sha256_file(data_manifest_path)
+
+    dataset_manifest_path = data_dir / "reports" / "dataset_manifest.json"
+    if dataset_manifest_path.exists():
+        manifest["dataset_manifest_sha256"] = _sha256_file(dataset_manifest_path)
     else:
-        manifest["data_manifest_sha256"] = None
+        raise RuntimeError(
+            f"dataset_manifest.json not found at {dataset_manifest_path}. "
+            f"Run make preprocess first."
+        )
 
     if Path("configs/model").exists():
         manifest["config_sha256"] = _sha256_concat("configs/model/*.yaml")
@@ -216,7 +221,7 @@ def main() -> None:
     print(f"  Best alpha: {manifest['best_alpha']}")
     print(f"  Best metadata variant: {manifest['best_metadata_variant']}")
     print(f"  Git commit: {manifest['git_commit'][:12]}")
-    print(f"  Data manifest SHA256: {(manifest.get('data_manifest_sha256') or 'N/A')[:12]}")
+    print(f"  Data manifest SHA256: {(manifest.get('dataset_manifest_sha256') or 'N/A')[:12]}")
     print(f"  Config SHA256: {(manifest.get('config_sha256') or 'N/A')[:12]}")
     print(f"  Variants: {args.variants}")
     print(f"  Seeds: {len(args.seeds)}")

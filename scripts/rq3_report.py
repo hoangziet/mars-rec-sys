@@ -16,7 +16,9 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -138,7 +140,25 @@ def main() -> None:
             f.write(f"| {row['rank']} | {row['variant']} | {row['n_seeds']} | {row['val_ndcg_at_10_mean']:.4f} ± {row['val_ndcg_at_10_std']:.4f} |\n")
 
     with open(output_dir / "rq3_best_variant.json", "w") as f:
-        json.dump({"best_variant": best_variant, "benchmark_id": args.benchmark_id}, f, indent=2)
+        winner = {
+            "best_variant": best_variant,
+            "benchmark_id": args.benchmark_id,
+            "candidate_grid": EXPECTED_VARIANTS,
+            "seeds": EXPECTED_SEEDS,
+            "selection_metric": PRIMARY_METRIC,
+        }
+        try:
+            winner["git_commit"] = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], text=True
+            ).strip()
+        except Exception:
+            winner["git_commit"] = "unknown"
+        ds_manifest = Path("data/processed/reports/dataset_manifest.json")
+        if ds_manifest.exists():
+            winner["dataset_manifest_sha256"] = hashlib.sha256(
+                ds_manifest.read_bytes()
+            ).hexdigest()
+        json.dump(winner, f, indent=2)
 
     print(f"Best variant: {best_variant}")
     print(f"Output: {output_dir}")
