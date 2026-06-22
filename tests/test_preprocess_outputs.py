@@ -315,3 +315,25 @@ def test_split_leave_one_out_writes_watch_signal_sequence():
     assert train_df.loc[0, "watch_signal_sequence"] == [True, True]
     assert val_df.loc[0, "watch_signal_sequence"] == [True, True]
     assert test_df.loc[0, "watch_signal_sequence"] == [True, True, True]
+
+
+def test_has_watch_signal_requires_temporal_match():
+    implicit = pd.DataFrame(
+        {
+            "user_id": ["1"],
+            "item_id": ["10"],
+            "created_at": pd.to_datetime(["2024-01-01"]),
+        }
+    )
+    lookup = pd.DataFrame(
+        {
+            "user_id": ["1"],
+            "item_id": ["10"],
+            "created_at": pd.to_datetime(["2024-01-02"]),
+            "engagement_score": [0.8],
+        }
+    )
+
+    result = preprocess.attach_engagement_score(implicit, lookup)
+    assert result.loc[0, "engagement_score"] == 0.0
+    assert bool(result.loc[0, "has_watch_signal"]) is False
