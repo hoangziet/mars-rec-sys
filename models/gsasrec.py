@@ -80,17 +80,24 @@ class GSASRecBlock(nn.Module):
 class GSASRec(nn.Module):
     """gSASRec model.
 
+    Reference: Petrov & Macdonald, ACM RecSys 2023.
+
+    Implementation note: the gBCE loss uses the score transformation
+    pos_score_t = log(1 / (sigmoid(pos)^-beta - 1)) as in the reference.
+    The "pos_smoothing" parameter is a project-specific extension.
+
     Parameters
     ----------
     t:
         gBCE temperature in [0, 1].  t=0 → standard BCE (= SASRec).
         t=1 → fully sampling-corrected logits.
-        Reference default (Petrov & Macdonald, RecSys 2023): t=0.5.
+        Project default: t=0.5 (see configs/model/gsasrec.yaml).
     num_neg:
         Number of negatives per positive sampled during training.
-        Reference default: 32.  The effective beta is computed as:
-          alpha = num_neg / (n_items - 1)
-          beta  = alpha * ((1 - 1/alpha) * t + 1/alpha)
+        Project default: 32 (see configs/model/gsasrec.yaml).
+        The original paper's experiments use K=256; this project
+        uses K=32 to fit within memory budget. Do NOT confuse the
+        project default with the paper default.
     """
 
     def __init__(

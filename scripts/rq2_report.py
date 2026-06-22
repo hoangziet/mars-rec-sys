@@ -61,14 +61,6 @@ def parse_args() -> argparse.Namespace:
     return build_parser().parse_args()
 
 
-def _format_p_value(value: float | None) -> str:
-    if value is None:
-        return "-"
-    if value < 1e-6:
-        return f"{value:.2e}"
-    return f"{value:.6f}"
-
-
 def main() -> None:
     args = parse_args()
     configure_mlflow(mlflow_module=mlflow)
@@ -88,13 +80,18 @@ def main() -> None:
             continue
         if tags.get("benchmark_id") != args.benchmark_id:
             continue
-        alpha = float(tags.get("confidence_alpha", "nan"))
+        alpha_str = tags.get("confidence_alpha")
+        if alpha_str is None:
+            continue
+        try:
+            alpha = float(alpha_str)
+        except (ValueError, TypeError):
+            continue
         seed = int(run.data.params.get("seed", "0"))
         val_ndcg = run.data.metrics.get(PRIMARY_METRIC)
-        test_ndcg = run.data.metrics.get("test_NDCG_at_10")
         if val_ndcg is None:
             continue
-        selected.append({"alpha": alpha, "seed": seed, "val_ndcg_at_10": val_ndcg, "test_NDCG_at_10": test_ndcg})
+        selected.append({"alpha": alpha, "seed": seed, "val_ndcg_at_10": val_ndcg})
 
     if not selected:
         raise RuntimeError(f"No reportable runs found for benchmark {args.benchmark_id}")

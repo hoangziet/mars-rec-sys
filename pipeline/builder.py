@@ -306,10 +306,16 @@ def build_train_loader(
     data_dir: Path,
     stats: dict,
     train_kwargs: dict,
+    model_kwargs: dict | None = None,
 ):
     max_len    = train_kwargs.get("max_len", 50)
     batch_size = train_kwargs.get("batch_size", 256)
-    num_neg    = train_kwargs.get("num_neg", 1)
+    # Prefer model_kwargs.num_neg (single source of truth for gBCE-style
+    # models like gSASRec), fall back to train_kwargs for plain models.
+    if model_kwargs is not None and "num_neg" in model_kwargs:
+        num_neg = model_kwargs["num_neg"]
+    else:
+        num_neg = train_kwargs.get("num_neg", 1)
 
     if model_name in ("sasrec", "gsasrec", "gru4rec", "bert4rec"):
         extra = {}

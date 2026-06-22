@@ -27,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from pipeline.builder import build_criterion_fn, build_eval_fn, build_model, build_train_loader
 from pipeline.loaders import get_eval_loader, get_val_loss_loader, load_stats
 from pipeline.optim import build_optimizer, build_scheduler
+from pipeline.training_grid import enforce_final_grid
 from training.configs import build_model_config
 from training.mlflow_contract import build_run_name, build_training_tags
 from training.mlflow_utils import collect_common_run_metadata, configure_mlflow, get_git_commit
@@ -64,21 +65,20 @@ def _run_single(args, alpha: float, seed: int) -> dict:
 
     base_cfg = build_model_config("gsasrec")
     model_kwargs = dict(base_cfg["model_kwargs"])
-    train_kwargs = dict(base_cfg["train_kwargs"])
+    train_kwargs = enforce_final_grid(base_cfg["train_kwargs"])
     train_kwargs["confidence_alpha"] = alpha
-    train_kwargs["batch_size"] = 128
 
     max_len = train_kwargs.get("max_len", 50)
     batch_size = train_kwargs.get("batch_size", 256)
 
     model = build_model("gsasrec", stats["n_items"], stats["n_users"], model_kwargs, max_len).to(device)
-    train_loader = build_train_loader("gsasrec", data_dir, stats, train_kwargs)
+    train_loader = build_train_loader("gsasrec", data_dir, stats, train_kwargs, model_kwargs=model_kwargs)
     val_loader = get_eval_loader(data_dir / "splits" / "val_sequences.csv", stats, batch_size=batch_size, max_len=max_len)
     optimizer = build_optimizer("gsasrec", model, train_kwargs)
     scheduler = build_scheduler(optimizer, train_kwargs, len(train_loader))
     criterion_fn = build_criterion_fn("gsasrec", train_kwargs)
     eval_fn = build_eval_fn("gsasrec")
-    val_loss_loader = get_val_loss_loader("gsasrec", data_dir / "splits" / "val_sequences.csv", stats, batch_size=batch_size, max_len=max_len, num_neg=train_kwargs.get("num_neg", 1), seed=seed)
+    val_loss_loader = get_val_loss_loader("gsasrec", data_dir / "splits" / "val_sequences.csv", stats, batch_size=batch_size, max_len=max_len, num_neg=model_kwargs.get("num_neg", train_kwargs.get("num_neg", 1)), seed=seed)
 
     variant = f"alpha-{alpha}"
     run_name = build_run_name("gsasrec", seed, variant=variant, alpha=alpha)

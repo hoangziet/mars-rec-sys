@@ -549,10 +549,6 @@ def serialize_sequence(values: list[int] | list[float] | list[bool]) -> str:
     return " ".join(str(v) for v in values)
 
 
-def serialize_legacy_sequence(values: list[int] | list[float] | list[bool]) -> str:
-    return str(list(values))
-
-
 def save_processed_outputs(
     *,
     output_dir: Path,
@@ -566,6 +562,15 @@ def save_processed_outputs(
     dataset_stats: dict,
     preprocessing_report: dict,
 ) -> None:
+    """Write canonical processed-data layout.
+
+    Layout:
+        <output_dir>/interactions/interactions.csv
+        <output_dir>/splits/{train,val,test}_sequences.csv
+        <output_dir>/item_features/item_metadata.csv
+        <output_dir>/mappings/{user,item}_id_map.csv
+        <output_dir>/reports/{dataset_stats,preprocessing_report}.json
+    """
     interactions_dir = output_dir / "interactions"
     splits_dir = output_dir / "splits"
     item_features_dir = output_dir / "item_features"
@@ -592,23 +597,9 @@ def save_processed_outputs(
                 )
         return result
 
-    def serialize_legacy_split_frame(df: pd.DataFrame) -> pd.DataFrame:
-        result = df.copy()
-        for column in ("item_sequence", "engagement_sequence", "watch_signal_sequence"):
-            if column in result.columns:
-                result[column] = result[column].apply(
-                    lambda values: serialize_legacy_sequence(values)
-                    if isinstance(values, list)
-                    else values
-                )
-        return result
-
     serialized_train = serialize_split_frame(train_df)
     serialized_val = serialize_split_frame(val_df)
     serialized_test = serialize_split_frame(test_df)
-    legacy_train = serialize_legacy_split_frame(train_df)
-    legacy_val = serialize_legacy_split_frame(val_df)
-    legacy_test = serialize_legacy_split_frame(test_df)
 
     interactions.to_csv(interactions_dir / "interactions.csv", index=False)
     serialized_train.to_csv(
@@ -631,19 +622,6 @@ def save_processed_outputs(
         json.dump(dataset_stats, f, indent=2)
     with open(reports_dir / "preprocessing_report.json", "w") as f:
         json.dump(preprocessing_report, f, indent=2)
-
-    # Transitional compatibility outputs for existing downstream readers.
-    interactions.to_csv(output_dir / "interactions.csv", index=False)
-    legacy_train.to_csv(output_dir / "train.csv", index=False)
-    legacy_val.rename(
-        columns={"item_sequence": "train_seq", "target_item": "target"}
-    )[["user_idx", "train_seq", "target"]].to_csv(output_dir / "val.csv", index=False)
-    legacy_test.rename(
-        columns={"item_sequence": "train_seq", "target_item": "target"}
-    )[["user_idx", "train_seq", "target"]].to_csv(output_dir / "test.csv", index=False)
-    item_metadata.to_csv(output_dir / "item_meta.csv", index=False)
-    with open(output_dir / "dataset_stats.json", "w") as f:
-        json.dump(dataset_stats, f, indent=2)
 
 
 def build_dataset_stats(

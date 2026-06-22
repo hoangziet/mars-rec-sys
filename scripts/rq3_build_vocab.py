@@ -1,11 +1,10 @@
 """
 scripts/rq3_build_vocab.py
 ==========================
-Build metadata vocabulary and pre-built tensors for RQ3.
+Build metadata vocabulary for RQ3.
 
 Input:  data/processed/item_features/item_metadata.csv
 Output: data/processed/item_features/metadata_vocab.json
-        data/processed/item_features/metadata_tensors.pt
 
 Usage:
     uv run python scripts/rq3_build_vocab.py
@@ -20,19 +19,17 @@ import sys
 from pathlib import Path
 
 import pandas as pd
-import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from pipeline.loaders import parse_seq
-from pipeline.metadata_utils import MetadataVocab, build_metadata_tensors, load_item_metadata
+from pipeline.metadata_utils import MetadataVocab, load_item_metadata
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Build metadata vocabulary and tensors.")
+    parser = argparse.ArgumentParser(description="Build metadata vocabulary.")
     parser.add_argument("--input", default="data/processed/item_features/item_metadata.csv")
     parser.add_argument("--vocab-output", default="data/processed/item_features/metadata_vocab.json")
-    parser.add_argument("--tensors-output", default="data/processed/item_features/metadata_tensors.pt")
     parser.add_argument("--n-items", type=int, default=None)
     parser.add_argument("--train-sequences", default="data/processed/splits/train_sequences.csv")
     return parser
@@ -55,7 +52,7 @@ def main() -> None:
     args = parse_args()
 
     if args.n_items is None:
-        stats_path = Path("data/processed/dataset_stats.json")
+        stats_path = Path("data/processed/reports/dataset_stats.json")
         if stats_path.exists():
             stats = json.loads(stats_path.read_text())
             n_items = stats["n_items"]
@@ -82,21 +79,12 @@ def main() -> None:
     print(f"Building vocabulary (fit on {fit_label})...")
     vocab = MetadataVocab.build(df, train_item_idx=train_items)
 
-    print("Building tensors...")
-    tensors = build_metadata_tensors(vocab, df, n_items)
-
     vocab_path = Path(args.vocab_output)
     vocab_path.parent.mkdir(parents=True, exist_ok=True)
     vocab.save(vocab_path, train_item_sha256=train_item_sha256)
     print(f"Saved vocab: {vocab_path}")
-
-    tensors_path = Path(args.tensors_output)
-    tensors_path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(tensors, tensors_path)
-    print(f"Saved tensors: {tensors_path}")
-
-    for field, tensor in tensors.items():
-        print(f"  {field}: shape={tensor.shape}, dtype={tensor.dtype}")
+    print(f"  Categorical: {len(vocab.categorical)}")
+    print(f"  Multilabel: {len(vocab.multilabel)}")
 
 
 if __name__ == "__main__":
