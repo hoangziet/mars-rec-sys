@@ -50,14 +50,15 @@ def _derive_subgroups(data_dir: Path) -> dict:
     train_df = pd.read_csv(data_dir / "splits" / "train_sequences.csv")
 
     has_watch = {}
-    if "has_watch_signal" in train_df.columns:
+    if "watch_signal_sequence" in train_df.columns:
         for _, row in train_df.iterrows():
-            has_watch[int(row["user_idx"])] = bool(row["has_watch_signal"])
+            uid = int(row["user_idx"])
+            seq = parse_seq(row["watch_signal_sequence"])
+            has_watch[uid] = any(v == 1 for v in seq) if seq else False
     else:
         for _, row in train_df.iterrows():
             uid = int(row["user_idx"])
-            seq = parse_seq(row.get("engagement_sequence", ""))
-            has_watch[uid] = any(e > 0 for e in seq) if seq else False
+            has_watch[uid] = False
 
     seq_lengths = dict(zip(train_df["user_idx"], train_df["sequence_length"]))
     median_len = int(train_df["sequence_length"].median())
