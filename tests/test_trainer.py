@@ -7,7 +7,7 @@ import torch.nn as nn
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from training.trainer import Trainer
+from training.trainer import NoValidCheckpointError, Trainer
 
 
 class _NaNModel(nn.Module):
@@ -43,10 +43,10 @@ def _make_loader(n=2, input_dim=4):
 
 
 def test_trainer_raises_when_no_valid_checkpoint(tmp_path):
-    """When all training is non-finite, trainer must raise RuntimeError.
+    """When all training is non-finite, trainer must raise NoValidCheckpointError.
 
-    The caller (rq4_ablation etc.) must catch this and skip per-user
-    export / downstream reporting for that seed.
+    The caller (rq4_ablation etc.) must catch this specifically and skip
+    per-user export / downstream reporting for that seed.
     """
     model = _NaNModel()
     trainer = Trainer("nan_test", "cpu", run_dir=tmp_path, use_mlflow=False)
@@ -58,7 +58,7 @@ def test_trainer_raises_when_no_valid_checkpoint(tmp_path):
         return {"NDCG@10": float("nan"), "Recall@10": float("nan")}
 
     loader = _make_loader()
-    with pytest.raises(RuntimeError, match="No valid checkpoint"):
+    with pytest.raises(NoValidCheckpointError, match="No valid checkpoint"):
         trainer.train(
             model=model, train_loader=loader, val_loader=loader,
             test_loader=loader,

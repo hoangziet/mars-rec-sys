@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import json
 import random
+import subprocess
 import sys
 from pathlib import Path
 
@@ -30,9 +31,60 @@ from pipeline.optim import build_optimizer, build_scheduler
 from pipeline.training_grid import enforce_final_grid
 from training.configs import build_model_config
 from training.mlflow_contract import build_run_name, build_training_tags
-from training.mlflow_utils import collect_common_run_metadata, configure_mlflow
-from training.trainer import Trainer
+from training.mlflow_utils import collect_common_run_metadata, configure_mlflow, get_git_commit
+from training.trainer import NoValidCheckpointError, Trainer
 from scripts.rq4_init_protocol import verify_protocol_hashes
+
+
+def _enforce_git_commit_match(protocol: dict, allow_mismatch: bool) -> None:
+    """Fail unless HEAD matches the protocol's git_commit and the tree is clean.
+
+    Content hashes (data, config, text) protect against drifted files, but
+    they don't cover model code, training logic, or evaluation code. Git is
+    the only source of truth for that. Final experiments require an exact
+    commit match and a clean working tree.
+
+    Pass ``--allow-git-mismatch`` to override (e.g. for a cherry-picked
+    doc-only commit).
+    """
+    expected_commit = protocol.get("git_commit")
+    if not expected_commit or expected_commit == "unknown":
+        if not allow_mismatch:
+            raise RuntimeError(
+                "Protocol manifest has no git_commit — re-init with a real commit, "
+                "or pass --allow-git-mismatch."
+            )
+        return
+
+    actual_commit = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], text=True
+    ).strip()
+
+    dirty = subprocess.check_output(
+        ["git", "status", "--porcelain"], text=True
+    ).strip()
+
+    mismatches = []
+    if actual_commit != expected_commit:
+        mismatches.append(
+            f"git_commit mismatch: protocol has {expected_commit[:12]}, "
+            f"HEAD is {actual_commit[:12]}"
+        )
+    if dirty:
+        mismatches.append(f"working tree is dirty ({len(dirty.splitlines())} files)")
+
+    if mismatches and not allow_mismatch:
+        raise RuntimeError(
+            "Git provenance check failed — the working directory differs from "
+            "the frozen protocol. Use --allow-git-mismatch if you are certain "
+            "the changes (e.g. docs-only) do not affect training.\n"
+            + "\n".join(f"  - {m}" for m in mismatches)
+        )
+
+    if mismatches and allow_mismatch:
+        print("WARNING: git mismatch allowed via --allow-git-mismatch")
+        for m in mismatches:
+            print(f"  - {m}")
 
 EXPERIMENT_NAME = "mars_final_ablation"
 
@@ -49,6 +101,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--protocol", required=True, help="Path to rq4_protocol_manifest.json")
     parser.add_argument("--data-dir", default="data/processed")
     parser.add_argument("--output-dir", default="experiments")
+    parser.add_argument("--allow-git-mismatch", action="store_true",
+                        help="Skip the git_commit and clean-tree checks (e.g. cherry-picked doc-only commit)")
     return parser
 
 
@@ -134,11 +188,17 @@ def _run_single(args, variant: str, seed: int, variant_cfg: dict, benchmark_id: 
 
     try:
         result = trainer.train(model=model, train_loader=train_loader, val_loader=val_loader, test_loader=test_loader, optimizer=optimizer, epochs=train_kwargs["epochs"], criterion_fn=criterion_fn, eval_fn=eval_fn, gradient_clip=train_kwargs.get("gradient_clip", 5.0), val_loss_loader=val_loss_loader, early_stop_patience=train_kwargs.get("early_stop_patience", 10), early_stop_min_delta=train_kwargs.get("early_stop_min_delta", 1e-4), scheduler=scheduler, mlflow_params=mlflow_cfg)
-    except RuntimeError:
+    except NoValidCheckpointError:
         # Training produced no valid checkpoint — MLflow already marked FAILED.
         # Do NOT export per-user results for this (variant, seed) pair.
         print(f"  {variant} seed={seed}: skipping per-user export (no valid checkpoint)")
         return None
+    except Exception:
+        # Any other error (OOM, shape mismatch, etc.) is a real bug —
+        # mark the MLflow run as FAILED and re-raise.
+        if trainer._use_mlflow and trainer._mlflow_run:
+            trainer._mlflow.end_run(status="FAILED")
+        raise
 
     run_id = trainer._mlflow_run.info.run_id if trainer._mlflow_run else None
     _export_per_user(model, test_loader, device, variant, seed, args.output_dir, benchmark_id, run_id)
@@ -193,6 +253,8 @@ def main() -> None:
         data_dir=Path(args.data_dir),
         configs_glob="configs/model/*.yaml",
     )
+
+    _enforce_git_commit_match(protocol, allow_mismatch=args.allow_git_mismatch)
 
     total = len(variants_list) * len(seeds)
     print(f"RQ4 ablation: {len(variants_list)} variants x {len(seeds)} seeds = {total} runs")
