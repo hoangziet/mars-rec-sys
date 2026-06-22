@@ -31,6 +31,22 @@ EXPERIMENT_NAME = "mars_metadata_tuning"
 PRIMARY_METRIC = "best_val_ndcg_at_10"
 VARIANT_ORDER = {"M0": 0, "M1": 1, "M2": 2, "M3": 3}
 
+EXPECTED_VARIANTS = ["M0", "M1", "M2", "M3"]
+EXPECTED_SEEDS = [42, 123, 2024]
+
+
+def _validate_rq3_grid(selected: list[dict]) -> None:
+    actual_variants = sorted({str(r["variant"]) for r in selected})
+    if actual_variants != EXPECTED_VARIANTS:
+        raise RuntimeError(f"Expected variants {EXPECTED_VARIANTS}, got {actual_variants}")
+
+    actual_pairs = {(str(r["variant"]), int(r["seed"])) for r in selected}
+    expected_pairs = {(variant, seed) for variant in EXPECTED_VARIANTS for seed in EXPECTED_SEEDS}
+    if actual_pairs != expected_pairs:
+        missing = sorted(expected_pairs - actual_pairs)
+        extra = sorted(actual_pairs - expected_pairs)
+        raise RuntimeError(f"RQ3 grid mismatch. Missing={missing}, Extra={extra}")
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="RQ3: report metadata tuning results.")
@@ -72,6 +88,7 @@ def main() -> None:
 
     if not selected:
         raise RuntimeError(f"No reportable runs found for benchmark {args.benchmark_id}")
+    _validate_rq3_grid(selected)
 
     # Validate seed consistency
     by_variant_pair: dict[str, set[int]] = {}

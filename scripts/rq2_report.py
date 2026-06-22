@@ -33,6 +33,22 @@ from training.mlflow_utils import configure_mlflow
 EXPERIMENT_NAME = "mars_confidence_tuning"
 PRIMARY_METRIC = "best_val_ndcg_at_10"
 
+EXPECTED_ALPHAS = [0.0, 0.25, 0.5, 1.0, 2.0]
+EXPECTED_SEEDS = [42, 123, 2024]
+
+
+def _validate_rq2_grid(selected: list[dict]) -> None:
+    actual_alphas = sorted({float(r["alpha"]) for r in selected})
+    if actual_alphas != EXPECTED_ALPHAS:
+        raise RuntimeError(f"Expected alphas {EXPECTED_ALPHAS}, got {actual_alphas}")
+
+    actual_pairs = {(float(r["alpha"]), int(r["seed"])) for r in selected}
+    expected_pairs = {(alpha, seed) for alpha in EXPECTED_ALPHAS for seed in EXPECTED_SEEDS}
+    if actual_pairs != expected_pairs:
+        missing = sorted(expected_pairs - actual_pairs)
+        extra = sorted(actual_pairs - expected_pairs)
+        raise RuntimeError(f"RQ2 grid mismatch. Missing={missing}, Extra={extra}")
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="RQ2: report alpha tuning results.")
@@ -82,6 +98,7 @@ def main() -> None:
 
     if not selected:
         raise RuntimeError(f"No reportable runs found for benchmark {args.benchmark_id}")
+    _validate_rq2_grid(selected)
 
     # Validate seed consistency
     by_alpha_pair: dict[float, set[int]] = {}
