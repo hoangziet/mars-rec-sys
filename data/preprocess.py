@@ -127,26 +127,37 @@ def attach_engagement_score(
 def build_user_sequences(interactions: pd.DataFrame) -> pd.DataFrame:
     if interactions.empty:
         return pd.DataFrame(
-            columns=["user_idx", "user_id", "item_seq_idx", "engagement_seq", "has_watch_signal"]
+            columns=[
+                "user_idx",
+                "user_id",
+                "item_seq_idx",
+                "engagement_seq",
+                "watch_signal_seq",
+            ]
         )
 
     rows = []
     ordered = interactions.sort_values(["user_idx", "created_at", "item_idx"], kind="stable")
     for user_idx, group in ordered.groupby("user_idx", sort=True):
-        has_watch = bool(group["has_watch_signal"].any()) if "has_watch_signal" in group.columns else False
         rows.append(
             {
                 "user_idx": int(user_idx),
                 "user_id": group["user_id"].iloc[0],
                 "item_seq_idx": group["item_idx"].tolist(),
                 "engagement_seq": group["engagement_score"].astype(float).tolist(),
-                "has_watch_signal": has_watch,
+                "watch_signal_seq": group["has_watch_signal"].astype(bool).tolist(),
             }
         )
 
     return pd.DataFrame(
         rows,
-        columns=["user_idx", "user_id", "item_seq_idx", "engagement_seq", "has_watch_signal"],
+        columns=[
+            "user_idx",
+            "user_id",
+            "item_seq_idx",
+            "engagement_seq",
+            "watch_signal_seq",
+        ],
     )
 
 
@@ -164,6 +175,12 @@ def _get_engagement_sequence_length(row: pd.Series) -> int | None:
     return None
 
 
+def _get_watch_signal_sequence_length(row: pd.Series) -> int | None:
+    if isinstance(row.get("watch_signal_seq"), list):
+        return len(row["watch_signal_seq"])
+    return None
+
+
 def _validate_row_sequence_alignment(row: pd.Series) -> None:
     seq_len = _get_sequence_length(row)
     engagement_len = _get_engagement_sequence_length(row)
@@ -172,6 +189,13 @@ def _validate_row_sequence_alignment(row: pd.Series) -> None:
         raise ValueError(
             "engagement sequence length mismatch "
             f"for user_id={user_id}: items={seq_len}, engagement={engagement_len}"
+        )
+    watch_signal_len = _get_watch_signal_sequence_length(row)
+    if watch_signal_len is not None and seq_len != watch_signal_len:
+        user_id = row.get("user_id", "<unknown>")
+        raise ValueError(
+            "watch signal sequence length mismatch "
+            f"for user_id={user_id}: items={seq_len}, watch_signal={watch_signal_len}"
         )
 
 
@@ -238,12 +262,14 @@ def split_leave_one_out(
         "user_idx",
         "item_sequence",
         "engagement_sequence",
+        "watch_signal_sequence",
         "sequence_length",
     ]
     eval_columns = [
         "user_idx",
         "item_sequence",
         "engagement_sequence",
+        "watch_signal_sequence",
         "sequence_length",
         "target_item",
         "target_engagement",
@@ -261,6 +287,7 @@ def split_leave_one_out(
         _validate_row_sequence_alignment(row)
         seq = row["item_seq_idx"]
         engagement = row["engagement_seq"]
+        watch_signal = row["watch_signal_seq"]
         n = len(seq)
 
         if n < MIN_BENCHMARK_SAFE_SEQUENCE_LEN:
@@ -273,10 +300,13 @@ def split_leave_one_out(
 
         train_history = seq[:-2]
         train_engagement = engagement[:-2]
+        train_watch_signal = watch_signal[:-2]
         val_target = seq[-2]
         val_target_engagement = engagement[-2]
+        val_watch_signal = watch_signal[:-2]
         test_history = seq[:-1]
         test_engagement = engagement[:-1]
+        test_watch_signal = watch_signal[:-1]
         test_target = seq[-1]
         test_target_engagement = engagement[-1]
 
@@ -285,6 +315,7 @@ def split_leave_one_out(
                 "user_idx": row["user_idx"],
                 "item_sequence": train_history,
                 "engagement_sequence": train_engagement,
+                "watch_signal_sequence": train_watch_signal,
                 "sequence_length": len(train_history),
             }
         )
@@ -293,6 +324,7 @@ def split_leave_one_out(
                 "user_idx": row["user_idx"],
                 "item_sequence": train_history,
                 "engagement_sequence": train_engagement,
+                "watch_signal_sequence": val_watch_signal,
                 "sequence_length": len(train_history),
                 "target_item": val_target,
                 "target_engagement": val_target_engagement,
@@ -303,6 +335,7 @@ def split_leave_one_out(
                 "user_idx": row["user_idx"],
                 "item_sequence": test_history,
                 "engagement_sequence": test_engagement,
+                "watch_signal_sequence": test_watch_signal,
                 "sequence_length": len(test_history),
                 "target_item": test_target,
                 "target_engagement": test_target_engagement,
@@ -316,11 +349,13 @@ def split_leave_one_out(
     )
 
 
-def serialize_sequence(values: list[int] | list[float]) -> str:
+def serialize_sequence(values: list[int] | list[float] | list[bool]) -> str:
+    if all(isinstance(v, bool) for v in values):
+        return " ".join("1" if v else "0" for v in values)
     return " ".join(str(v) for v in values)
 
 
-def serialize_legacy_sequence(values: list[int] | list[float]) -> str:
+def serialize_legacy_sequence(values: list[int] | list[float] | list[bool]) -> str:
     return str(list(values))
 
 
@@ -354,7 +389,7 @@ def save_processed_outputs(
 
     def serialize_split_frame(df: pd.DataFrame) -> pd.DataFrame:
         result = df.copy()
-        for column in ("item_sequence", "engagement_sequence"):
+        for column in ("item_sequence", "engagement_sequence", "watch_signal_sequence"):
             if column in result.columns:
                 result[column] = result[column].apply(
                     lambda values: serialize_sequence(values)
@@ -365,7 +400,7 @@ def save_processed_outputs(
 
     def serialize_legacy_split_frame(df: pd.DataFrame) -> pd.DataFrame:
         result = df.copy()
-        for column in ("item_sequence", "engagement_sequence"):
+        for column in ("item_sequence", "engagement_sequence", "watch_signal_sequence"):
             if column in result.columns:
                 result[column] = result[column].apply(
                     lambda values: serialize_legacy_sequence(values)
@@ -556,7 +591,7 @@ def main() -> None:
 
     implicit_sorted = implicit.sort_values("created_at", kind="stable")
     implicit_dedup = implicit_sorted.drop_duplicates(
-        subset=["user_id", "item_id"],
+        subset=["user_id", "item_id", "created_at"],
         keep="first",
     ).copy()
     repeat_events_removed = len(implicit) - len(implicit_dedup)
