@@ -81,8 +81,9 @@ def _run_single(args, alpha: float, seed: int) -> dict:
 
     variant = f"alpha-{alpha}"
     run_name = build_run_name("gsasrec", seed, variant=variant, alpha=alpha)
+    run_output_dir = Path(args.output_dir) / "rq2" / args.benchmark_id / variant / f"seed_{seed}"
 
-    trainer = Trainer("gsasrec", device, args.output_dir, use_mlflow=True, mlflow_config={
+    trainer = Trainer("gsasrec", device, str(run_output_dir), use_mlflow=True, mlflow_config={
         "experiment_name": EXPERIMENT_NAME, "run_name": run_name, "log_artifacts": True,
         "phase": "tuning", "variant": variant, "git_commit": get_git_commit(), "reportable": True,
     })
