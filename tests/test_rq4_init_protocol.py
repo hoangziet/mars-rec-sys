@@ -1,0 +1,158 @@
+import json
+import sys
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from scripts import rq4_init_protocol
+
+
+def _write_winners(tmp_path, alpha=0.5, variant="M3", rq2_bid="rq2-x", rq3_bid="rq3-x"):
+    rq2 = tmp_path / "rq2_best_alpha.json"
+    rq2.write_text(json.dumps({"best_alpha": alpha, "benchmark_id": rq2_bid}))
+    rq3 = tmp_path / "rq3_best_variant.json"
+    rq3.write_text(json.dumps({"best_variant": variant, "benchmark_id": rq3_bid}))
+    return rq2, rq3
+
+
+def _run_with_argv(argv):
+    saved = sys.argv
+    sys.argv = argv
+    try:
+        rq4_init_protocol.main()
+    finally:
+        sys.argv = saved
+
+
+def test_init_reads_winners_from_json(tmp_path):
+    rq2, rq3 = _write_winners(tmp_path, alpha=0.5, variant="M3")
+    output = tmp_path / "out"
+    _run_with_argv([
+        "rq4_init_protocol.py",
+        "--benchmark-id", "test-rq4",
+        "--rq2-winners", str(rq2),
+        "--rq3-winners", str(rq3),
+        "--output-dir", str(output),
+        "--seeds", "42", "123",
+    ])
+
+    manifest = json.loads((output / "rq4_protocol_manifest.json").read_text())
+    assert manifest["best_alpha"] == 0.5
+    assert manifest["best_metadata_variant"] == "M3"
+    assert manifest["rq2_benchmark_id"] == "rq2-x"
+    assert manifest["rq3_benchmark_id"] == "rq3-x"
+    assert manifest["neural_seeds"] == [42, 123]
+
+
+def test_init_writes_sha256_hashes(tmp_path):
+    rq2, rq3 = _write_winners(tmp_path)
+    output = tmp_path / "out"
+    _run_with_argv([
+        "rq4_init_protocol.py",
+        "--benchmark-id", "test-rq4",
+        "--rq2-winners", str(rq2),
+        "--rq3-winners", str(rq3),
+        "--output-dir", str(output),
+        "--data-dir", str(tmp_path),
+        "--seeds", "42",
+    ])
+
+    manifest = json.loads((output / "rq4_protocol_manifest.json").read_text())
+    assert "git_commit" in manifest
+    assert "metadata_variants" in manifest
+    assert "M0" in manifest["metadata_variants"]
+    assert manifest["metadata_variants"]["M0"]["use_structured"] is False
+    assert manifest["metadata_variants"]["M3"]["use_structured"] is True
+    assert manifest["metadata_variants"]["M3"]["use_text"] is True
+    # protocol_sha256 is the self-hash
+    assert "protocol_sha256" in manifest
+    assert isinstance(manifest["protocol_sha256"], str)
+    assert len(manifest["protocol_sha256"]) == 64  # sha256 hex length
+
+
+def test_init_writes_data_manifest_hash_when_present(tmp_path):
+    rq2, rq3 = _write_winners(tmp_path)
+    output = tmp_path / "out"
+    data_dir = tmp_path / "data"
+    reports_dir = data_dir / "reports"
+    reports_dir.mkdir(parents=True)
+    (reports_dir / "preprocessing_report.json").write_text("{}")
+    _run_with_argv([
+        "rq4_init_protocol.py",
+        "--benchmark-id", "test-rq4",
+        "--rq2-winners", str(rq2),
+        "--rq3-winners", str(rq3),
+        "--output-dir", str(output),
+        "--data-dir", str(data_dir),
+    ])
+
+    manifest = json.loads((output / "rq4_protocol_manifest.json").read_text())
+    assert manifest["data_manifest_sha256"] is not None
+    assert len(manifest["data_manifest_sha256"]) == 64
+
+
+def test_init_rejects_rq2_winner_missing_key(tmp_path):
+    rq2 = tmp_path / "rq2_best_alpha.json"
+    rq2.write_text(json.dumps({"benchmark_id": "rq2-x"}))  # missing best_alpha
+    rq3 = tmp_path / "rq3_best_variant.json"
+    rq3.write_text(json.dumps({"best_variant": "M3", "benchmark_id": "rq3-x"}))
+    output = tmp_path / "out"
+
+    saved = sys.argv
+    sys.argv = [
+        "rq4_init_protocol.py",
+        "--benchmark-id", "test-rq4",
+        "--rq2-winners", str(rq2),
+        "--rq3-winners", str(rq3),
+        "--output-dir", str(output),
+    ]
+    try:
+        with pytest.raises(ValueError, match="best_alpha"):
+            rq4_init_protocol.main()
+    finally:
+        sys.argv = saved
+
+
+def test_init_rejects_rq3_winner_missing_key(tmp_path):
+    rq2 = tmp_path / "rq2_best_alpha.json"
+    rq2.write_text(json.dumps({"best_alpha": 0.5, "benchmark_id": "rq2-x"}))
+    rq3 = tmp_path / "rq3_best_variant.json"
+    rq3.write_text(json.dumps({"benchmark_id": "rq3-x"}))  # missing best_variant
+    output = tmp_path / "out"
+
+    saved = sys.argv
+    sys.argv = [
+        "rq4_init_protocol.py",
+        "--benchmark-id", "test-rq4",
+        "--rq2-winners", str(rq2),
+        "--rq3-winners", str(rq3),
+        "--output-dir", str(output),
+    ]
+    try:
+        with pytest.raises(ValueError, match="best_variant"):
+            rq4_init_protocol.main()
+    finally:
+        sys.argv = saved
+
+
+def test_init_rejects_existing_manifest(tmp_path):
+    rq2, rq3 = _write_winners(tmp_path)
+    output = tmp_path / "out"
+    output.mkdir(parents=True, exist_ok=True)
+    (output / "rq4_protocol_manifest.json").write_text("{}")  # pre-existing
+
+    saved = sys.argv
+    sys.argv = [
+        "rq4_init_protocol.py",
+        "--benchmark-id", "test-rq4",
+        "--rq2-winners", str(rq2),
+        "--rq3-winners", str(rq3),
+        "--output-dir", str(output),
+    ]
+    try:
+        with pytest.raises(RuntimeError, match="already exists"):
+            rq4_init_protocol.main()
+    finally:
+        sys.argv = saved
