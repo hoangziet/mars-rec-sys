@@ -73,7 +73,7 @@ def _load_per_user(per_user_dir: Path, variants: list[str], seeds: list[int]) ->
 
 
 def _join_by_user(per_user: pd.DataFrame, comp_variant: str, base_variant: str,
-                  metric: str) -> pd.DataFrame:
+                  metric: str, expected_seed_count: int) -> pd.DataFrame:
     """Join two variants by (seed, user_idx, target_item), then average delta per user across seeds.
 
     Returns one row per user with averaged delta.
@@ -106,6 +106,13 @@ def _join_by_user(per_user: pd.DataFrame, comp_variant: str, base_variant: str,
         base_metric=("base_metric", "mean"),
         n_seeds=("seed", "nunique"),
     ).reset_index()
+
+    if not (user_avg["n_seeds"] == expected_seed_count).all():
+        bad = user_avg[user_avg["n_seeds"] != expected_seed_count][["user_idx", "target_item", "n_seeds"]]
+        raise RuntimeError(
+            "expected all users to have complete seed coverage; got "
+            f"{bad.to_dict(orient='records')[:10]}"
+        )
 
     return user_avg
 
@@ -181,7 +188,7 @@ def _format_p_value(value: float | None) -> str:
 def _run_comparison(per_user: pd.DataFrame, comp_variant: str, base_variant: str,
                     expected_seeds: set[int], rng: np.random.Generator) -> dict:
     """Run full comparison between two variants."""
-    merged = _join_by_user(per_user, comp_variant, base_variant, PRIMARY_METRIC)
+    merged = _join_by_user(per_user, comp_variant, base_variant, PRIMARY_METRIC, len(expected_seeds))
     deltas = merged["delta"].values
     n_users = len(deltas)
 
