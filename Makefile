@@ -70,7 +70,7 @@ rq4-init:
 	uv run python scripts/rq4_init_protocol.py --benchmark-id $(RQ4_BENCHMARK_ID) --best-alpha $(RQ2_BEST_ALPHA) --best-variant $(RQ3_BEST_VARIANT) --seeds $(RQ4_SEEDS) --rq2-benchmark-id $(RQ2_BENCHMARK_ID) --rq3-benchmark-id $(RQ3_BENCHMARK_ID) --preprocessing-version $(PREPROCESSING_VERSION) --output-dir $(RQ4_COMPARISON_DIR)
 
 rq4-ablation:
-	uv run python scripts/rq4_ablation.py --best-alpha $(RQ2_BEST_ALPHA) --best-variant $(RQ3_BEST_VARIANT) --seeds $(RQ4_SEEDS) --benchmark-id $(RQ4_BENCHMARK_ID)
+	uv run python scripts/rq4_ablation.py --protocol $(RQ4_MANIFEST)
 
 rq4-collect:
 	uv run python scripts/rq4_collect.py --benchmark-id $(RQ4_BENCHMARK_ID) --protocol $(RQ4_MANIFEST) --output-dir $(RQ4_COMPARISON_DIR)
