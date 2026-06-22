@@ -63,12 +63,16 @@ def main() -> None:
         f.write(f"Benchmark: {args.benchmark_id}\n\n")
 
         f.write("## Primary Findings\n\n")
+        f.write("Primary findings are only considered improvements when mean_difference > 0, the bootstrap lower bound is > 0, Holm-adjusted p < 0.05, and the practical-significance threshold is met.\n\n")
         for r in primary:
             sig = "statistically significant" if r.get("significant") == "True" else "not significant"
+            pract_raw = r.get("practically_significant", "False")
+            pract = (pract_raw == "True" or pract_raw is True)
             f.write(f"- **{r['comparison']}**: {sig} (Holm p = {r.get('holm_adjusted_p', '-')})\n")
             f.write(f"  - Mean difference: {float(r['mean_difference']):.6f}\n")
             f.write(f"  - 95% bootstrap CI: [{r['bootstrap_ci_low']}, {r['bootstrap_ci_high']}]\n")
-            f.write(f"  - Cohen's d: {float(r.get('cohens_d', 0)):.3f}\n\n")
+            f.write(f"  - Cohen's d: {float(r.get('cohens_d', 0)):.3f}\n")
+            f.write(f"  - Practical significance threshold met: {pract}\n\n")
 
         f.write("## Secondary Findings (Descriptive)\n\n")
         for r in secondary:
