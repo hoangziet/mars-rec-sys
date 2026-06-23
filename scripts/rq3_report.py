@@ -8,6 +8,15 @@ Reads from MLflow experiment 'mars_metadata_tuning'.
 Selection: highest mean validation NDCG@10.
 Tie-break: prefer simpler config (M0 > M1 > M2 > M3).
 
+All selected runs are required to share the same:
+    - backbone (model)
+    - benchmark_id
+    - preprocessing_version
+    - data_source
+    - git_commit
+Missing or mismatched provenance fails the report — there is no silent
+fallback to "mars-preprocess-v1" or "data/processed".
+
 Usage:
     uv run python scripts/rq3_report.py --benchmark-id rq3-metadata-tune
 """
@@ -16,9 +25,7 @@ from __future__ import annotations
 
 import argparse
 import csv
-import hashlib
 import json
-import subprocess
 import sys
 from pathlib import Path
 
@@ -33,21 +40,86 @@ EXPERIMENT_NAME = "mars_metadata_tuning"
 PRIMARY_METRIC = "best_val_ndcg_at_10"
 VARIANT_ORDER = {"M0": 0, "M1": 1, "M2": 2, "M3": 3}
 
-EXPECTED_VARIANTS = ["M0", "M1", "M2", "M3"]
-EXPECTED_SEEDS = [42, 123, 2024]
-
+REQUIRED_PROVENANCE_FIELDS = (
+    "data_source",
+    "preprocessing_version",
+    "git_commit",
+    "benchmark_id",
+    "backbone",
+)
 
 def _validate_rq3_grid(selected: list[dict]) -> None:
-    actual_variants = sorted({str(r["variant"]) for r in selected})
-    if actual_variants != EXPECTED_VARIANTS:
-        raise RuntimeError(f"Expected variants {EXPECTED_VARIANTS}, got {actual_variants}")
-
+    """Validate that every (variant, seed) appears exactly once and seeds are
+    consistent across variants. The expected grid is derived from the runs,
+    not hardcoded — a partial variant sweep is valid if complete.
+    """
+    if not selected:
+        raise RuntimeError("No runs to validate")
     actual_pairs = {(str(r["variant"]), int(r["seed"])) for r in selected}
-    expected_pairs = {(variant, seed) for variant in EXPECTED_VARIANTS for seed in EXPECTED_SEEDS}
-    if actual_pairs != expected_pairs:
-        missing = sorted(expected_pairs - actual_pairs)
-        extra = sorted(actual_pairs - expected_pairs)
-        raise RuntimeError(f"RQ3 grid mismatch. Missing={missing}, Extra={extra}")
+    if len(actual_pairs) != len(selected):
+        pair_counts: dict[tuple[str, int], int] = {}
+        for r in selected:
+            key = (str(r["variant"]), int(r["seed"]))
+            pair_counts[key] = pair_counts.get(key, 0) + 1
+        dupes = {k: v for k, v in pair_counts.items() if v > 1}
+        raise RuntimeError(f"Duplicate (variant, seed) runs: {dupes}")
+
+    by_variant: dict[str, set[int]] = {}
+    for r in selected:
+        by_variant.setdefault(str(r["variant"]), set()).add(int(r["seed"]))
+    seed_sets = list(by_variant.values())
+    if len(set(frozenset(s) for s in seed_sets)) > 1:
+        details = {v: sorted(s) for v, s in by_variant.items()}
+        raise RuntimeError(
+            f"All variants must have the same seed set. Got: {details}"
+        )
+
+
+def _parse_seed(run, run_id: str) -> int:
+    """Strict seed parsing — never silently coerce to 0."""
+    raw = run.data.params.get("seed")
+    if raw is None:
+        raise RuntimeError(
+            f"Run {run_id} ({run.info.run_name}) has no 'seed' MLflow param. "
+            "Every RQ3 run must log seed as an int param."
+        )
+    try:
+        return int(raw)
+    except (ValueError, TypeError) as exc:
+        raise RuntimeError(
+            f"Run {run_id} ({run.info.run_name}) has malformed seed={raw!r}; "
+            f"could not parse as int: {exc}. Fix the run or remove it from "
+            "the experiment before re-running rq3-report."
+        ) from exc
+
+
+def _validate_provenance(selected: list[dict]) -> dict:
+    """All selected runs must share the same provenance.
+
+    Required fields: backbone, benchmark_id, preprocessing_version,
+    data_source, git_commit. Missing any field on any run, or any
+    disagreement across runs, fails the report.
+    """
+    expected: dict[str, str] = {}
+    for r in selected:
+        for key in REQUIRED_PROVENANCE_FIELDS:
+            value = r.get("provenance", {}).get(key)
+            if value is None or value == "":
+                raise RuntimeError(
+                    f"{r['run_id']} ({r['run_name']}): missing provenance "
+                    f"field {key!r}. All RQ3 runs must carry: "
+                    f"{REQUIRED_PROVENANCE_FIELDS}. Refusing to write a "
+                    "winner artifact with silent defaults."
+                )
+            if key in expected and expected[key] != value:
+                raise RuntimeError(
+                    f"Provenance mismatch for {key!r}: "
+                    f"expected {expected[key]!r} (from first run), got {value!r} "
+                    f"on run {r['run_id']} ({r['run_name']}). All RQ3 runs "
+                    "must share the same provenance."
+                )
+            expected[key] = value
+    return expected
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -81,32 +153,37 @@ def main() -> None:
         if tags.get("benchmark_id") != args.benchmark_id:
             continue
         variant = tags.get("metadata_variant", "?")
-        seed = int(run.data.params.get("seed", "0"))
+        try:
+            seed = _parse_seed(run, run.info.run_id)
+        except RuntimeError:
+            raise
         val_ndcg = run.data.metrics.get(PRIMARY_METRIC)
         if val_ndcg is None:
             continue
-        selected.append({"variant": variant, "seed": seed, "val_ndcg_at_10": val_ndcg})
+        provenance = {
+            "backbone": tags.get("model"),
+            "benchmark_id": tags.get("benchmark_id"),
+            "preprocessing_version": tags.get("preprocessing_version"),
+            "data_source": tags.get("data_source"),
+            "git_commit": tags.get("git_commit"),
+        }
+        selected.append({
+            "variant": variant,
+            "seed": seed,
+            "val_ndcg_at_10": val_ndcg,
+            "provenance": provenance,
+            "run_id": run.info.run_id,
+            "run_name": run.info.run_name,
+        })
 
     if not selected:
         raise RuntimeError(f"No reportable runs found for benchmark {args.benchmark_id}")
     _validate_rq3_grid(selected)
-
-    # Validate seed consistency
-    by_variant_pair: dict[str, set[int]] = {}
-    pair_counts: dict[tuple[str, int], int] = {}
-    for r in selected:
-        by_variant_pair.setdefault(r["variant"], set()).add(r["seed"])
-        key = (r["variant"], r["seed"])
-        pair_counts[key] = pair_counts.get(key, 0) + 1
-
-    dupes = {k: v for k, v in pair_counts.items() if v > 1}
-    if dupes:
-        raise RuntimeError(f"Duplicate (variant, seed) runs: {dupes}")
-
-    seed_sets = list(by_variant_pair.values())
-    if len(set(frozenset(s) for s in seed_sets)) > 1:
-        details = {v: sorted(s) for v, s in by_variant_pair.items()}
-        raise RuntimeError(f"All variants must have the same seed set. Got: {details}")
+    provenance = _validate_provenance(selected)
+    if provenance["backbone"] != "gsasrec":
+        raise RuntimeError(
+            f"RQ3 is gSASRec-only, but selected runs report backbone={provenance['backbone']!r}"
+        )
 
     by_variant: dict[str, list[float]] = {}
     for r in selected:
@@ -139,28 +216,25 @@ def main() -> None:
         for row in summary_rows:
             f.write(f"| {row['rank']} | {row['variant']} | {row['n_seeds']} | {row['val_ndcg_at_10_mean']:.4f} ± {row['val_ndcg_at_10_std']:.4f} |\n")
 
+    observed_variants = sorted({str(r["variant"]) for r in selected})
+    observed_seeds = sorted({int(r["seed"]) for r in selected})
+
     with open(output_dir / "rq3_best_variant.json", "w") as f:
         winner = {
             "best_variant": best_variant,
             "benchmark_id": args.benchmark_id,
-            "candidate_grid": EXPECTED_VARIANTS,
-            "seeds": EXPECTED_SEEDS,
+            "backbone": "gsasrec",
+            "candidate_grid": observed_variants,
+            "seeds": observed_seeds,
             "selection_metric": PRIMARY_METRIC,
+            "preprocessing_version": provenance["preprocessing_version"],
+            "data_source": provenance["data_source"],
+            "git_commit": provenance["git_commit"],
         }
-        try:
-            winner["git_commit"] = subprocess.check_output(
-                ["git", "rev-parse", "HEAD"], text=True
-            ).strip()
-        except Exception:
-            winner["git_commit"] = "unknown"
-        ds_manifest = Path("data/processed/reports/dataset_manifest.json")
-        if ds_manifest.exists():
-            winner["dataset_manifest_sha256"] = hashlib.sha256(
-                ds_manifest.read_bytes()
-            ).hexdigest()
         json.dump(winner, f, indent=2)
 
     print(f"Best variant: {best_variant}")
+    print(f"Backbone: {provenance['backbone']}")
     print(f"Output: {output_dir}")
 
 
