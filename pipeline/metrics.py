@@ -75,6 +75,12 @@ def _ranks_from_logits(
     counted ahead of it. This avoids optimistic metrics for heuristic models
     (e.g. popularity, item-CF) where many items often share identical scores.
     """
+    if not torch.isfinite(logits).all():
+        raise FloatingPointError(
+            f"Non-finite logits during evaluation. "
+            f"NaN count: {torch.isnan(logits).sum().item()}, "
+            f"Inf count: {torch.isinf(logits).sum().item()}"
+        )
     logits = logits.masked_fill(history_mask, float("-inf"))
     target_scores = logits.gather(1, target.unsqueeze(1))   # (B, 1)
     ranks = (logits >= target_scores).sum(dim=1)            # (B,) 1-indexed
@@ -84,6 +90,42 @@ def _ranks_from_logits(
 # ---------------------------------------------------------------------------
 # Evaluate functions by model type
 # ---------------------------------------------------------------------------
+
+
+@torch.no_grad()
+def evaluate_sequential_detailed(
+    model,
+    eval_loader,
+    device,
+    k_list: tuple = (10, 20),
+) -> tuple[dict, list[dict]]:
+    """Full-sort evaluation with per-user detail export.
+
+    Returns (aggregate_metrics, per_user_rows).
+    Each per_user_row: {user_idx, target_item, rank, hit_at_10, ndcg_at_10, hit_at_20, ndcg_at_20}
+    """
+    model.eval()
+    all_ranks: list[int] = []
+    per_user: list[dict] = []
+
+    for batch in _progress(eval_loader, desc="eval detailed"):
+        input_seq    = batch["input_seq"].to(device)
+        history_mask = batch["history_mask"].to(device)
+        target       = batch["target"].to(device)
+        user_idx     = batch["user"]
+
+        logits = model(input_seq)
+        ranks = _ranks_from_logits(logits, history_mask, target)
+        all_ranks.extend(ranks)
+
+        for i, rank in enumerate(ranks):
+            row = {"user_idx": int(user_idx[i]), "target_item": int(target[i]), "rank": rank}
+            for k in k_list:
+                row[f"hit_at_{k}"] = 1.0 if rank <= k else 0.0
+                row[f"ndcg_at_{k}"] = 1.0 / np.log2(rank + 1) if rank <= k else 0.0
+            per_user.append(row)
+
+    return compute_metrics_from_ranks(all_ranks, k_list), per_user
 
 
 @torch.no_grad()

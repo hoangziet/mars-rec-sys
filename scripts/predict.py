@@ -8,8 +8,10 @@ Usage:
     uv run python scripts/predict.py bprmf  --user_id 42 --top_k 20
     uv run python scripts/predict.py sasrec --user_id 42 --show_titles
 
-The user's training history is read from data/processed/train.csv.
-Item titles (if available) are read from data/processed/item_meta.csv.
+The user's training history is read from
+    <data_dir>/splits/train_sequences.csv
+Item titles (if available) are read from
+    <data_dir>/item_features/item_metadata.csv.
 """
 
 import argparse

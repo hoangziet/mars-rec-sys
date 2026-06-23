@@ -133,7 +133,7 @@ def run_neural_model(
     batch_size = train_kwargs.get("batch_size", 256)
 
     model        = build_model(model_name, stats["n_items"], stats["n_users"], model_kwargs, max_len).to(device)
-    train_loader = build_train_loader(model_name, data_dir, stats, train_kwargs)
+    train_loader = build_train_loader(model_name, data_dir, stats, train_kwargs, model_kwargs=model_kwargs)
     val_loader   = get_eval_loader(data_dir / "splits" / "val_sequences.csv",  stats, batch_size=batch_size, max_len=max_len)
     test_loader  = get_eval_loader(data_dir / "splits" / "test_sequences.csv", stats, batch_size=batch_size, max_len=max_len)
 
@@ -145,7 +145,7 @@ def run_neural_model(
         stats,
         batch_size=batch_size,
         max_len=max_len,
-        num_neg=train_kwargs.get("num_neg", 1),
+        num_neg=model_kwargs.get("num_neg", train_kwargs.get("num_neg", 1)),
         seed=seed,
     )
 
@@ -242,7 +242,7 @@ def run_heuristic_model(
     if model_name == "popularity":
         from models.popularity import PopularityRecommender
         model = PopularityRecommender()
-        model.fit(data_dir / "interactions" / "interactions.csv")
+        model.fit(data_dir / "splits" / "train_sequences.csv")
         val_results  = evaluate_popularity(model.item_counts, val_loader)
         test_results = evaluate_popularity(model.item_counts, test_loader)
         print_results("Popularity", test_results, phase="Test")
@@ -297,7 +297,7 @@ def run_heuristic_model(
     if model_name == "itemcf":
         from models.itemcf import ItemCFRecommender
         model = ItemCFRecommender(top_k_sim=model_kwargs.get("top_k_sim", 20))
-        model.fit(data_dir / "interactions" / "interactions.csv", stats_path=data_dir / "reports" / "dataset_stats.json")
+        model.fit(data_dir / "splits" / "train_sequences.csv", stats_path=data_dir / "reports" / "dataset_stats.json")
         val_results  = evaluate_itemcf(model.sim_matrix, model.user_history, val_loader)
         test_results = evaluate_itemcf(model.sim_matrix, model.user_history, test_loader)
         print_results("Item-CF", test_results, phase="Test")
@@ -493,7 +493,7 @@ def main() -> None:
         json.dump(run_records, f, indent=2)
 
     print(f"\nBenchmark run records saved to: {comp_dir}/run_records.json")
-    print(f"Use scripts/report_rq1.py --benchmark-id {args.benchmark_id} to aggregate RQ1 results.")
+    print(f"Use scripts/rq1_report.py --benchmark-id {args.benchmark_id} to aggregate RQ1 results.")
 
 
 if __name__ == "__main__":

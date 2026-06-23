@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from training.mlflow_contract import HEURISTIC_MODELS
 from training.mlflow_utils import configure_mlflow
+from training.winner_artifact import write_winner_artifact
 
 
 def required_run_count_for_model(model_name: str, seed_count: int) -> int:
@@ -60,6 +61,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--benchmark-id", required=True)
     parser.add_argument("--output-dir", default=None)
     parser.add_argument("--manifest", default=None)
+    parser.add_argument("--winner-output", default=None,
+                        help="Where to write rq1_winner.json. Default: <output_dir>/rq1_winner.json")
     return parser
 
 
@@ -259,6 +262,65 @@ def main() -> None:
                 f"{format_metric_summary(row['test_ndcg_at_20'])} | "
                 f"{format_metric_summary(row['test_recall_at_20'])} |\n"
             )
+
+    # ------------------------------------------------------------------
+    # Winner artifact (machine-readable contract for RQ2/RQ3/RQ4)
+    # ------------------------------------------------------------------
+    winner_row = summary_rows[0]
+    winner_model = winner_row["model"]
+    seed_set = (
+        {int(manifest["heuristic_seed"])}
+        if winner_model in HEURISTIC_MODELS
+        else sorted({int(s) for s in manifest["neural_seeds"]})
+    )
+    data_source = None
+    preprocessing_version = manifest.get("preprocessing_version")
+    for run in selected_runs:
+        if run.data.tags.get("model") == winner_model:
+            data_source = run.data.tags.get("data_source", "data/processed")
+            if preprocessing_version is None:
+                preprocessing_version = run.data.tags.get(
+                    "preprocessing_version", "mars-preprocess-v1"
+                )
+            break
+
+    if data_source is None:
+        # Fall back to a marker; load_winner_artifact() is not called here.
+        data_source = "data/processed"
+    if preprocessing_version is None:
+        preprocessing_version = "mars-preprocess-v1"
+
+    winner_path = Path(args.winner_output) if args.winner_output else output_dir / "rq1_winner.json"
+    write_winner_artifact(
+        winner_path,
+        benchmark_id=args.benchmark_id,
+        winner_model=winner_model,
+        selection_metric="best_val_ndcg_at_10",
+        selection_split="val",
+        seed_set=seed_set,
+        data_source=data_source,
+        preprocessing_version=preprocessing_version,
+    )
+
+    # ------------------------------------------------------------------
+    # Backbone notice (warn if winner cannot drive RQ2/RQ3/RQ4)
+    # ------------------------------------------------------------------
+    from training.winner_artifact import is_heuristic_backbone, is_supported_backbone
+
+    if winner_model in HEURISTIC_MODELS or is_heuristic_backbone(winner_model):
+        print(
+            f"\nWARNING: Winner '{winner_model}' is a heuristic / non-sequential model. "
+            "RQ2/RQ3/RQ4 require a neural backbone (sasrec/gsasrec/gru4rec/bert4rec/bprmf). "
+            "Re-run RQ1 with at least one neural model in the candidate set."
+        )
+    elif not is_supported_backbone(winner_model):
+        print(
+            f"\nWARNING: Winner '{winner_model}' is not a supported backbone for "
+            "RQ2/RQ3/RQ4. Allowed: sasrec, gsasrec, gru4rec, bert4rec, bprmf."
+        )
+
+    print(f"\nWinner: {winner_model}")
+    print(f"Winner artifact: {winner_path}")
 
 
 if __name__ == "__main__":

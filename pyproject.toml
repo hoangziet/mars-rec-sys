@@ -1,7 +1,7 @@
 [project]
 name = "mars-rec-sys"
 version = "0.1.0"
-description = "Add your description here"
+description = "Sequential course recommendation on the MARS e-learning dataset (7 models, full-sort evaluation, MLflow tracking, RQ1-RQ4 research workflow)."
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
 dependencies = [
@@ -17,6 +17,7 @@ dependencies = [
     "scikit-learn>=1.8.0",
     "scipy>=1.14.0",
     "seaborn>=0.13.2",
+    "sentence-transformers>=3.0.0",
     "statsmodels>=0.14.6",
     "torch==2.6.0+cu124",
     "torchvision==0.21.0+cu124",

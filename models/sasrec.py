@@ -77,27 +77,17 @@ class SASRecBlock(nn.Module):
         attn_mask: torch.Tensor | None = None,
         padding_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """
-        Follows the reference SASRec.pytorch implementation: only the causal
-        attention mask is applied.  Padding positions start with x=0 (due to
-        item_emb(0)=0 and pos_emb(0)=0 from padding_idx=0), and the model
-        learns to ignore them naturally via the training signal.  No explicit
-        zeroing of padding outputs is performed because that creates artificial
-        gradient signals that cause training instability after several epochs.
-        The ``padding_mask`` argument is accepted but unused; ``_last_hidden``
-        correctly extracts the last non-padding position for prediction.
-        """
         if self.norm_first:
             # Pre-LN
             residual = x
             z = self.ln1(x)
-            attn_out, _ = self.attn(z, z, z, attn_mask=attn_mask)
+            attn_out, _ = self.attn(z, z, z, attn_mask=attn_mask, key_padding_mask=padding_mask)
             x = residual + self.dropout1(attn_out)
             residual = x
             x = residual + self.dropout2(self.ffn(self.ln2(x)))
         else:
             # Post-LN
-            attn_out, _ = self.attn(x, x, x, attn_mask=attn_mask)
+            attn_out, _ = self.attn(x, x, x, attn_mask=attn_mask, key_padding_mask=padding_mask)
             x = self.ln1(x + self.dropout1(attn_out))
             x = self.ln2(x + self.dropout2(self.ffn(x)))
         return x
@@ -163,6 +153,9 @@ class SASRec(nn.Module):
     def _init_weights(self) -> None:
         nn.init.normal_(self.item_emb.weight, std=0.01)
         nn.init.normal_(self.pos_emb.weight, std=0.01)
+        with torch.no_grad():
+            self.item_emb.weight[0].zero_()
+            self.pos_emb.weight[0].zero_()
 
     def _encode(self, input_seq: torch.Tensor) -> torch.Tensor:
         """Encode item sequence -> contextualised hidden states (B, L, D)."""
@@ -174,6 +167,10 @@ class SASRec(nn.Module):
 
         # Scale item embeddings by sqrt(d) to balance magnitude with positional embeddings.
         x = self.item_emb(input_seq) * (self.hidden_dim ** 0.5) + self.pos_emb(pos_ids)
+
+        pad_hidden_mask = (input_seq == self.pad_token).unsqueeze(-1)
+        x = x.masked_fill(pad_hidden_mask, 0.0)
+
         x = self.emb_dropout(x)
 
         causal_mask = torch.triu(
@@ -183,8 +180,14 @@ class SASRec(nn.Module):
 
         for block in self.blocks:
             x = block(x, attn_mask=causal_mask, padding_mask=padding_mask)
+            # Re-zero at padding positions: when a padded query has all keys
+            # masked, attention softmax becomes all -inf → NaN, which then
+            # propagates through the residual to valid positions in later blocks.
+            x = x.masked_fill(pad_hidden_mask, 0.0)
 
-        return self.final_ln(x)
+        x = self.final_ln(x)
+        x = x.masked_fill(pad_hidden_mask, 0.0)
+        return x
 
     def _last_hidden(self, input_seq: torch.Tensor) -> torch.Tensor:
         """Extract hidden state at the last non-padding position. Returns (B, D)."""

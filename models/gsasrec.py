@@ -61,19 +61,17 @@ class GSASRecBlock(nn.Module):
         self.dropout2 = nn.Dropout(dropout)
 
     def forward(self, x, attn_mask=None, padding_mask=None):
-        # Same as SASRec: causal mask only, no explicit padding zeroing.
-        # padding_mask is accepted for API compatibility but is not applied.
         if self.norm_first:
             # Pre-LN
             residual = x
             z = self.ln1(x)
-            attn_out, _ = self.attn(z, z, z, attn_mask=attn_mask)
+            attn_out, _ = self.attn(z, z, z, attn_mask=attn_mask, key_padding_mask=padding_mask)
             x = residual + self.dropout1(attn_out)
             residual = x
             x = residual + self.dropout2(self.ffn(self.ln2(x)))
         else:
             # Post-LN
-            attn_out, _ = self.attn(x, x, x, attn_mask=attn_mask)
+            attn_out, _ = self.attn(x, x, x, attn_mask=attn_mask, key_padding_mask=padding_mask)
             x = self.ln1(x + self.dropout1(attn_out))
             x = self.ln2(x + self.dropout2(self.ffn(x)))
         return x
@@ -82,17 +80,24 @@ class GSASRecBlock(nn.Module):
 class GSASRec(nn.Module):
     """gSASRec model.
 
+    Reference: Petrov & Macdonald, ACM RecSys 2023.
+
+    Implementation note: the gBCE loss uses the score transformation
+    pos_score_t = log(1 / (sigmoid(pos)^-beta - 1)) as in the reference.
+    The "pos_smoothing" parameter is a project-specific extension.
+
     Parameters
     ----------
     t:
         gBCE temperature in [0, 1].  t=0 → standard BCE (= SASRec).
         t=1 → fully sampling-corrected logits.
-        Reference default (Petrov & Macdonald, RecSys 2023): t=0.5.
+        Project default: t=0.5 (see configs/model/gsasrec.yaml).
     num_neg:
         Number of negatives per positive sampled during training.
-        Reference default: 32.  The effective beta is computed as:
-          alpha = num_neg / (n_items - 1)
-          beta  = alpha * ((1 - 1/alpha) * t + 1/alpha)
+        Project default: 32 (see configs/model/gsasrec.yaml).
+        The original paper's experiments use K=256; this project
+        uses K=32 to fit within memory budget. Do NOT confuse the
+        project default with the paper default.
     """
 
     def __init__(
@@ -108,6 +113,7 @@ class GSASRec(nn.Module):
         num_neg: int = 32,
         pos_smoothing: float = 0.0,
         norm_first: bool = True,
+        item_encoder=None,
     ) -> None:
         super().__init__()
         if emb_dim is not None:
@@ -121,7 +127,15 @@ class GSASRec(nn.Module):
         self.num_neg    = num_neg
         self.pos_smoothing = pos_smoothing
 
-        self.item_emb    = nn.Embedding(n_items + 1, hidden_dim, padding_idx=0)
+        if item_encoder is not None:
+            self.item_emb = item_encoder
+            self.item_emb_is_embedding = False
+        else:
+            self.item_emb = nn.Embedding(n_items + 1, hidden_dim, padding_idx=0)
+            nn.init.normal_(self.item_emb.weight, std=0.01)
+            with torch.no_grad():
+                self.item_emb.weight[0].zero_()
+            self.item_emb_is_embedding = True
         # 1-indexed positions; index 0 (padding_idx=0) → zero vector for padding tokens.
         self.pos_emb     = nn.Embedding(max_len + 1, hidden_dim, padding_idx=0)
         self.emb_dropout = nn.Dropout(dropout)
@@ -131,8 +145,9 @@ class GSASRec(nn.Module):
         )
         self.final_ln = nn.LayerNorm(hidden_dim, eps=1e-8)
 
-        nn.init.normal_(self.item_emb.weight, std=0.01)
         nn.init.normal_(self.pos_emb.weight,  std=0.01)
+        with torch.no_grad():
+            self.pos_emb.weight[0].zero_()
 
     # ------------------------------------------------------------------
     # Encoder
@@ -152,6 +167,11 @@ class GSASRec(nn.Module):
             pos_ids = (pos_ids.float() + noise).clamp(min=0.0).long()
 
         x = self.item_emb(input_seq) * (self.hidden_dim ** 0.5) + self.pos_emb(pos_ids)
+
+        # Zero hidden at padding positions before attention (unifies behavior with ItemEncoder)
+        pad_hidden_mask = (input_seq == self.pad_token).unsqueeze(-1)
+        x = x.masked_fill(pad_hidden_mask, 0.0)
+
         x = self.emb_dropout(x)
 
         causal_mask = torch.triu(
@@ -160,7 +180,13 @@ class GSASRec(nn.Module):
         padding_mask = input_seq == self.pad_token
         for block in self.blocks:
             x = block(x, attn_mask=causal_mask, padding_mask=padding_mask)
-        return self.final_ln(x)
+            # Re-zero at padding positions: when a padded query has all keys
+            # masked, attention softmax becomes all -inf → NaN, which then
+            # propagates through the residual to valid positions in later blocks.
+            x = x.masked_fill(pad_hidden_mask, 0.0)
+        x = self.final_ln(x)
+        x = x.masked_fill(pad_hidden_mask, 0.0)
+        return x
 
     def _last_hidden(self, input_seq: torch.Tensor) -> torch.Tensor:
         """Extract hidden state at the last non-padding position. Returns (B, D)."""
@@ -200,6 +226,7 @@ class GSASRec(nn.Module):
         input_seq: torch.Tensor,
         pos_items: torch.Tensor,
         neg_items: torch.Tensor,
+        reduction: str = "mean",
     ) -> torch.Tensor:
         """Generalised BCE loss at the last valid sequence position.
 
@@ -243,6 +270,8 @@ class GSASRec(nn.Module):
             all_scores, all_labels, reduction="none"
         ).mean(dim=1)                                                          # (B,)
 
+        if reduction == "none":
+            return loss_per_sample
         return loss_per_sample.mean()
 
     # ------------------------------------------------------------------
@@ -251,7 +280,12 @@ class GSASRec(nn.Module):
 
     def predict(self, input_seq: torch.Tensor) -> torch.Tensor:
         """Return scores (B, n_items+1) via dot-product with item_emb."""
-        return self._last_hidden(input_seq) @ self.item_emb.weight.T
+        h = self._last_hidden(input_seq)  # (B, D)
+        if hasattr(self.item_emb, "weight"):
+            return h @ self.item_emb.weight.T
+        all_ids = torch.arange(self.n_items + 1, device=input_seq.device)
+        all_embs = self.item_emb(all_ids)
+        return h @ all_embs.T
 
     def forward(self, input_seq: torch.Tensor) -> torch.Tensor:
         """Alias for predict — returns scores over full item vocab."""
