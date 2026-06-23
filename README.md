@@ -278,7 +278,7 @@ make test
 
 | Phase (script)               | Experiment                  |
 | ---------------------------- | --------------------------- |
-| `smoke`                      | `mars_smoke`                |
+| RQ1 smoke (`train_all.py`)   | `mars_benchmark`            |
 | RQ1 (`benchmark`)            | `mars_benchmark`            |
 | RQ2 (tuning)                 | `mars_confidence_tuning`    |
 | RQ3 (tuning)                 | `mars_metadata_tuning`      |
@@ -355,7 +355,7 @@ training/
   mlflow_utils.py
   winner_artifact.py         RQ1 winner artifact contract
 Makefile                     common local workflow shortcuts
-tests/                       local pytest suite (gitignored)
+tests/                       local pytest suite (tracked)
 docs/                        local specs/plans/research notes (gitignored)
 ```
 
