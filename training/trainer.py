@@ -161,7 +161,12 @@ class ExperimentTracker:
 
 # Trainer
 class Trainer:
-    """Unified training loop for all model types."""
+    """Unified training loop for all model types.
+
+    The MLflow run is opened lazily inside ``train()`` and is always
+    closed exactly once — success → FINISHED, exception → FAILED. There
+    is no path where an exception leaves the run in ``RUNNING``.
+    """
 
     def __init__(self, model_name: str, device: str | torch.device,
                  output_dir: str | Path = "experiments",
@@ -175,24 +180,49 @@ class Trainer:
         self.tracker = ExperimentTracker(model_name)
 
         self._use_mlflow = use_mlflow
-        self._mlflow_run = None
         self._mlflow = None
-        self._mlflow_log_artifacts = False
+        self._mlflow_run = None
+        # Stable handle to the most recently opened MLflow run, preserved
+        # across close() so post-train artifact promotion (e.g. rq4_ablation)
+        # can still find the run after the trainer terminates it.
+        self.last_run_id: str | None = None
+        self._mlflow_config = mlflow_config or {}
+        self._mlflow_log_artifacts = self._mlflow_config.get("log_artifacts", True)
+        self._mlflow_phase = self._mlflow_config.get("phase")
+        self._mlflow_variant = self._mlflow_config.get("variant")
+        self._mlflow_git_commit = self._mlflow_config.get("git_commit")
+        self._mlflow_reportable = self._mlflow_config.get("reportable", True)
+
         if use_mlflow:
             import mlflow
 
             self._mlflow = mlflow
-            mlflow_config = mlflow_config or {}
-            experiment_name = mlflow_config.get("experiment_name", "mars_rec_sys")
-            run_name = mlflow_config.get("run_name", model_name)
-            self._mlflow_log_artifacts = mlflow_config.get("log_artifacts", True)
-            self._mlflow_phase = mlflow_config.get("phase")
-            self._mlflow_variant = mlflow_config.get("variant")
-            self._mlflow_git_commit = mlflow_config.get("git_commit")
-            self._mlflow_reportable = mlflow_config.get("reportable", True)
             configure_mlflow(mlflow_module=self._mlflow)
-            self._mlflow.set_experiment(experiment_name)
-            self._mlflow_run = self._mlflow.start_run(run_name=run_name)
+
+    def _open_mlflow_run(self) -> None:
+        """Open an MLflow run. Safe to call once per train() invocation."""
+        if self._mlflow is None or self._mlflow_run is not None:
+            return
+        experiment_name = self._mlflow_config.get("experiment_name", "mars_rec_sys")
+        run_name = self._mlflow_config.get("run_name", self.model_name)
+        self._mlflow.set_experiment(experiment_name)
+        self._mlflow_run = self._mlflow.start_run(run_name=run_name)
+        self.last_run_id = self._mlflow_run.info.run_id
+
+    def _close_mlflow_run(self, status: str) -> None:
+        """Close the MLflow run exactly once. status ∈ {"FINISHED", "FAILED"}."""
+        if self._mlflow is None or self._mlflow_run is None:
+            return
+        try:
+            self._mlflow.end_run(status=status)
+        except Exception:
+            # Best-effort cleanup. The caller is already dealing with a
+            # failure path; don't mask it with a second exception.
+            pass
+        finally:
+            self._mlflow_run = None
+        # NOTE: do NOT reset self.last_run_id — it must remain readable
+        # for callers that promote the run after the trainer closes it.
 
     # Public API
     def train(self, model, train_loader, val_loader,
@@ -218,6 +248,11 @@ class Trainer:
             criterion_fn   : callable(model, batch, device) -> loss scalar
             eval_fn        : callable(model, eval_loader, device) -> metrics dict
             gradient_clip  : max norm for gradient clipping (0 = disabled)
+
+        MLflow lifecycle: a run is opened here, parameters and tags are
+        logged, the entire epoch loop is executed, and the run is closed
+        inside a ``finally`` block. Any exception in the loop results in
+        status=FAILED; a clean run results in status=FINISHED.
         """
         print(f"\n{'='*50}")
         print(f"  {self.model_name}")
@@ -230,13 +265,57 @@ class Trainer:
             print(f"  Test sz   : {len(test_loader.dataset):,}")
         print(f"{'='*50}\n")
 
-        if self._use_mlflow and mlflow_params:
-            self._mlflow.log_params(_flatten_dict(mlflow_params))
+        # Open MLflow run lazily, but always inside the try/finally so any
+        # error during training (or any setup step) leaves the run
+        # properly terminated.
+        mlflow_status = "FAILED"  # default if anything goes wrong
+        tags_subkey: dict = {}
+        try:
+            self._open_mlflow_run()
 
-        tags = mlflow_params.get("tags", {}) if mlflow_params else {}
-        if tags and self._use_mlflow:
-            self._mlflow.set_tags(tags)
+            if self._use_mlflow and mlflow_params:
+                # Params are immutable configuration; tags are mutable run
+                # state. We split them out: the rest of mlflow_params is
+                # treated as params, the explicit `tags` sub-key is logged
+                # as tags. We deliberately do NOT flatten ``tags.*`` keys
+                # into params, because reportable/per_user_complete flip
+                # from false to true after the run starts and would make
+                # param queries disagree with tag queries.
+                tags_subkey = mlflow_params.get("tags", {}) if isinstance(mlflow_params, dict) else {}
+                # Pull out the explicit `params` subkey if present; do not
+                # re-flatten the wrapper level (so the caller controls
+                # param names exactly).
+                if isinstance(mlflow_params, dict) and isinstance(mlflow_params.get("params"), dict):
+                    params_only = mlflow_params["params"]
+                else:
+                    params_only = {k: v for k, v in mlflow_params.items() if k != "tags"}
+                if params_only:
+                    self._mlflow.log_params(params_only)
 
+            if tags_subkey and self._use_mlflow and self._mlflow_run is not None:
+                self._mlflow.set_tags(tags_subkey)
+
+            result = self._run_training_loop(
+                model=model, train_loader=train_loader, val_loader=val_loader,
+                optimizer=optimizer, epochs=epochs, criterion_fn=criterion_fn,
+                eval_fn=eval_fn, gradient_clip=gradient_clip,
+                val_loss_loader=val_loss_loader, test_loader=test_loader,
+                early_stop_patience=early_stop_patience,
+                early_stop_min_delta=early_stop_min_delta, scheduler=scheduler,
+                mlflow_params=mlflow_params,
+            )
+            mlflow_status = "FINISHED"
+            return result
+        finally:
+            self._close_mlflow_run(status=mlflow_status)
+
+    def _run_training_loop(self, model, train_loader, val_loader,
+                           optimizer, epochs, criterion_fn, eval_fn,
+                           gradient_clip, val_loss_loader, test_loader,
+                           early_stop_patience, early_stop_min_delta,
+                           scheduler, mlflow_params) -> "ExperimentTracker":
+        """Inner loop body — same logic as before, but isolated so train()
+        can wrap it in a single try/except/finally for MLflow cleanup."""
         best_val_ndcg = -1.0
         best_state = None
         patience_counter = 0
@@ -268,7 +347,7 @@ class Trainer:
             # Log
             self.tracker.log_epoch(epoch, train_loss, val_loss, val_metrics)
 
-            if self._use_mlflow:
+            if self._use_mlflow and self._mlflow_run is not None:
                 ml_metrics = {
                     "train_loss": train_loss,
                     "val_loss": val_loss if val_loss is not None else 0.0,
@@ -337,14 +416,9 @@ class Trainer:
             print(f"\n  Run FAILED: no valid checkpoint produced (all training was non-finite).")
             print(f"  Skipping test evaluation. Skipping checkpoint save.")
             self.tracker.finalize({})
-
-            if self._use_mlflow and self._mlflow_run:
-                self._mlflow.end_run(status="FAILED")
-
             self.tracker.save_metrics(self.output_dir / "metrics.json")
             self.tracker.plot_losses(self.output_dir / "loss_plot.png")
             self.tracker.plot_metrics(self.output_dir / "metrics_plot.png")
-
             raise NoValidCheckpointError(
                 "No valid checkpoint produced — all training was non-finite. "
                 "MLflow run has been marked FAILED. Check learning rate, "
@@ -358,7 +432,7 @@ class Trainer:
         # Print summary
         self._print_summary()
 
-        if self._use_mlflow:
+        if self._use_mlflow and self._mlflow_run is not None:
             test_ml_metrics = {
                 "best_val_ndcg_at_10": self.tracker.best_val_ndcg,
                 "best_epoch": float(self.tracker.best_epoch),
@@ -374,7 +448,6 @@ class Trainer:
                     self._mlflow.log_artifact(str(self.output_dir / "metrics_plot.png"), artifact_path="plots")
                 if (self.output_dir / "best_model.pt").exists():
                     self._mlflow.log_artifact(str(self.output_dir / "best_model.pt"), artifact_path="checkpoints")
-            self._mlflow.end_run(status="FINISHED")
 
         return self.tracker
 

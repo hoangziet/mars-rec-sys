@@ -29,10 +29,18 @@ from pipeline.builder import build_criterion_fn, build_eval_fn, build_model, bui
 from pipeline.loaders import get_eval_loader, get_val_loss_loader, load_stats
 from pipeline.optim import build_optimizer, build_scheduler
 from pipeline.training_grid import enforce_final_grid
+from scripts.rq4_per_user import (
+    PerUserExportError,
+    fail_run_atomically,
+    promote_run_complete,
+    validate_per_user_file,
+    write_per_user_atomic,
+)
 from training.configs import build_model_config
 from training.mlflow_contract import build_run_name, build_training_tags
 from training.mlflow_utils import collect_common_run_metadata, configure_mlflow, get_git_commit
 from training.trainer import NoValidCheckpointError, Trainer
+from training.winner_artifact import load_winner_artifact
 from scripts.rq4_init_protocol import verify_protocol_hashes
 
 
@@ -112,7 +120,7 @@ def _get_variant_config(variant: str, best_alpha: float, best_variant: str) -> d
         raise ValueError(f"Unknown variant: {variant}")
 
 
-def _run_single(args, variant: str, seed: int, variant_cfg: dict, benchmark_id: str, protocol: dict) -> dict:
+def _run_single(args, backbone: str, variant: str, seed: int, variant_cfg: dict, benchmark_id: str, protocol: dict) -> dict:
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -142,28 +150,29 @@ def _run_single(args, variant: str, seed: int, variant_cfg: dict, benchmark_id: 
     max_len = train_kwargs.get("max_len", 50)
     batch_size = train_kwargs.get("batch_size", 256)
 
-    model = build_model("gsasrec", stats["n_items"], stats["n_users"], model_kwargs, max_len, data_dir=data_dir).to(device)
-    train_loader = build_train_loader("gsasrec", data_dir, stats, train_kwargs, model_kwargs=model_kwargs)
+    model = build_model(backbone, stats["n_items"], stats["n_users"], model_kwargs, max_len, data_dir=data_dir).to(device)
+    train_loader = build_train_loader(backbone, data_dir, stats, train_kwargs, model_kwargs=model_kwargs)
     val_loader = get_eval_loader(data_dir / "splits" / "val_sequences.csv", stats, batch_size=batch_size, max_len=max_len)
     test_loader = get_eval_loader(data_dir / "splits" / "test_sequences.csv", stats, batch_size=batch_size, max_len=max_len)
-    optimizer = build_optimizer("gsasrec", model, train_kwargs)
+    optimizer = build_optimizer(backbone, model, train_kwargs)
     scheduler = build_scheduler(optimizer, train_kwargs, len(train_loader))
-    criterion_fn = build_criterion_fn("gsasrec", train_kwargs)
-    eval_fn = build_eval_fn("gsasrec")
-    val_loss_loader = get_val_loss_loader("gsasrec", data_dir / "splits" / "val_sequences.csv", stats, batch_size=batch_size, max_len=max_len, num_neg=model_kwargs.get("num_neg", train_kwargs.get("num_neg", 1)), seed=seed)
+    criterion_fn = build_criterion_fn(backbone, train_kwargs)
+    eval_fn = build_eval_fn(backbone)
+    val_loss_loader = get_val_loss_loader(backbone, data_dir / "splits" / "val_sequences.csv", stats, batch_size=batch_size, max_len=max_len, num_neg=model_kwargs.get("num_neg", train_kwargs.get("num_neg", 1)), seed=seed)
 
-    run_name = build_run_name("gsasrec", seed, variant=variant.lower())
+    run_name = build_run_name(backbone, seed, variant=variant.lower())
     run_output_dir = Path(args.output_dir) / "rq4" / benchmark_id / variant / f"seed_{seed}"
 
-    trainer = Trainer("gsasrec", device, str(run_output_dir), use_mlflow=True, mlflow_config={
+    trainer = Trainer(backbone, device, str(run_output_dir), use_mlflow=True, mlflow_config={
         "experiment_name": EXPERIMENT_NAME, "run_name": run_name, "log_artifacts": True,
         "phase": "final", "variant": variant.lower(), "git_commit": get_git_commit(), "reportable": False,
     })
-    mlflow_cfg = collect_common_run_metadata(model_name="gsasrec", seed=seed, phase="final", git_commit=get_git_commit(), extra_params={**model_kwargs, **train_kwargs})
-    mlflow_cfg["tags"] = build_training_tags(model_name="gsasrec", phase="final", variant=variant.lower(), git_commit=get_git_commit(), reportable=False)
+    mlflow_cfg = collect_common_run_metadata(model_name=backbone, seed=seed, phase="final", git_commit=get_git_commit(), extra_params={**model_kwargs, **train_kwargs})
+    mlflow_cfg["tags"] = build_training_tags(model_name=backbone, phase="final", variant=variant.lower(), git_commit=get_git_commit(), reportable=False)
     mlflow_cfg["tags"]["ablation_variant"] = variant
     mlflow_cfg["tags"]["rq"] = "rq4"
     mlflow_cfg["tags"]["benchmark_id"] = benchmark_id
+    mlflow_cfg["tags"]["backbone"] = backbone
     mlflow_cfg["tags"]["confidence_alpha"] = str(variant_cfg["confidence_alpha"])
     mlflow_cfg["tags"]["use_structured"] = str(variant_cfg["use_structured"]).lower()
     mlflow_cfg["tags"]["use_text"] = str(variant_cfg["use_text"]).lower()
@@ -181,34 +190,51 @@ def _run_single(args, variant: str, seed: int, variant_cfg: dict, benchmark_id: 
     except NoValidCheckpointError:
         print(f"  {variant} seed={seed}: skipping per-user export (no valid checkpoint)")
         return None
-    except Exception:
-        if trainer._use_mlflow and trainer._mlflow_run:
-            trainer._mlflow.end_run(status="FAILED")
-        raise
 
-    # Training succeeded — now export per-user results.  Only after
-    # per-user export succeeds do we mark the run as reportable.
-    run_id = trainer._mlflow_run.info.run_id if trainer._mlflow_run else None
+    # Training succeeded — now export per-user results through the atomic helper.
+    # Only after the helper fully succeeds do we mark the run as reportable.
+    # Use Trainer.last_run_id (not _mlflow_run) — the trainer closes its
+    # active run in finally, so _mlflow_run is None here even on success.
+    run_id = trainer.last_run_id
+    if not run_id:
+        raise RuntimeError(
+            "RQ4 training completed but Trainer.last_run_id is missing; "
+            "cannot export/promote per-user artifacts."
+        )
     try:
         _export_per_user(model, test_loader, device, variant, seed, args.output_dir, benchmark_id, run_id)
-    except Exception:
-        if trainer._use_mlflow and run_id:
-            mlflow.tracking.MlflowClient().set_terminated(run_id, status="FAILED")
+    except Exception as exc:
+        if run_id:
+            fail_run_atomically(run_id, exc)
+        # Re-raise the original exception so the caller knows the run failed.
         raise
 
-    # Per-user export succeeded — mark the run as complete and reportable.
+    # Per-user export succeeded — promote tags in one shot. If anything
+    # goes wrong here we fail the run so the collector won't pick it up
+    # as a stale partial result.
     if run_id:
-        client = mlflow.tracking.MlflowClient()
-        client.set_tag(run_id, "per_user_complete", "true")
-        client.set_tag(run_id, "reportable", "true")
+        try:
+            promote_run_complete(run_id)
+        except Exception as exc:
+            fail_run_atomically(run_id, exc)
+            raise
 
     return result
 
 
 def _export_per_user(model, test_loader, device, variant, seed, output_dir, benchmark_id, run_id=None):
+    """Atomic per-user export:
+
+        1. Evaluate on test loader.
+        2. Write CSV atomically (write tmp, validate, rename).
+        3. Validate the canonical file.
+        4. Upload to MLflow if ``run_id`` is given.
+
+    Any failure raises and leaves the file system in a state with no
+    partial canonical artifact at the target path. Caller is responsible
+    for marking the run FAILED on failure.
+    """
     from pipeline.metrics import evaluate_sequential_detailed
-    import csv as csv_mod
-    import mlflow as mlflow_mod
 
     _, per_user = evaluate_sequential_detailed(model, test_loader, device)
     for row in per_user:
@@ -216,19 +242,31 @@ def _export_per_user(model, test_loader, device, variant, seed, output_dir, benc
         row["seed"] = seed
 
     user_dir = Path(output_dir) / "rq4" / benchmark_id / "per_user"
-    user_dir.mkdir(parents=True, exist_ok=True)
-    path = user_dir / f"{variant}_s{seed}.csv"
-    fields = ["variant", "seed", "user_idx", "target_item", "rank", "hit_at_10", "ndcg_at_10", "hit_at_20", "ndcg_at_20"]
-    with open(path, "w", newline="") as f:
-        writer = csv_mod.DictWriter(f, fieldnames=fields)
-        writer.writeheader()
-        writer.writerows(per_user)
+    canonical_path = user_dir / f"{variant}_s{seed}.csv"
+
+    write_per_user_atomic(per_user, canonical_path)
+    # Sanity re-read after rename.
+    validate_per_user_file(canonical_path, expected_min_rows=1)
 
     if run_id:
-        client = mlflow_mod.tracking.MlflowClient()
-        client.log_artifact(run_id, str(path), artifact_path="per_user")
+        import mlflow as mlflow_mod
+        try:
+            mlflow_mod.tracking.MlflowClient().log_artifact(
+                run_id, str(canonical_path), artifact_path="per_user"
+            )
+        except Exception as exc:
+            # Roll back the on-disk artifact if upload fails so the
+            # collector cannot read a stale file the run never reported.
+            try:
+                if canonical_path.exists():
+                    canonical_path.unlink()
+            except OSError:
+                pass
+            raise PerUserExportError(
+                f"Failed to upload per-user artifact to MLflow run {run_id}: {exc}"
+            ) from exc
 
-    return path
+    return canonical_path
 
 
 def main() -> None:
@@ -241,6 +279,17 @@ def main() -> None:
     seeds = [int(s) for s in protocol["neural_seeds"]]
     variants_list = protocol["variants"]
     benchmark_id = protocol["benchmark_id"]
+
+    # The backbone MUST come from the protocol manifest (which itself was
+    # sourced from the RQ1 winner artifact during rq4_init_protocol).
+    # No silent fallback to gsasrec.
+    backbone = protocol.get("backbone")
+    if not backbone:
+        raise RuntimeError(
+            "Protocol manifest has no 'backbone' field. Re-run `rq4-init` "
+            "with --winner-artifact pointing to rq1_winner.json. The "
+            "backbone is read from the RQ1 winner artifact, not hardcoded."
+        )
 
     # Provenance check: recompute SHA256 of the preprocessing report, config
     # bundle, and text embedding artifact. Refuse to train if any of them
@@ -256,7 +305,7 @@ def main() -> None:
     _enforce_git_commit_match(protocol)
 
     total = len(variants_list) * len(seeds)
-    print(f"RQ4 ablation: {len(variants_list)} variants x {len(seeds)} seeds = {total} runs")
+    print(f"RQ4 ablation: backbone={backbone}, {len(variants_list)} variants x {len(seeds)} seeds = {total} runs")
     print(f"Protocol: {args.protocol}")
     print(f"Best alpha: {best_alpha}")
     print(f"Best metadata variant: {best_variant}")
@@ -268,7 +317,7 @@ def main() -> None:
         for j, seed in enumerate(seeds):
             run_num = i * len(seeds) + j + 1
             print(f"\n[{run_num}/{total}] {variant}, seed={seed}")
-            result = _run_single(args, variant, seed, variant_cfg, benchmark_id, protocol)
+            result = _run_single(args, backbone, variant, seed, variant_cfg, benchmark_id, protocol)
             if result is None:
                 failed_runs.append((variant, seed))
 
