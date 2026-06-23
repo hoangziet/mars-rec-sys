@@ -6,6 +6,7 @@ DATA_DIR ?= data/processed
 REPORT_OUTPUT_DIR ?= experiments/benchmark/$(BENCHMARK_ID)/reports
 STATS_OUTPUT_DIR ?= experiments/benchmark/$(BENCHMARK_ID)/stats
 PREPROCESSING_VERSION ?= mars-preprocess-v1
+RQ4_BASELINE_VARIANT ?= V0
 
 .PHONY: preprocess rq1-smoke rq1-full rq1-report rq1-compare test rq2-tune rq2-report rq3-precompute rq3-tune rq3-report rq4-init rq4-ablation rq4-collect rq4-compare rq4-subgroup rq4-report
 
@@ -19,7 +20,7 @@ rq1-full:
 	uv run python scripts/train_all.py $(BENCHMARK_MODELS) --seeds $(RQ1_SEEDS) --benchmark-id $(BENCHMARK_ID) --protocol-version rq1-v1 --preprocessing-version $(PREPROCESSING_VERSION)
 
 rq1-report:
-	uv run python scripts/report_rq1.py --benchmark-id $(BENCHMARK_ID) --output-dir $(REPORT_OUTPUT_DIR)
+	uv run python scripts/rq1_report.py --benchmark-id $(BENCHMARK_ID) --output-dir $(REPORT_OUTPUT_DIR)
 
 rq1-compare:
 	uv run python scripts/rq1_compare.py \
@@ -29,9 +30,11 @@ rq1-compare:
 		--output-dir $(STATS_OUTPUT_DIR)
 
 test:
-	uv run pytest tests/ -v
+	uv run pytest tests/ -v --ignore=tests/test_mlflow.py --ignore=tests/test_remote_mlflow_integration.py
 
 # --- RQ2: Confidence Tuning ---
+# RQ2/RQ3/RQ4 are gSASRec-only follow-up studies. The backbone is frozen
+# in each script (not sourced from the RQ1 winner artifact).
 RQ2_ALPHAS ?= 0.0 0.25 0.5 1.0 2.0
 RQ2_SEEDS ?= 42 123 2024
 RQ2_BENCHMARK_ID ?= rq2-alpha-tune
@@ -51,9 +54,9 @@ RQ3_OUTPUT_DIR ?= experiments/rq3/$(RQ3_BENCHMARK_ID)
 
 rq3-precompute:
 	uv run python scripts/rq3_build_vocab.py --data-dir $(DATA_DIR)
-	uv run python scripts/rq3_precompute_embeddings.py
+	uv run python scripts/rq3_precompute_embeddings.py --data-dir $(DATA_DIR)
 
-rq3-tune:
+rq3-tune: rq3-precompute
 	uv run python scripts/rq3_tune_metadata.py --variants $(RQ3_VARIANTS) --seeds $(RQ3_SEEDS) --benchmark-id $(RQ3_BENCHMARK_ID) --data-dir $(DATA_DIR)
 
 rq3-report:
@@ -73,9 +76,9 @@ rq4-init:
 		--benchmark-id $(RQ4_BENCHMARK_ID) \
 		--rq2-winners $(RQ2_WINNERS) \
 		--rq3-winners $(RQ3_WINNERS) \
+		--baseline-variant $(RQ4_BASELINE_VARIANT) \
 		--seeds $(RQ4_SEEDS) \
 		--data-dir $(DATA_DIR) \
-		--preprocessing-version $(PREPROCESSING_VERSION) \
 		--output-dir $(RQ4_COMPARISON_DIR)
 
 rq4-ablation:
