@@ -44,6 +44,23 @@ from training.winner_artifact import load_winner_artifact
 from scripts.rq4_init_protocol import verify_protocol_hashes
 
 
+def _validate_protocol_backbone(protocol: dict) -> str:
+    """RQ4 is gSASRec-only — refuse any protocol whose backbone is not gsasrec.
+
+    The protocol is frozen by ``rq4-init`` from the RQ2/RQ3 winners, and the
+    init step already enforces backbone="gsasrec". This guard is the last
+    line of defense: if someone hand-edits the protocol manifest or runs
+    rq4-ablation against a stale file, we fail loud here.
+    """
+    backbone = protocol.get("backbone")
+    if backbone != "gsasrec":
+        raise RuntimeError(
+            f"RQ4 is gSASRec-only, but protocol backbone is {backbone!r}. "
+            f"Re-run rq4-init from gSASRec RQ2/RQ3 winners."
+        )
+    return backbone
+
+
 def _enforce_git_commit_match(protocol: dict) -> None:
     """Fail unless HEAD matches the protocol's git_commit and the tree is clean.
 
@@ -280,16 +297,11 @@ def main() -> None:
     variants_list = protocol["variants"]
     benchmark_id = protocol["benchmark_id"]
 
-    # The backbone MUST come from the protocol manifest (which itself was
-    # sourced from the RQ1 winner artifact during rq4_init_protocol).
-    # No silent fallback to gsasrec.
-    backbone = protocol.get("backbone")
-    if not backbone:
-        raise RuntimeError(
-            "Protocol manifest has no 'backbone' field. Re-run `rq4-init` "
-            "with --winner-artifact pointing to rq1_winner.json. The "
-            "backbone is read from the RQ1 winner artifact, not hardcoded."
-        )
+    # The backbone MUST come from the protocol manifest (frozen by
+    # rq4-init from the gSASRec RQ2/RQ3 winners). We enforce gsasrec-only
+    # here so a stale or hand-edited protocol cannot drive a non-gsasrec
+    # run.
+    backbone = _validate_protocol_backbone(protocol)
 
     # Provenance check: recompute SHA256 of the preprocessing report, config
     # bundle, and text embedding artifact. Refuse to train if any of them
