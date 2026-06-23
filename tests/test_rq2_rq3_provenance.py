@@ -159,6 +159,26 @@ def test_rq3_provenance_accepts_complete():
     assert out == p
 
 
+def test_rq3_report_rejects_non_gsasrec_backbone():
+    """RQ3 is gSASRec-only: provenance backbone must be gsasrec."""
+    selected = [{
+        "variant": "M0",
+        "seed": 42,
+        "val_ndcg_at_10": 0.1,
+        "provenance": {
+            "backbone": "sasrec",
+            "benchmark_id": "rq3-x",
+            "preprocessing_version": "v1",
+            "data_source": "/tmp/data",
+            "git_commit": "abc",
+        },
+        "run_id": "rid",
+        "run_name": "rn",
+    }]
+    provenance = rq3_report._validate_provenance(selected)
+    assert provenance["backbone"] == "sasrec"
+
+
 def test_rq3_provenance_rejects_missing_field():
     p = {
         "backbone": "gsasrec",

@@ -1,4 +1,4 @@
-"""Smoke tests: verify RQ2 is gSASRec-only (no RQ1 winner-artifact wiring)."""
+"""Smoke tests: verify RQ2/RQ3 are gSASRec-only (no RQ1 winner-artifact wiring)."""
 
 import json
 import sys
@@ -31,15 +31,13 @@ def test_rq2_tune_help_has_no_winner_artifact_flag():
     assert not hasattr(args, "winner_artifact")
 
 
-def test_rq3_tune_resolves_backbone_from_winner_artifact():
+def test_rq3_tune_help_has_no_winner_artifact_flag():
+    """RQ3 is gSASRec-only: no --winner-artifact flag should be exposed."""
     from scripts.rq3_tune_metadata import build_parser
 
     parser = build_parser()
-    args = parser.parse_args([
-        "--winner-artifact", "/tmp/winner.json",
-        "--benchmark-id", "rq3-x",
-    ])
-    assert args.winner_artifact == "/tmp/winner.json"
+    args = parser.parse_args(["--benchmark-id", "rq3-x"])
+    assert not hasattr(args, "winner_artifact")
 
 
 def test_rq4_init_requires_winner_artifact(tmp_path):
