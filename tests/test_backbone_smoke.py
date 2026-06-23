@@ -156,6 +156,8 @@ def test_rq4_collect_result_manifest_carries_gsasrec_backbone(tmp_path, monkeypa
         "metadata_variants": {"M3": {"use_structured": True, "use_text": True}},
         "benchmark_id": "rq4-test",
         "backbone": "gsasrec",
+        "preprocessing_version": "v1",
+        "data_source": "/tmp/data",
     }
     (tmp_path / "protocol.json").write_text(json.dumps(protocol))
 
@@ -173,9 +175,6 @@ def test_rq4_collect_result_manifest_carries_gsasrec_backbone(tmp_path, monkeypa
                     "use_structured": str(use_structured).lower(),
                     "use_text": str(use_text).lower(),
                     "per_user_complete": "true",
-                    "protocol_sha256": "abc",
-                    "dataset_manifest_sha256": "def",
-                    "config_sha256": "ghi",
                 },
                 params={"seed": str(seed)},
                 metrics={
@@ -216,7 +215,6 @@ def test_rq4_collect_result_manifest_carries_gsasrec_backbone(tmp_path, monkeypa
     monkeypatch.setattr(rq4_collect, "configure_mlflow", _fake_configure_mlflow)
     monkeypatch.setattr(rq4_collect, "_validate_provenance_tags", lambda *a, **k: [])
     monkeypatch.setattr(rq4_collect, "_validate_per_user_on_disk", lambda *a, **k: [])
-    monkeypatch.setattr(rq4_collect, "verify_protocol_hashes", lambda *a, **k: None)
 
     out = tmp_path / "out"
     (out / "per_user").mkdir(parents=True)

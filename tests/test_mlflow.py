@@ -15,10 +15,11 @@ with mlflow.start_run(run_name="first-run"):
         }
     )
 
+    # MLflow metric names reject '@' on this server; sanitize like the trainer.
     mlflow.log_metrics(
         {
-            "ndcg@10": 0.182,
-            "recall@10": 0.261,
+            "ndcg_at_10": 0.182,
+            "recall_at_10": 0.261,
         }
     )
 

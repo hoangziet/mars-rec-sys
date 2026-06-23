@@ -493,7 +493,7 @@ def main() -> None:
         json.dump(run_records, f, indent=2)
 
     print(f"\nBenchmark run records saved to: {comp_dir}/run_records.json")
-    print(f"Use scripts/report_rq1.py --benchmark-id {args.benchmark_id} to aggregate RQ1 results.")
+    print(f"Use scripts/rq1_report.py --benchmark-id {args.benchmark_id} to aggregate RQ1 results.")
 
 
 if __name__ == "__main__":

@@ -95,7 +95,7 @@ def test_check_key_set_equality_passes_on_match():
 # ---- _run_comparison: raw stats only, no label ----
 
 def test_run_comparison_does_not_return_significance_label():
-    """_run_comparison returns raw stats; label is assigned later (after Holm)."""
+    """_run_comparison returns raw stats; significant is assigned later."""
     rows = []
     for user in range(10):
         target = 100 + user
@@ -106,48 +106,46 @@ def test_run_comparison_does_not_return_significance_label():
     rng = np.random.default_rng(42)
     result = rq4_compare._run_comparison(per_user, "V1", "V0", {42, 43}, rng)
     assert "significance_label" not in result
+    assert "significant" in result
+    assert result["significant"] is None  # not assigned yet
     assert "permutation_p" in result
     assert "mean_difference" in result
     assert "bootstrap_ci_low" in result
     assert "bootstrap_ci_high" in result
 
 
-# ---- _assign_significance_label (called in main after Holm) ----
+# ---- _assign_significance_label: sets only significant boolean ----
 
-def test_assign_primary_label_improvement():
-    """Holm-adjusted p < 0.05 + mean_diff > 0 + CI_low > 0 → reliable_improvement."""
+def test_assign_primary_significant_true():
+    """Holm-adjusted p < 0.05 + mean_diff > 0 + CI_low > 0 → significant=True."""
     result = {"mean_difference": 0.01, "bootstrap_ci_low": 0.002, "bootstrap_ci_high": 0.018}
     rq4_compare._assign_significance_label(result, holm_adjusted_p=0.03, is_primary=True)
-    assert result["significance_label"] == "reliable_improvement"
+    assert result["significant"] is True
+    assert "significance_label" not in result
 
 
-def test_assign_primary_label_degradation():
-    result = {"mean_difference": -0.01, "bootstrap_ci_low": -0.018, "bootstrap_ci_high": -0.001}
-    rq4_compare._assign_significance_label(result, holm_adjusted_p=0.02, is_primary=True)
-    assert result["significance_label"] == "reliable_degradation"
-
-
-def test_assign_primary_label_inconclusive_p_value():
-    result = {"mean_difference": 0.01, "bootstrap_ci_low": 0.002, "bootstrap_ci_high": 0.018}
-    rq4_compare._assign_significance_label(result, holm_adjusted_p=0.10, is_primary=True)
-    assert result["significance_label"] == "inconclusive"
-
-
-def test_assign_primary_label_inconclusive_ci_crosses_zero():
+def test_assign_primary_significant_false_ci_crosses_zero():
+    """Holm p < 0.05 but CI crosses zero → significant=False."""
     result = {"mean_difference": 0.01, "bootstrap_ci_low": -0.001, "bootstrap_ci_high": 0.021}
     rq4_compare._assign_significance_label(result, holm_adjusted_p=0.03, is_primary=True)
-    assert result["significance_label"] == "inconclusive"
+    assert result["significant"] is False
 
 
-def test_assign_secondary_label_descriptive_only():
-    """Secondary comparisons never get 'reliable_*' — they are always descriptive."""
+def test_assign_primary_significant_false_weak_p():
+    result = {"mean_difference": 0.01, "bootstrap_ci_low": 0.002, "bootstrap_ci_high": 0.018}
+    rq4_compare._assign_significance_label(result, holm_adjusted_p=0.10, is_primary=True)
+    assert result["significant"] is False
+
+
+def test_assign_secondary_significant_always_false():
+    """Secondary comparisons never get significant=True."""
     result = {"mean_difference": 0.01, "bootstrap_ci_low": 0.002, "bootstrap_ci_high": 0.018}
     rq4_compare._assign_significance_label(result, holm_adjusted_p=0.03, is_primary=False)
-    assert result["significance_label"] == "descriptive_improvement"
+    assert result["significant"] is False
 
     result2 = {"mean_difference": -0.001, "bootstrap_ci_low": -0.008, "bootstrap_ci_high": 0.006}
     rq4_compare._assign_significance_label(result2, holm_adjusted_p=None, is_primary=False)
-    assert result2["significance_label"] == "descriptive_inconclusive"
+    assert result2["significant"] is False
 
 
 def test_run_comparison_drops_practically_significant():

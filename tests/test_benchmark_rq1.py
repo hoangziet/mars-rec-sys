@@ -6,7 +6,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scripts.report_rq1 import (
+from scripts.rq1_report import (
     format_metric_summary,
     parse_args as parse_report_args,
     required_run_count_for_model,
@@ -111,11 +111,11 @@ def test_train_all_parse_args_supports_protocol_version_and_seeds(monkeypatch):
     assert args.seeds == [42]
 
 
-def test_report_rq1_parse_args_only_has_manifest_args(monkeypatch):
+def test_rq1_report_parse_args_only_has_manifest_args(monkeypatch):
     monkeypatch.setattr(
         sys,
         "argv",
-        ["report_rq1.py", "--benchmark-id", "rq1-smoke", "--manifest", "experiments/benchmark/rq1-smoke/benchmark_manifest.json"],
+        ["rq1_report.py", "--benchmark-id", "rq1-smoke", "--manifest", "experiments/benchmark/rq1-smoke/benchmark_manifest.json"],
     )
     args = parse_report_args()
     assert args.benchmark_id == "rq1-smoke"
@@ -159,7 +159,7 @@ def test_report_cli_no_longer_exposes_dataset_version(monkeypatch):
     monkeypatch.setattr(
         sys,
         "argv",
-        ["report_rq1.py", "--benchmark-id", "rq1-smoke"],
+        ["rq1_report.py", "--benchmark-id", "rq1-smoke"],
     )
     args = parse_report_args()
     assert not hasattr(args, "dataset_version")

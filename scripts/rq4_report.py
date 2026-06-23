@@ -42,6 +42,17 @@ def main() -> None:
     if not comparison_csv.exists():
         raise FileNotFoundError(f"Comparison results not found: {comparison_csv}")
 
+    # Verify the comparison belongs to the claimed benchmark
+    result_manifest = comparison_dir / "rq4_result_manifest.json"
+    if result_manifest.exists():
+        manifest = json.loads(result_manifest.read_text())
+        manifest_benchmark = manifest.get("benchmark_id", "")
+        if manifest_benchmark and manifest_benchmark != args.benchmark_id:
+            raise RuntimeError(
+                f"Benchmark mismatch: --benchmark-id={args.benchmark_id} but "
+                f"result manifest says {manifest_benchmark}"
+            )
+
     with open(comparison_csv, newline="") as f:
         rows = list(csv.DictReader(f))
 
@@ -65,15 +76,13 @@ def main() -> None:
         f.write("## Primary Findings\n\n")
         f.write(
             "Each primary finding reports the effect size (Δ, relative %), the 95% bootstrap CI, "
-            "the permutation p-value with Holm correction, Cohen's d, and a significance label "
-            "derived from the Holm-adjusted p-value and bootstrap CI direction. Practical significance "
-            "is left to the reader: inspect the 95% CI against your domain's noise floor; "
-            "this report does not enforce a binary threshold.\n\n"
+            "the Holm-corrected permutation p-value, Cohen's d, and wins/ties/losses. "
+            "The ``significant`` column reflects the primary conclusion: Holm-adjusted p < 0.05 "
+            "AND the bootstrap CI does not cross zero in the direction opposite to the effect.\n\n"
         )
         for r in primary:
-            label = r.get("significance_label", "inconclusive")
             sig = "statistically significant" if r.get("significant") == "True" else "not significant"
-            f.write(f"- **{r['comparison']}**: {sig} — {label} (Holm p = {r.get('holm_adjusted_p', '-')})\n")
+            f.write(f"- **{r['comparison']}**: {sig} (Holm p = {r.get('holm_adjusted_p', '-')})\n")
             f.write(f"  - Mean difference: {float(r['mean_difference']):.6f}\n")
             f.write(f"  - Relative improvement: {r.get('relative_improvement_pct', '-')}% (Δ/|baseline| = {r.get('relative_improvement', '-')})\n")
             f.write(f"  - 95% bootstrap CI: [{r['bootstrap_ci_low']}, {r['bootstrap_ci_high']}]\n")

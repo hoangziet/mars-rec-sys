@@ -15,7 +15,6 @@ from __future__ import annotations
 import argparse
 import json
 import random
-import subprocess
 import sys
 from pathlib import Path
 
@@ -40,8 +39,6 @@ from training.configs import build_model_config
 from training.mlflow_contract import build_run_name, build_training_tags
 from training.mlflow_utils import collect_common_run_metadata, configure_mlflow, get_git_commit
 from training.trainer import NoValidCheckpointError, Trainer
-from training.winner_artifact import load_winner_artifact
-from scripts.rq4_init_protocol import verify_protocol_hashes
 
 
 def _validate_protocol_backbone(protocol: dict) -> str:
@@ -62,44 +59,16 @@ def _validate_protocol_backbone(protocol: dict) -> str:
 
 
 def _enforce_git_commit_match(protocol: dict) -> None:
-    """Fail unless HEAD matches the protocol's git_commit and the tree is clean.
+    """Deprecated no-op stub.
 
-    Content hashes (data, config, text) protect against drifted files, but
-    they don't cover model code, training logic, or evaluation code. Git is
-    the only source of truth for that. Final experiments require an exact
-    commit match and a clean working tree.
+    Git-commit runtime gating was removed from the RQ4 research contract.
+    Provenance is now lightweight: ``preprocessing_version`` and
+    ``data_source`` only. RQ4 no longer blocks runs on HEAD mismatch or
+    working-tree dirtiness. This symbol is kept only to avoid breaking
+    external imports; new code should not call it.
     """
-    expected_commit = protocol.get("git_commit")
-    if not expected_commit or expected_commit == "unknown":
-        raise RuntimeError(
-            "Protocol manifest has no git_commit — cannot verify the code "
-            "used to train. Re-init the protocol with a real commit."
-        )
+    return None
 
-    actual_commit = subprocess.check_output(
-        ["git", "rev-parse", "HEAD"], text=True
-    ).strip()
-
-    dirty = subprocess.check_output(
-        ["git", "status", "--porcelain"], text=True
-    ).strip()
-
-    mismatches = []
-    if actual_commit != expected_commit:
-        mismatches.append(
-            f"git_commit mismatch: protocol has {expected_commit[:12]}, "
-            f"HEAD is {actual_commit[:12]}"
-        )
-    if dirty:
-        mismatches.append(f"working tree is dirty ({len(dirty.splitlines())} files)")
-
-    if mismatches:
-        raise RuntimeError(
-            "Git provenance check failed — the working directory differs from "
-            "the frozen protocol. Commit, stash, or checkout the protocol's "
-            "commit before running final experiments.\n"
-            + "\n".join(f"  - {m}" for m in mismatches)
-        )
 
 EXPERIMENT_NAME = "mars_final_ablation"
 
@@ -194,11 +163,9 @@ def _run_single(args, backbone: str, variant: str, seed: int, variant_cfg: dict,
     mlflow_cfg["tags"]["use_structured"] = str(variant_cfg["use_structured"]).lower()
     mlflow_cfg["tags"]["use_text"] = str(variant_cfg["use_text"]).lower()
     mlflow_cfg["tags"]["protocol_version"] = protocol.get("benchmark_id", "unknown")
-    mlflow_cfg["tags"]["protocol_sha256"] = protocol.get("protocol_sha256", "unknown")
-    mlflow_cfg["tags"]["dataset_manifest_sha256"] = protocol.get("dataset_manifest_sha256", "unknown")
-    mlflow_cfg["tags"]["config_sha256"] = protocol.get("config_sha256", "unknown")
-    if protocol.get("text_artifact_sha256"):
-        mlflow_cfg["tags"]["text_artifact_sha256"] = protocol["text_artifact_sha256"]
+    # Lightweight provenance (no SHA256 hashing in the RQ4 contract).
+    mlflow_cfg["tags"]["preprocessing_version"] = protocol.get("preprocessing_version", "unknown")
+    mlflow_cfg["tags"]["data_source"] = protocol.get("data_source", "unknown")
     # per_user_complete starts false — only set to true after export succeeds
     mlflow_cfg["tags"]["per_user_complete"] = "false"
 
@@ -300,21 +267,10 @@ def main() -> None:
     # The backbone MUST come from the protocol manifest (frozen by
     # rq4-init from the gSASRec RQ2/RQ3 winners). We enforce gsasrec-only
     # here so a stale or hand-edited protocol cannot drive a non-gsasrec
-    # run.
+    # run. The RQ4 contract uses light provenance (preprocessing_version
+    # + data_source); git_commit is recorded as a tag for traceability
+    # only.
     backbone = _validate_protocol_backbone(protocol)
-
-    # Provenance check: recompute SHA256 of the preprocessing report, config
-    # bundle, and text embedding artifact. Refuse to train if any of them
-    # drifted since the protocol was frozen. The git_commit field is kept
-    # for traceability but is no longer enforced here (it is replaced by
-    # the more meaningful content hashes below).
-    verify_protocol_hashes(
-        manifest=protocol,
-        data_dir=Path(args.data_dir),
-        configs_glob="configs/model/*.yaml",
-    )
-
-    _enforce_git_commit_match(protocol)
 
     total = len(variants_list) * len(seeds)
     print(f"RQ4 ablation: backbone={backbone}, {len(variants_list)} variants x {len(seeds)} seeds = {total} runs")
