@@ -178,6 +178,18 @@ selected run agrees on all of these** and that the backbone is
 silently writing a default. `rq4-init` re-checks that the RQ2 and RQ3
 winner artifacts also declare `gsasrec` before freezing the protocol.
 
+The RQ4 protocol uses **lightweight provenance** only:
+
+- `preprocessing_version` and `data_source` from the validated RQ2/RQ3 winners
+- `backbone = "gsasrec"`
+- `git_commit` recorded as informational metadata (not a runtime gate)
+
+There is **no SHA256 hashing** of the dataset manifest, configs, or text
+embeddings, and **no git-commit runtime gate**. The research contract is
+gSASRec-only; the protocol manifest is checked for backbone and
+provenance consistency, not for byte-exact reproducibility of data or
+code.
+
 ### RQ4 explicit baseline
 
 The RQ4 protocol manifest declares an explicit `baseline_variant`

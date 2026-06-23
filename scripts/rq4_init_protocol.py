@@ -20,8 +20,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import glob
-import hashlib
 import json
 import subprocess
 import sys
@@ -53,99 +51,16 @@ def parse_args() -> argparse.Namespace:
     return build_parser().parse_args()
 
 
-def _sha256_file(path) -> str:
-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
-
-
-def _sha256_concat(glob_pattern: str) -> str:
-    """Concatenate all files matching the glob, then SHA256."""
-    h = hashlib.sha256()
-    for path in sorted(glob.glob(glob_pattern)):
-        h.update(Path(path).read_bytes())
-    return h.hexdigest()
-
-
 def _get_git_long_commit() -> str:
+    """Record the HEAD commit as a non-blocking provenance field.
+
+    The recorded value is informational only; the runner does not
+    enforce commit match at runtime.
+    """
     try:
         return subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
     except Exception:
         return "unknown"
-
-
-def verify_protocol_hashes(manifest: dict, data_dir: Path, configs_glob: str) -> None:
-    """Recompute and verify the SHA256 hashes recorded in the protocol manifest.
-
-    Hashes that were None at init time (e.g. data not yet preprocessed) are
-    skipped. When a recorded hash is non-None and the recomputed value
-    disagrees, the run is rejected with a clear remediation message.
-    """
-    data_dir = Path(data_dir)
-
-    # --- Self-hash: guard against tampering of the manifest itself ---
-    protocol_expected = manifest.get("protocol_sha256")
-    if protocol_expected:
-        body = {k: v for k, v in manifest.items() if k != "protocol_sha256"}
-        actual = hashlib.sha256(
-            json.dumps(body, sort_keys=True, indent=2).encode()
-        ).hexdigest()
-        if actual != protocol_expected:
-            raise RuntimeError(
-                f"protocol_sha256 mismatch: the manifest content has changed "
-                f"since the protocol was frozen. This usually means a field "
-                f"was manually edited without re-running rq4_init_protocol. "
-                f"Expected {protocol_expected[:12]}..., got {actual[:12]}..."
-            )
-
-    expected_data = manifest.get("dataset_manifest_sha256")
-    if expected_data:
-        data_report = data_dir / "reports" / "dataset_manifest.json"
-        if not data_report.exists():
-            raise RuntimeError(
-                f"dataset_manifest_sha256 was frozen to {expected_data[:12]}... "
-                f"but dataset_manifest.json is missing at {data_report}. "
-                f"Re-run data/preprocess.py or re-init the protocol."
-            )
-        actual = _sha256_file(data_report)
-        if actual != expected_data:
-            raise RuntimeError(
-                f"dataset_manifest_sha256 mismatch: manifest has {expected_data[:12]}..., "
-                f"current file has {actual[:12]}... "
-                f"This means processed data has changed since the protocol was frozen. "
-                f"Re-run data/preprocess.py or re-init the protocol."
-            )
-
-    expected_config = manifest.get("config_sha256")
-    if expected_config:
-        if not Path(configs_glob).parent.parent.exists() and not glob.glob(configs_glob):
-            raise RuntimeError(
-                f"config_sha256 was frozen to {expected_config[:12]}... "
-                f"but no config files match {configs_glob!r}. "
-                f"Restore the configs or re-init the protocol."
-            )
-        actual = _sha256_concat(configs_glob)
-        if actual != expected_config:
-            raise RuntimeError(
-                f"config_sha256 mismatch: manifest has {expected_config[:12]}..., "
-                f"current configs have {actual[:12]}... "
-                f"Restore the original configs or re-init the protocol."
-            )
-
-    expected_text = manifest.get("text_artifact_sha256")
-    if expected_text:
-        text_path = data_dir / "item_features" / "text_embeddings.pt"
-        if not text_path.exists():
-            raise RuntimeError(
-                f"text_artifact_sha256 was frozen to {expected_text[:12]}... "
-                f"but text_embeddings.pt is missing at {text_path}. "
-                f"Re-run rq3-precompute or re-init the protocol."
-            )
-        actual = _sha256_file(text_path)
-        if actual != expected_text:
-            raise RuntimeError(
-                f"text_artifact_sha256 mismatch: manifest has {expected_text[:12]}..., "
-                f"current file has {actual[:12]}... "
-                f"Re-run rq3-precompute or re-init the protocol."
-            )
 
 
 def main() -> None:
@@ -244,38 +159,6 @@ def main() -> None:
         },
     }
 
-    # Provenance SHA256s — these let rq4_ablation detect drift between
-    # manifest creation time and training time.
-
-    dataset_manifest_path = data_dir / "reports" / "dataset_manifest.json"
-    if dataset_manifest_path.exists():
-        manifest["dataset_manifest_sha256"] = _sha256_file(dataset_manifest_path)
-    else:
-        raise RuntimeError(
-            f"dataset_manifest.json not found at {dataset_manifest_path}. "
-            f"Run make preprocess first."
-        )
-
-    if Path("configs/model").exists():
-        manifest["config_sha256"] = _sha256_concat("configs/model/*.yaml")
-    else:
-        manifest["config_sha256"] = None
-
-    text_emb_path = data_dir / "item_features" / "text_embeddings.pt"
-    if text_emb_path.exists():
-        manifest["text_artifact_sha256"] = _sha256_file(text_emb_path)
-    else:
-        manifest["text_artifact_sha256"] = None
-
-    path.write_text(json.dumps(manifest, indent=2) + "\n")
-
-    # Self-hash: hash of canonical (sort_keys) JSON of the manifest, excluding
-    # the field itself.  This is a content identifier, not a hash of the file
-    # (the file is written without sort_keys for human readability).
-    manifest_no_self_hash = {k: v for k, v in manifest.items() if k != "protocol_sha256"}
-    manifest["protocol_sha256"] = hashlib.sha256(
-        json.dumps(manifest_no_self_hash, sort_keys=True, indent=2).encode()
-    ).hexdigest()
     path.write_text(json.dumps(manifest, indent=2) + "\n")
 
     print(f"Protocol manifest written: {path}")
@@ -284,8 +167,6 @@ def main() -> None:
     print(f"  Best alpha: {manifest['best_alpha']}")
     print(f"  Best metadata variant: {manifest['best_metadata_variant']}")
     print(f"  Git commit: {manifest['git_commit'][:12]}")
-    print(f"  Data manifest SHA256: {(manifest.get('dataset_manifest_sha256') or 'N/A')[:12]}")
-    print(f"  Config SHA256: {(manifest.get('config_sha256') or 'N/A')[:12]}")
     print(f"  Variants: {args.variants}")
     print(f"  Seeds: {len(args.seeds)}")
     print(f"  Expected runs: {manifest['expected_runs']}")

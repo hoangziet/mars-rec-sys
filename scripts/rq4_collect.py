@@ -27,7 +27,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scripts.rq4_init_protocol import verify_protocol_hashes
+from scripts.rq4_per_user import validate_per_user_file
 from training.mlflow_utils import configure_mlflow
 
 EXPERIMENT_NAME = "mars_final_ablation"
@@ -127,10 +127,16 @@ def _validate_run_tags(selected, tags_by_run, expected_alpha, best_metadata_vari
 
 def _validate_provenance_tags(selected: list[dict], tags_by_run: dict[str, dict],
                              protocol: dict) -> list[str]:
-    """Each MLflow run must carry the exact provenance hashes from the protocol.
+    """Validate MLflow-run tags against the protocol.
 
-    A run with outdated or missing provenance tags was trained with a
-    different data/config/artifact version and must not be included.
+    The RQ4 contract uses lightweight provenance (preprocessing_version +
+    data_source + git_commit). There is no SHA256 hashing in the protocol
+    anymore, so this validator only checks ``git_commit`` (informational)
+    and the per-user-export flag.
+
+    The run is rejected if:
+      - the recorded ``git_commit`` is missing
+      - ``per_user_complete`` is not exactly "true"
     """
     errors = []
     for r in selected:
@@ -138,30 +144,6 @@ def _validate_provenance_tags(selected: list[dict], tags_by_run: dict[str, dict]
         variant = r["variant"]
         seed = r["seed"]
         prefix = f"{variant} seed={seed}"
-
-        for key in ("protocol_sha256", "dataset_manifest_sha256", "config_sha256"):
-            expected = protocol.get(key)
-            if expected is None:
-                continue
-            actual = tags.get(key)
-            if actual is None:
-                errors.append(f"{prefix}: missing tag {key}")
-            elif actual != expected:
-                errors.append(
-                    f"{prefix}: {key} mismatch — "
-                    f"expected {expected[:12]}..., got {actual[:12]}..."
-                )
-
-        text_expected = protocol.get("text_artifact_sha256")
-        if text_expected:
-            text_actual = tags.get("text_artifact_sha256")
-            if text_actual is None:
-                errors.append(f"{prefix}: missing tag text_artifact_sha256")
-            elif text_actual != text_expected:
-                errors.append(
-                    f"{prefix}: text_artifact_sha256 mismatch — "
-                    f"expected {text_expected[:12]}..., got {text_actual[:12]}..."
-                )
 
         git_expected = protocol.get("git_commit")
         if git_expected and git_expected != "unknown":
@@ -179,6 +161,29 @@ def _validate_provenance_tags(selected: list[dict], tags_by_run: dict[str, dict]
         if tags.get("per_user_complete") != "true":
             errors.append(f"{prefix}: per_user_complete is not true")
 
+    return errors
+
+
+def _validate_per_user_on_disk(
+    selected: list[dict], per_user_dir: Path
+) -> list[str]:
+    """Each run that claims per_user_complete=true must have a valid CSV on
+    disk. We re-validate using the same helper as the writer to defend
+    against stale or tampered files.
+    """
+    errors: list[str] = []
+    for r in selected:
+        path = per_user_dir / f"{r['variant']}_s{r['seed']}.csv"
+        prefix = f"{r['variant']} seed={r['seed']}"
+        if not path.exists():
+            errors.append(
+                f"{prefix}: per_user_complete=true but file is missing at {path}"
+            )
+            continue
+        try:
+            validate_per_user_file(path, expected_min_rows=1)
+        except Exception as exc:
+            errors.append(f"{prefix}: invalid per-user CSV at {path}: {exc}")
     return errors
 
 
@@ -202,7 +207,10 @@ def main() -> None:
         if tags.get("benchmark_id") != args.benchmark_id:
             continue
         variant = tags.get("ablation_variant", "?")
-        seed = int(run.data.params.get("seed", "0"))
+        try:
+            seed = int(run.data.params.get("seed", "0"))
+        except (ValueError, TypeError):
+            continue  # malformed seed param — skip this run
         val_ndcg = run.data.metrics.get("best_val_ndcg_at_10")
         test_ndcg = run.data.metrics.get("test_NDCG_at_10")
         test_recall = run.data.metrics.get("test_Recall_at_10")
@@ -225,18 +233,28 @@ def main() -> None:
     if not selected:
         raise RuntimeError(f"No reportable runs found for benchmark {args.benchmark_id}")
 
+    # Always reject duplicate (variant, seed) pairs — even without --protocol.
+    # Without this check, stale or re-run experiments silently inflate counts.
+    pair_counts: dict[tuple[str, int], int] = {}
+    for r in selected:
+        key = (r["variant"], r["seed"])
+        pair_counts[key] = pair_counts.get(key, 0) + 1
+    dupes = {k: v for k, v in pair_counts.items() if v > 1}
+    if dupes:
+        raise RuntimeError(
+            f"Duplicate (variant, seed) runs found. Fix your MLflow experiment "
+            f"(e.g. delete stale runs or use a new benchmark_id) and re-collect.\n"
+            f"Duplicates: {dupes}"
+        )
+
     # Validate against protocol manifest if provided
     if args.protocol:
         protocol = json.loads(Path(args.protocol).read_text())
 
-        # Reject collect if data/config/text artifacts drifted since the
-        # protocol was frozen. Catches the case where someone re-runs collect
-        # on a different machine with regenerated embeddings, etc.
-        verify_protocol_hashes(
-            manifest=protocol,
-            data_dir=Path(args.data_dir),
-            configs_glob="configs/model/*.yaml",
-        )
+        # RQ4 contract: gSASRec-only with lightweight provenance. The
+        # protocol no longer carries SHA256 hashes, so there is no drift
+        # check to run here. We just record the protocol for downstream
+        # validation in _validate_provenance_tags below.
 
         expected_variants = set(protocol["variants"])
         expected_seeds = {int(s) for s in protocol["neural_seeds"]}
@@ -264,13 +282,6 @@ def main() -> None:
                 errors.append(f"Extra seeds: {extra_s}")
         if len(actual_pairs) != expected_runs:
             errors.append(f"Expected {expected_runs} runs, got {len(actual_pairs)}")
-        pair_counts = {}
-        for r in selected:
-            key = (r["variant"], r["seed"])
-            pair_counts[key] = pair_counts.get(key, 0) + 1
-        dupes = {k: v for k, v in pair_counts.items() if v > 1}
-        if dupes:
-            errors.append(f"Duplicate (variant, seed): {dupes}")
 
         # Validate tags against protocol
         tags_by_run = _get_run_tags(client, experiment.experiment_id)
@@ -298,11 +309,30 @@ def main() -> None:
             if missing_metrics:
                 errors.append(f"{r['variant']} seed={r['seed']}: missing metrics {missing_metrics}")
 
+        # Validate the on-disk per-user CSV for every run that claims
+        # per_user_complete=true. This is the second half of the atomic
+        # contract from rq4_per_user.py: MLflow tags lie until the file
+        # checks out.
+        output_dir = Path(args.output_dir) if args.output_dir else Path("experiments") / "rq4" / args.benchmark_id
+        per_user_dir = output_dir / "per_user"
+        errors.extend(_validate_per_user_on_disk(selected, per_user_dir))
+
         if errors:
             raise RuntimeError("Protocol validation failed:\n" + "\n".join(f"  - {e}" for e in errors))
 
     output_dir = Path(args.output_dir) if args.output_dir else Path("experiments") / "rq4" / args.benchmark_id
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Always validate the per-user CSV on disk, regardless of whether
+    # --protocol was given. The collector cannot trust the MLflow tag
+    # alone — the file on disk must also be valid.
+    per_user_dir = output_dir / "per_user"
+    per_user_errors = _validate_per_user_on_disk(selected, per_user_dir)
+    if per_user_errors:
+        raise RuntimeError(
+            "Per-user CSV validation failed:\n"
+            + "\n".join(f"  - {e}" for e in per_user_errors)
+        )
 
     # Write rq4_runs.csv
     run_fields = ["variant", "seed", "run_id", "run_name", "best_val_ndcg_at_10",
@@ -358,11 +388,16 @@ def main() -> None:
         "n_variants": len(all_variants),
     }
     if args.protocol:
-        for key in ("protocol_sha256", "dataset_manifest_sha256", "config_sha256",
-                     "text_artifact_sha256", "git_commit"):
+        for key in ("git_commit", "baseline_variant", "backbone",
+                     "preprocessing_version", "data_source"):
             val = protocol.get(key)
             if val is not None:
                 manifest[key] = val
+        # If the protocol declared a baseline that is not in the
+        # actually-collected variants, propagate anyway so rq4_compare can
+        # fail with a clear error.
+        if "baseline_variant" not in manifest and "baseline_variant" in protocol:
+            manifest["baseline_variant"] = protocol["baseline_variant"]
     with open(output_dir / "rq4_result_manifest.json", "w") as f:
         json.dump(manifest, f, indent=2)
 

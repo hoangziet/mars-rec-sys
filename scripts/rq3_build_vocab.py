@@ -45,7 +45,8 @@ def _get_train_item_idx(train_csv: str) -> set[int]:
     """Collect the set of item_idx that appear in the training sequences."""
     df = pd.read_csv(train_csv)
     items: set[int] = set()
-    for seq_str in df["item_sequence"]:
+    seq_col = "item_sequence" if "item_sequence" in df.columns else "train_seq"
+    for seq_str in df[seq_col]:
         items.update(parse_seq(seq_str))
     return items
 
@@ -74,7 +75,7 @@ def main() -> None:
     if not train_csv.exists():
         raise FileNotFoundError(
             f"train_sequences.csv is required for train-only metadata fitting: {train_csv}. "
-            f"Run make preprocess first, or pass --fit-on-all-items for explicit transductive mode."
+            f"Run make preprocess first."
         )
     train_items = _get_train_item_idx(str(train_csv))
     train_item_sha256 = hashlib.sha256(

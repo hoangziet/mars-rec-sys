@@ -27,13 +27,13 @@ __pycache__/
 
 # experiments
 experiments/
-!experiments/benchmark/*/benchmark_manifest.json
 
 # mlruns
 mlruns/
 
 # output
 outputs/
+result.txt
 
 # IDE
 .vscode/

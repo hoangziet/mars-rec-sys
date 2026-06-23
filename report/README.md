@@ -1,6 +1,6 @@
 # FPT University LaTeX Thesis Template
 
-A professional, well-organized LaTeX thesis template for FPT University graduation projects.
+A professional, well-organized LaTeX thesis template for FPT University graduation projects. This directory is the **embedded thesis template** for the `mars-rec-sys` research codebase; it is tracked in git as part of the deliverable but is not run as part of the experiment workflow.
 
 ## Project Structure
 

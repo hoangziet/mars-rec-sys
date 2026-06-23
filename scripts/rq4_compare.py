@@ -9,12 +9,24 @@ computes per-user delta, then runs:
 - Paired permutation test (sign-flip, user-level)
 - Paired t-test (seed-level, supplementary)
 - Cohen's d effect size
-- Holm correction on 3 primary comparisons
+- Holm correction on primary comparisons
 
-Primary comparisons (Holm-corrected):
-    V1 vs V0, V2 vs V0, V3 vs V0
-Secondary comparisons (descriptive only):
-    V3 vs V1, V3 vs V2
+Comparisons are derived from the protocol manifest, not hardcoded:
+
+Primary (Holm-corrected):
+    every non-baseline variant vs the explicit ``baseline_variant``
+    declared in the protocol manifest. There is no implicit fallback
+    to ``variants[0]``; reordering or a custom variant list will not
+    silently change the baseline.
+
+Secondary (descriptive only):
+    best-performing non-baseline variant vs every other non-baseline
+    variant. No multiple-comparison correction; significance is always
+    False for these.
+
+The result manifest must declare ``baseline_variant`` and a unique list
+of variants. Otherwise ``_resolve_baseline`` raises and the comparison
+fails fast.
 
 Usage:
     uv run python scripts/rq4_compare.py --per-user-dir ... --manifest ... --output-dir ...
@@ -37,15 +49,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 PRIMARY_METRIC = "ndcg_at_10"
 METRIC_LABEL = "NDCG@10"
-PRIMARY_COMPARISONS = [("V1", "V0"), ("V2", "V0"), ("V3", "V0")]
-SECONDARY_COMPARISONS = [("V3", "V1"), ("V3", "V2")]
 BOOTSTRAP_N = 10000
 PERMUTATION_N = 10000
 RNG_SEED = 42
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="RQ4: user-level statistical comparison.")
     parser.add_argument("--per-user-dir", required=True, help="Directory with per-user CSV files")
-    parser.add_argument("--manifest", required=True, help="rq4_manifest.json")
+    parser.add_argument("--manifest", required=True, help="rq4_result_manifest.json (produced by rq4_collect)")
     parser.add_argument("--output-dir", required=True)
     return parser
 
@@ -187,11 +197,18 @@ def _permutation_test(deltas: np.ndarray, n_perm: int = PERMUTATION_N,
 
 
 def _cohens_d(deltas: np.ndarray) -> float:
-    """Cohen's d for paired samples: mean(delta) / std(delta)."""
+    """Cohen's d for paired samples: mean(delta) / std(delta).
+
+    Returns ``float('inf')`` when every user has the same non-zero delta
+    (maximum effect).  Returns 0.0 when the mean delta is exactly 0.
+    """
+    mean = deltas.mean()
     std = deltas.std(ddof=1)
     if std == 0:
-        return 0.0
-    return float(deltas.mean() / std)
+        if mean == 0:
+            return 0.0
+        return float("inf") if mean > 0 else float("-inf")
+    return float(mean / std)
 
 
 def _seed_level_ttest(per_user: pd.DataFrame, comp_variant: str, base_variant: str,
@@ -285,37 +302,61 @@ def _assign_significance_label(
     holm_adjusted_p: float | None,
     is_primary: bool = True,
 ) -> None:
-    """Assign the final significance_label after Holm correction.
+    """Assign ``significant`` as the sole public conclusion.
 
-    Primary comparisons use the Holm-adjusted p-value and bootstrap CI to
-    distinguish reliable improvement / degradation from inconclusive. The
-    label must be computed here, not inside _run_comparison, because the
-    Holm correction happens after all three primary comparisons are run.
+    Primary: ``significant`` is True only when the Holm-adjusted p < 0.05
+    AND the bootstrap CI does not cross zero (same direction as mean_diff).
 
-    Secondary comparisons are always descriptive (no multiple-comparison
-    correction) and prefix the label with ``descriptive_``.
+    Secondary: ``significant`` is always False (no multiple-comparison
+    correction), and the result carries no ``significance_label`` in public
+    output.
     """
     mean_diff = float(result["mean_difference"])
     ci_low = float(result["bootstrap_ci_low"])
     ci_high = float(result["bootstrap_ci_high"])
 
     if is_primary and holm_adjusted_p is not None and holm_adjusted_p < 0.05:
-        if mean_diff > 0 and ci_low > 0:
-            result["significance_label"] = "reliable_improvement"
-        elif mean_diff < 0 and ci_high < 0:
-            result["significance_label"] = "reliable_degradation"
+        if (mean_diff > 0 and ci_low > 0) or (mean_diff < 0 and ci_high < 0):
+            result["significant"] = True
         else:
-            result["significance_label"] = "inconclusive"
-    elif is_primary:
-        result["significance_label"] = "inconclusive"
+            result["significant"] = False
     else:
-        # Secondary: descriptive only, no correction
-        if mean_diff > 0 and ci_low > 0:
-            result["significance_label"] = "descriptive_improvement"
-        elif mean_diff < 0 and ci_high < 0:
-            result["significance_label"] = "descriptive_degradation"
-        else:
-            result["significance_label"] = "descriptive_inconclusive"
+        result["significant"] = False
+
+
+def _resolve_baseline(manifest: dict, variants: list[str]) -> str:
+    """Pick the baseline variant for statistical comparison.
+
+    The protocol manifest MUST declare ``baseline_variant`` explicitly.
+    Variants must be unique. We never silently pick variants[0] because
+    reordering or a custom variant list would silently change the baseline.
+    """
+    if not variants:
+        raise RuntimeError("Cannot resolve baseline: variants list is empty")
+
+    seen: dict[str, int] = {}
+    for v in variants:
+        seen[v] = seen.get(v, 0) + 1
+    dupes = {k: c for k, c in seen.items() if c > 1}
+    if dupes:
+        raise RuntimeError(
+            f"Variant IDs must be unique, found duplicates: {sorted(dupes)}. "
+            "Re-init the protocol with unique variant IDs."
+        )
+
+    baseline = manifest.get("baseline_variant")
+    if not baseline:
+        raise RuntimeError(
+            "Protocol manifest is missing 'baseline_variant'. "
+            "Re-run rq4-init with --baseline-variant V0 (or another baseline). "
+            "There is no implicit fallback to variants[0]."
+        )
+    if baseline not in variants:
+        raise RuntimeError(
+            f"baseline_variant={baseline!r} not in variants={variants}. "
+            "Re-init the protocol or fix the manifest."
+        )
+    return baseline
 
 
 def main() -> None:
@@ -325,6 +366,8 @@ def main() -> None:
     expected_seeds = {int(s) for s in manifest["neural_seeds"]}
     variants = manifest["variants"]
 
+    baseline = _resolve_baseline(manifest, variants)
+
     per_user_dir = Path(args.per_user_dir)
     per_user = _load_per_user(per_user_dir, variants, sorted(expected_seeds))
 
@@ -333,9 +376,15 @@ def main() -> None:
 
     rng = np.random.default_rng(RNG_SEED)
 
+    non_baseline = [v for v in variants if v != baseline]
+    if not non_baseline:
+        raise RuntimeError(f"No non-baseline variants to compare against {baseline}")
+
+    primary_pairs = [(v, baseline) for v in non_baseline]
+
     # Primary comparisons
     primary_results = []
-    for comp_variant, base_variant in PRIMARY_COMPARISONS:
+    for comp_variant, base_variant in primary_pairs:
         result = _run_comparison(per_user, comp_variant, base_variant, expected_seeds, rng)
         result["comparison_type"] = "primary"
         primary_results.append(result)
@@ -350,13 +399,18 @@ def main() -> None:
             # assign label AFTER Holm + CI check
             _assign_significance_label(r, holm_adjusted_p=float(adj), is_primary=True)
 
-    # Secondary comparisons
+    # Secondary comparisons: best non-baseline variant vs the rest
     secondary_results = []
-    for comp_variant, base_variant in SECONDARY_COMPARISONS:
-        result = _run_comparison(per_user, comp_variant, base_variant, expected_seeds, rng)
-        result["comparison_type"] = "secondary"
-        _assign_significance_label(result, holm_adjusted_p=None, is_primary=False)
-        secondary_results.append(result)
+    if len(non_baseline) > 1:
+        best = max(non_baseline, key=lambda v: next(
+            r["comp_mean"] for r in primary_results if r["comp_variant"] == v
+        ))
+        for other in non_baseline:
+            if other != best:
+                result = _run_comparison(per_user, best, other, expected_seeds, rng)
+                result["comparison_type"] = "secondary"
+                _assign_significance_label(result, holm_adjusted_p=None, is_primary=False)
+                secondary_results.append(result)
 
     all_results = primary_results + secondary_results
 
@@ -368,7 +422,6 @@ def main() -> None:
         "comparison", "comparison_type", "comp_variant", "base_variant",
         "n_users", "comp_mean", "base_mean", "mean_difference", "relative_improvement",
         "relative_improvement_pct", "abs_mean_difference",
-        "significance_label",
         "wins", "ties", "losses",
         "bootstrap_ci_low", "bootstrap_ci_high",
         "permutation_p", "cohens_d",
@@ -389,16 +442,15 @@ def main() -> None:
         f.write("Multiple-comparison correction: Holm (primary comparisons only)\n")
         f.write("Family-wise significance level: α = 0.05\n")
         f.write("Practical-significance threshold: not enforced. Report Δ, rel%, [95% CI].\n")
-        f.write("Significance label is derived from Holm-adjusted p-value and bootstrap CI direction.\n\n")
+        f.write("``significant`` is True when Holm-adjusted p < 0.05 and the bootstrap CI does not cross zero.\n\n")
 
         f.write("## Primary comparisons (Holm-corrected)\n\n")
-        f.write("| Comparison | Comp | Base | Δ | Rel % | 95% CI (bootstrap) | W/T/L | Perm p | Holm p | Cohen's d | Label | Sig |\n")
-        f.write("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |\n")
+        f.write("| Comparison | Comp | Base | Δ | Rel % | 95% CI (bootstrap) | W/T/L | Perm p | Holm p | Cohen's d | Sig |\n")
+        f.write("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |\n")
         for r in primary_results:
             ci = f"[{r['bootstrap_ci_low']:.4f}, {r['bootstrap_ci_high']:.4f}]"
             wtl = f"{r['wins']}/{r['ties']}/{r['losses']}"
             rel = f"{r['relative_improvement_pct']:.2f}%" if r["relative_improvement_pct"] is not None else "-"
-            label = r.get("significance_label", "inconclusive")
             sig = "✅" if r["significant"] else "-"
             f.write(
                 f"| {r['comparison']} "
@@ -411,7 +463,6 @@ def main() -> None:
                 f"| {_format_p_value(r['permutation_p'])} "
                 f"| {_format_p_value(r['holm_adjusted_p'])} "
                 f"| {r['cohens_d']:.3f} "
-                f"| {label} "
                 f"| {sig} |\n"
             )
 

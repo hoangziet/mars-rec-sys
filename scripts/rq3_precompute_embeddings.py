@@ -25,15 +25,16 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 DEFAULT_MODEL = "dangvantuan/sentence-camembert-base"
-DEFAULT_INPUT = "data/processed/item_features/item_metadata.csv"
-DEFAULT_OUTPUT = "data/processed/item_features/text_embeddings.pt"
+DEFAULT_DATA_DIR = "data/processed"
 MISSING_TEXT = "contenu non disponible"
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Precompute text embeddings for items.")
-    parser.add_argument("--input", default=DEFAULT_INPUT)
-    parser.add_argument("--output", default=DEFAULT_OUTPUT)
+    parser.add_argument("--data-dir", default=DEFAULT_DATA_DIR,
+                        help="Processed data directory (derives --input, --output)")
+    parser.add_argument("--input", default=None)
+    parser.add_argument("--output", default=None)
     parser.add_argument("--model-name", default=DEFAULT_MODEL)
     parser.add_argument("--batch-size", type=int, default=64)
     return parser
@@ -62,6 +63,10 @@ def _resolve_encoder_revision(model_name: str) -> str:
 
 def main() -> None:
     args = parse_args()
+    data_dir = Path(args.data_dir)
+
+    input_csv = Path(args.input) if args.input else data_dir / "item_features" / "item_metadata.csv"
+    output_path = Path(args.output) if args.output else data_dir / "item_features" / "text_embeddings.pt"
 
     print(f"Loading model: {args.model_name}")
     from sentence_transformers import SentenceTransformer
@@ -69,7 +74,7 @@ def main() -> None:
 
     encoder_revision = _resolve_encoder_revision(args.model_name)
 
-    df = pd.read_csv(args.input)
+    df = pd.read_csv(str(input_csv))
     df = df.sort_values("item_idx").reset_index(drop=True)
 
     if df["item_idx"].duplicated().any():
@@ -103,13 +108,12 @@ def main() -> None:
     for i, idx in enumerate(item_indices):
         full_embeddings[idx] = torch.tensor(embeddings[i], dtype=torch.float32)
 
-    output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(full_embeddings, output_path)
 
     import hashlib
-    map_path = output_path.parent.parent / "mappings" / "item_id_map.csv"
-    meta_csv_path = output_path.parent / "item_metadata.csv"
+    map_path = data_dir / "mappings" / "item_id_map.csv"
+    meta_csv_path = data_dir / "item_features" / "item_metadata.csv"
     item_id_map_sha256 = hashlib.sha256(map_path.read_bytes()).hexdigest() if map_path.exists() else None
     metadata_sha256 = hashlib.sha256(meta_csv_path.read_bytes()).hexdigest() if meta_csv_path.exists() else None
 
