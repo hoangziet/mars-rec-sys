@@ -65,13 +65,13 @@ class GSASRecBlock(nn.Module):
             # Pre-LN
             residual = x
             z = self.ln1(x)
-            attn_out, _ = self.attn(z, z, z, attn_mask=attn_mask, key_padding_mask=padding_mask)
+            attn_out, _ = self.attn(z, z, z, attn_mask=attn_mask)
             x = residual + self.dropout1(attn_out)
             residual = x
             x = residual + self.dropout2(self.ffn(self.ln2(x)))
         else:
             # Post-LN
-            attn_out, _ = self.attn(x, x, x, attn_mask=attn_mask, key_padding_mask=padding_mask)
+            attn_out, _ = self.attn(x, x, x, attn_mask=attn_mask)
             x = self.ln1(x + self.dropout1(attn_out))
             x = self.ln2(x + self.dropout2(self.ffn(x)))
         return x
@@ -177,12 +177,8 @@ class GSASRec(nn.Module):
         causal_mask = torch.triu(
             torch.ones(L, L, device=input_seq.device, dtype=torch.bool), diagonal=1
         )
-        padding_mask = input_seq == self.pad_token
         for block in self.blocks:
-            x = block(x, attn_mask=causal_mask, padding_mask=padding_mask)
-            # Re-zero at padding positions: when a padded query has all keys
-            # masked, attention softmax becomes all -inf → NaN, which then
-            # propagates through the residual to valid positions in later blocks.
+            x = block(x, attn_mask=causal_mask)
             x = x.masked_fill(pad_hidden_mask, 0.0)
         x = self.final_ln(x)
         x = x.masked_fill(pad_hidden_mask, 0.0)
