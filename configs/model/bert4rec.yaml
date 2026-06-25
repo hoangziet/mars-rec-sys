@@ -8,14 +8,15 @@ model_kwargs:
 train_kwargs:
   batch_size: 256
   epochs: 50
-  lr: 1e-4
-  weight_decay: 1e-2
+  lr: 1e-3
+  weight_decay: 1e-4
+  beta2: 0.98
   max_len: 50
   gradient_clip: 5.0
   early_stop_patience: 10
   early_stop_min_delta: 1e-4
   mask_ratio: 0.2
-  warmup_steps: 100
+  warmup_steps: 0
   dupe_factor: 10
   prop_sliding_window: 0.1
   force_last_item_mask: true

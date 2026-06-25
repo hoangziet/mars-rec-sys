@@ -30,7 +30,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from scripts.rq4_per_user import validate_per_user_file
 from training.mlflow_utils import configure_mlflow
 
-EXPERIMENT_NAME = "mars_final_ablation"
+from training.mlflow_contract import RQ4_EXPERIMENT_NAME
+
+EXPERIMENT_NAME = RQ4_EXPERIMENT_NAME
 VARIANT_ORDER = {"V0": 0, "V1": 1, "V2": 2, "V3": 3}
 
 
@@ -129,13 +131,14 @@ def _validate_provenance_tags(selected: list[dict], tags_by_run: dict[str, dict]
                              protocol: dict) -> list[str]:
     """Validate MLflow-run tags against the protocol.
 
-    The RQ4 contract uses lightweight provenance (preprocessing_version +
-    data_source + git_commit). There is no SHA256 hashing in the protocol
-    anymore, so this validator only checks ``git_commit`` (informational)
-    and the per-user-export flag.
+    The RQ4 contract uses lightweight provenance only
+    (preprocessing_version + data_source). There is no SHA256 hashing or
+    git-commit gating in the protocol anymore, so this validator only
+    checks the per-user-export flag.
 
     The run is rejected if:
-      - the recorded ``git_commit`` is missing
+      - ``preprocessing_version`` mismatches the frozen protocol
+      - ``data_source`` mismatches the frozen protocol
       - ``per_user_complete`` is not exactly "true"
     """
     errors = []
@@ -145,16 +148,19 @@ def _validate_provenance_tags(selected: list[dict], tags_by_run: dict[str, dict]
         seed = r["seed"]
         prefix = f"{variant} seed={seed}"
 
-        git_expected = protocol.get("git_commit")
-        if git_expected and git_expected != "unknown":
-            git_actual = tags.get("git_commit")
-            if git_actual is None:
-                errors.append(f"{prefix}: missing tag git_commit")
-            elif git_actual != git_expected:
-                errors.append(
-                    f"{prefix}: git_commit mismatch — "
-                    f"expected {git_expected[:12]}, got {git_actual[:12]}"
-                )
+        expected_pv = protocol.get("preprocessing_version")
+        actual_pv = tags.get("preprocessing_version")
+        if expected_pv and actual_pv != expected_pv:
+            errors.append(
+                f"{prefix}: preprocessing_version mismatch — expected {expected_pv!r}, got {actual_pv!r}"
+            )
+
+        expected_ds = protocol.get("data_source")
+        actual_ds = tags.get("data_source")
+        if expected_ds and actual_ds != expected_ds:
+            errors.append(
+                f"{prefix}: data_source mismatch — expected {expected_ds!r}, got {actual_ds!r}"
+            )
 
         # Every final run must have per_user_complete=true
         # (the runner sets it after per-user CSV is committed to disk)
@@ -189,6 +195,8 @@ def _validate_per_user_on_disk(
 
 def main() -> None:
     args = parse_args()
+    if not args.protocol:
+        raise RuntimeError("--protocol is required for rq4_collect")
     configure_mlflow(mlflow_module=mlflow)
 
     client = mlflow.tracking.MlflowClient()
@@ -247,78 +255,63 @@ def main() -> None:
             f"Duplicates: {dupes}"
         )
 
-    # Validate against protocol manifest if provided
-    if args.protocol:
-        protocol = json.loads(Path(args.protocol).read_text())
+    protocol = json.loads(Path(args.protocol).read_text())
 
-        # RQ4 contract: gSASRec-only with lightweight provenance. The
-        # protocol no longer carries SHA256 hashes, so there is no drift
-        # check to run here. We just record the protocol for downstream
-        # validation in _validate_provenance_tags below.
+    expected_variants = set(protocol["variants"])
+    expected_seeds = {int(s) for s in protocol["neural_seeds"]}
+    expected_runs = len(expected_variants) * len(expected_seeds)
+    expected_alpha = float(protocol["best_alpha"])
 
-        expected_variants = set(protocol["variants"])
-        expected_seeds = {int(s) for s in protocol["neural_seeds"]}
-        expected_runs = len(expected_variants) * len(expected_seeds)
-        expected_alpha = float(protocol["best_alpha"])
+    actual_variants = {r["variant"] for r in selected}
+    actual_seeds = {r["seed"] for r in selected}
+    actual_pairs = {(r["variant"], r["seed"]) for r in selected}
 
-        actual_variants = {r["variant"] for r in selected}
-        actual_seeds = {r["seed"] for r in selected}
-        actual_pairs = {(r["variant"], r["seed"]) for r in selected}
+    errors = []
+    if actual_variants != expected_variants:
+        missing_v = sorted(expected_variants - actual_variants)
+        extra_v = sorted(actual_variants - expected_variants)
+        if missing_v:
+            errors.append(f"Missing variants: {missing_v}")
+        if extra_v:
+            errors.append(f"Extra variants: {extra_v}")
+    if actual_seeds != expected_seeds:
+        missing_s = sorted(expected_seeds - actual_seeds)
+        extra_s = sorted(actual_seeds - expected_seeds)
+        if missing_s:
+            errors.append(f"Missing seeds: {missing_s}")
+        if extra_s:
+            errors.append(f"Extra seeds: {extra_s}")
+    if len(actual_pairs) != expected_runs:
+        errors.append(f"Expected {expected_runs} runs, got {len(actual_pairs)}")
 
-        errors = []
-        if actual_variants != expected_variants:
-            missing_v = sorted(expected_variants - actual_variants)
-            extra_v = sorted(actual_variants - expected_variants)
-            if missing_v:
-                errors.append(f"Missing variants: {missing_v}")
-            if extra_v:
-                errors.append(f"Extra variants: {extra_v}")
-        if actual_seeds != expected_seeds:
-            missing_s = sorted(expected_seeds - actual_seeds)
-            extra_s = sorted(actual_seeds - expected_seeds)
-            if missing_s:
-                errors.append(f"Missing seeds: {missing_s}")
-            if extra_s:
-                errors.append(f"Extra seeds: {extra_s}")
-        if len(actual_pairs) != expected_runs:
-            errors.append(f"Expected {expected_runs} runs, got {len(actual_pairs)}")
-
-        # Validate tags against protocol
-        tags_by_run = _get_run_tags(client, experiment.experiment_id)
-        best_metadata_variant = protocol.get("best_metadata_variant", "M3")
-        metadata_variants = protocol.get("metadata_variants", {})
-        errors.extend(
-            _validate_run_tags(
-                selected,
-                tags_by_run,
-                expected_alpha,
-                best_metadata_variant,
-                metadata_variants,
-            )
+    tags_by_run = _get_run_tags(client, experiment.experiment_id)
+    best_metadata_variant = protocol.get("best_metadata_variant", "M3")
+    metadata_variants = protocol.get("metadata_variants", {})
+    errors.extend(
+        _validate_run_tags(
+            selected,
+            tags_by_run,
+            expected_alpha,
+            best_metadata_variant,
+            metadata_variants,
         )
+    )
+    errors.extend(_validate_provenance_tags(selected, tags_by_run, protocol))
 
-        # Each MLflow run must carry provenance hashes matching the protocol
-        errors.extend(_validate_provenance_tags(selected, tags_by_run, protocol))
+    for r in selected:
+        missing_metrics = []
+        for m in ["test_Recall_at_10", "test_NDCG_at_20", "test_Recall_at_20"]:
+            if r.get(m) is None:
+                missing_metrics.append(m)
+        if missing_metrics:
+            errors.append(f"{r['variant']} seed={r['seed']}: missing metrics {missing_metrics}")
 
-        # Require all secondary metrics
-        for r in selected:
-            missing_metrics = []
-            for m in ["test_Recall_at_10", "test_NDCG_at_20", "test_Recall_at_20"]:
-                if r.get(m) is None:
-                    missing_metrics.append(m)
-            if missing_metrics:
-                errors.append(f"{r['variant']} seed={r['seed']}: missing metrics {missing_metrics}")
+    output_dir = Path(args.output_dir) if args.output_dir else Path("experiments") / "rq4" / args.benchmark_id
+    per_user_dir = output_dir / "per_user"
+    errors.extend(_validate_per_user_on_disk(selected, per_user_dir))
 
-        # Validate the on-disk per-user CSV for every run that claims
-        # per_user_complete=true. This is the second half of the atomic
-        # contract from rq4_per_user.py: MLflow tags lie until the file
-        # checks out.
-        output_dir = Path(args.output_dir) if args.output_dir else Path("experiments") / "rq4" / args.benchmark_id
-        per_user_dir = output_dir / "per_user"
-        errors.extend(_validate_per_user_on_disk(selected, per_user_dir))
-
-        if errors:
-            raise RuntimeError("Protocol validation failed:\n" + "\n".join(f"  - {e}" for e in errors))
+    if errors:
+        raise RuntimeError("Protocol validation failed:\n" + "\n".join(f"  - {e}" for e in errors))
 
     output_dir = Path(args.output_dir) if args.output_dir else Path("experiments") / "rq4" / args.benchmark_id
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -388,7 +381,7 @@ def main() -> None:
         "n_variants": len(all_variants),
     }
     if args.protocol:
-        for key in ("git_commit", "baseline_variant", "backbone",
+        for key in ("baseline_variant", "backbone",
                      "preprocessing_version", "data_source"):
             val = protocol.get(key)
             if val is not None:

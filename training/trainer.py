@@ -190,7 +190,6 @@ class Trainer:
         self._mlflow_log_artifacts = self._mlflow_config.get("log_artifacts", True)
         self._mlflow_phase = self._mlflow_config.get("phase")
         self._mlflow_variant = self._mlflow_config.get("variant")
-        self._mlflow_git_commit = self._mlflow_config.get("git_commit")
         self._mlflow_reportable = self._mlflow_config.get("reportable", True)
 
         if use_mlflow:

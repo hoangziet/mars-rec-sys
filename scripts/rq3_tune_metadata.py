@@ -35,11 +35,11 @@ from pipeline.loaders import get_eval_loader, get_val_loss_loader, load_stats
 from pipeline.optim import build_optimizer, build_scheduler
 from pipeline.training_grid import enforce_final_grid
 from training.configs import build_model_config
-from training.mlflow_contract import build_run_name, build_training_tags
-from training.mlflow_utils import collect_common_run_metadata, configure_mlflow, get_git_commit
+from training.mlflow_contract import RQ3_EXPERIMENT_NAME, build_run_name, build_training_tags
+from training.mlflow_utils import collect_common_run_metadata, configure_mlflow
 from training.trainer import Trainer
 
-EXPERIMENT_NAME = "mars_metadata_tuning"
+EXPERIMENT_NAME = RQ3_EXPERIMENT_NAME
 DEFAULT_SEEDS = [42, 123, 2024]
 BACKBONE = "gsasrec"
 
@@ -119,10 +119,10 @@ def _run_single(args, variant_name: str, seed: int) -> dict:
 
     trainer = Trainer(backbone, device, str(run_output_dir), use_mlflow=True, mlflow_config={
         "experiment_name": EXPERIMENT_NAME, "run_name": run_name, "log_artifacts": True,
-        "phase": "tuning", "variant": variant_name.lower(), "git_commit": get_git_commit(), "reportable": True,
+        "phase": "tuning", "variant": variant_name.lower(), "reportable": True,
     })
-    mlflow_cfg = collect_common_run_metadata(model_name=backbone, seed=seed, phase="tuning", git_commit=get_git_commit(), extra_params={**model_kwargs, **train_kwargs})
-    mlflow_cfg["tags"] = build_training_tags(model_name=backbone, phase="tuning", variant=variant_name.lower(), git_commit=get_git_commit(), reportable=True)
+    mlflow_cfg = collect_common_run_metadata(model_name=backbone, seed=seed, phase="tuning", extra_params={**model_kwargs, **train_kwargs})
+    mlflow_cfg["tags"] = build_training_tags(model_name=backbone, phase="tuning", variant=variant_name.lower(), reportable=True)
     mlflow_cfg["tags"]["metadata_variant"] = variant_name
     mlflow_cfg["tags"]["rq"] = "rq3"
     mlflow_cfg["tags"]["benchmark_id"] = args.benchmark_id

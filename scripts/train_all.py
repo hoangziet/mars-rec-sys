@@ -37,7 +37,7 @@ from pipeline.metrics import (
 from pipeline.optim import build_optimizer, build_scheduler
 from scripts.train import validate_processed_layout
 from training.mlflow_contract import build_run_name, build_training_tags, get_experiment_name_for_phase
-from training.mlflow_utils import collect_common_run_metadata, configure_mlflow, get_git_commit, sanitize_metric_name
+from training.mlflow_utils import collect_common_run_metadata, configure_mlflow, sanitize_metric_name
 from training.trainer import Trainer
 
 DEFAULT_SEEDS = [42, 123, 2024, 3407, 9999]
@@ -162,7 +162,6 @@ def run_neural_model(
             "log_artifacts": True,
             "phase": phase,
             "variant": "base",
-            "git_commit": get_git_commit(),
             "reportable": True,
         },
     )
@@ -171,14 +170,12 @@ def run_neural_model(
         model_name=model_name,
         seed=seed,
         phase="benchmark",
-        git_commit=get_git_commit(),
         extra_params={**model_kwargs, **train_kwargs},
     )
     mlflow_cfg["tags"] = build_training_tags(
         model_name=model_name,
         phase="benchmark",
         variant="base",
-        git_commit=get_git_commit(),
         reportable=True,
     )
     mlflow_cfg["tags"].update(
@@ -265,7 +262,6 @@ def run_heuristic_model(
                     model_name=model_name,
                     seed=seed,
                     phase="benchmark",
-                    git_commit=get_git_commit(),
                     extra_params={**model_kwargs, **train_kwargs},
                 )
             )
@@ -275,7 +271,6 @@ def run_heuristic_model(
                     model_name=model_name,
                     phase="benchmark",
                     variant="base",
-                    git_commit=get_git_commit(),
                     reportable=True,
                     ),
                     "benchmark_id": benchmark_id,
@@ -320,7 +315,6 @@ def run_heuristic_model(
                     model_name=model_name,
                     seed=seed,
                     phase="benchmark",
-                    git_commit=get_git_commit(),
                     extra_params={**model_kwargs, **train_kwargs},
                 )
             )
@@ -330,7 +324,6 @@ def run_heuristic_model(
                     model_name=model_name,
                     phase="benchmark",
                     variant="base",
-                    git_commit=get_git_commit(),
                     reportable=True,
                     ),
                     "benchmark_id": benchmark_id,
