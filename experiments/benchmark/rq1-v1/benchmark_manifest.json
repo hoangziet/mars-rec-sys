@@ -1,6 +1,7 @@
 {
   "benchmark_id": "rq1-v1",
   "protocol_version": "rq1-v1",
+  "preprocessing_version": "mars-preprocess-v1",
   "expected_models": [
     "sasrec",
     "gsasrec",
@@ -17,6 +18,5 @@
     3407,
     9999
   ],
-  "heuristic_seed": 42,
-  "preprocessing_version": "mars-preprocess-v1"
+  "heuristic_seed": 42
 }
