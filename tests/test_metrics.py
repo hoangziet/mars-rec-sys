@@ -36,3 +36,13 @@ def test_ranks_from_logits_passes_on_finite():
     ranks = _ranks_from_logits(logits, history_mask, target)
     assert len(ranks) == 2
     assert all(1 <= r <= 10 for r in ranks)
+
+
+def test_ranks_from_logits_raises_if_target_is_masked_by_history():
+    logits = torch.randn(1, 6)
+    history_mask = torch.zeros(1, 6, dtype=torch.bool)
+    target = torch.tensor([3])
+    history_mask[0, 3] = True
+
+    with pytest.raises(RuntimeError, match="target item is masked"):
+        _ranks_from_logits(logits, history_mask, target)

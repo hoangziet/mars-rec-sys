@@ -89,6 +89,17 @@ def validate_seed_set(model_name: str, actual_seed_list: list[int], expected_see
         )
 
 
+def validate_data_source_consistency(runs: list) -> str:
+    data_sources = {run.data.tags.get("data_source") for run in runs}
+    if None in data_sources or "" in data_sources:
+        raise RuntimeError("data_source mismatch: missing data_source on one or more selected runs")
+    if len(data_sources) != 1:
+        raise RuntimeError(
+            f"data_source mismatch across selected runs: {sorted(data_sources)}"
+        )
+    return next(iter(data_sources))
+
+
 def main() -> None:
     args = parse_args()
     configure_mlflow(mlflow_module=mlflow)
@@ -123,6 +134,8 @@ def main() -> None:
 
     if not selected_runs:
         raise RuntimeError(f"No reportable runs found for benchmark {args.benchmark_id}")
+
+    benchmark_data_source = validate_data_source_consistency(selected_runs)
 
     grouped: dict[str, list] = {}
     for run in selected_runs:
@@ -273,20 +286,16 @@ def main() -> None:
         if winner_model in HEURISTIC_MODELS
         else sorted({int(s) for s in manifest["neural_seeds"]})
     )
-    data_source = None
+    data_source = benchmark_data_source
     preprocessing_version = manifest.get("preprocessing_version")
     for run in selected_runs:
         if run.data.tags.get("model") == winner_model:
-            data_source = run.data.tags.get("data_source", "data/processed")
             if preprocessing_version is None:
                 preprocessing_version = run.data.tags.get(
                     "preprocessing_version", "mars-preprocess-v1"
                 )
             break
 
-    if data_source is None:
-        # Fall back to a marker; load_winner_artifact() is not called here.
-        data_source = "data/processed"
     if preprocessing_version is None:
         preprocessing_version = "mars-preprocess-v1"
 

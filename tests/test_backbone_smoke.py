@@ -278,3 +278,36 @@ def test_rq4_init_freezes_backbone_as_gsasrec(tmp_path):
     assert manifest["backbone"] == "gsasrec", manifest
     assert manifest["baseline_variant"] == "V0"
     assert "rq1_benchmark_id" not in manifest
+
+
+def test_rq4_init_rejects_unknown_light_provenance(tmp_path):
+    from scripts.rq4_init_protocol import main as rq4_init_main
+
+    rq2 = tmp_path / "rq2.json"
+    rq2.write_text(json.dumps({
+        "best_alpha": 0.5,
+        "benchmark_id": "x",
+        "backbone": "gsasrec",
+    }))
+    rq3 = tmp_path / "rq3.json"
+    rq3.write_text(json.dumps({
+        "best_variant": "M3",
+        "benchmark_id": "y",
+        "backbone": "gsasrec",
+    }))
+
+    saved = sys.argv
+    sys.argv = [
+        "rq4_init_protocol.py",
+        "--benchmark-id", "rq4-x",
+        "--rq2-winners", str(rq2),
+        "--rq3-winners", str(rq3),
+        "--output-dir", str(tmp_path / "out"),
+        "--data-dir", str(tmp_path),
+        "--seeds", "42",
+    ]
+    try:
+        with pytest.raises(RuntimeError, match="missing preprocessing_version|missing data_source"):
+            rq4_init_main()
+    finally:
+        sys.argv = saved

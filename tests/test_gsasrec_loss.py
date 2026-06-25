@@ -39,3 +39,21 @@ def test_loss_reduction_mean_matches_default():
     default_loss = model.loss(input_seq, pos_items, neg_items)
     per_sample = model.loss(input_seq, pos_items, neg_items, reduction="none")
     assert torch.allclose(default_loss, per_sample.mean())
+
+
+def test_pos_smoothing_does_not_overflow_position_embeddings():
+    model = GSASRec(
+        n_items=50,
+        max_len=5,
+        hidden_dim=16,
+        num_heads=2,
+        num_layers=1,
+        t=0.5,
+        num_neg=4,
+        pos_smoothing=100.0,
+    ).train()
+    input_seq = torch.tensor([[1, 2, 3, 4, 5]], dtype=torch.long)
+
+    out = model(input_seq)
+
+    assert out.shape == (1, 51)

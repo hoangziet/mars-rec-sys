@@ -87,7 +87,6 @@ def test_init_does_not_contain_sha256_fields(tmp_path):
     ])
 
     manifest = json.loads((output / "rq4_protocol_manifest.json").read_text())
-    assert "git_commit" in manifest
     assert "metadata_variants" in manifest
     assert "M0" in manifest["metadata_variants"]
     assert manifest["metadata_variants"]["M0"]["use_structured"] is False

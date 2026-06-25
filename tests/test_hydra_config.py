@@ -32,11 +32,29 @@ def test_gsasrec_config_values():
     assert cfg.model.model_kwargs.t == 0.5
 
 
+def test_gru4rec_config_values():
+    cfg = _compose(["model=gru4rec"])
+    assert cfg.model.train_kwargs.loss_type == "bpr_max"
+    assert cfg.model.train_kwargs.num_neg == 32
+    assert cfg.model.train_kwargs.beta2 == 0.98
+
+
 def test_bert4rec_config_values():
     cfg = _compose(["model=bert4rec"])
+    assert cfg.model.train_kwargs.lr == pytest.approx(1e-3)
+    assert cfg.model.train_kwargs.weight_decay == pytest.approx(1e-4)
+    assert cfg.model.train_kwargs.beta2 == pytest.approx(0.98)
     assert cfg.model.train_kwargs.mask_ratio == 0.2
     assert cfg.model.train_kwargs.force_last_item_mask is True
-    assert cfg.model.train_kwargs.warmup_steps == 100
+    assert cfg.model.train_kwargs.warmup_steps == 0
+
+
+def test_bprmf_config_values():
+    cfg = _compose(["model=bprmf"])
+    assert cfg.model.train_kwargs.batch_size == 256
+    assert cfg.model.train_kwargs.weight_decay == pytest.approx(1e-4)
+    assert cfg.model.train_kwargs.beta2 == pytest.approx(0.98)
+    assert cfg.model.train_kwargs.gradient_clip == pytest.approx(5.0)
 
 
 def test_all_neural_models_have_confidence_alpha():

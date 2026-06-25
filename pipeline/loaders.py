@@ -351,6 +351,12 @@ class FullSortEvalDataset(Dataset):
         self.seqs = [parse_seq(s) for s in df[seq_col]]
         self.targets = df[tgt_col].tolist()
 
+        for i, (seq, target) in enumerate(zip(self.seqs, self.targets, strict=False)):
+            if int(target) in set(seq):
+                raise RuntimeError(
+                    f"FullSortEvalDataset invariant violated at row {i}: target item appears in history"
+                )
+
         self._padded_seqs = [
             pad_sequence(seq, max_len, pad_token) for seq in self.seqs
         ]
@@ -502,16 +508,19 @@ def get_val_loss_loader(
         user_list.append(user_idx)
 
         if num_neg == 1:
-            neg = int(rng.integers(1, n_items + 1))
-            while neg in seen:
-                neg = int(rng.integers(1, n_items + 1))
-            neg_items_list.append(neg)
+            neg_pool = [item for item in range(1, n_items + 1) if item not in seen]
+            if not neg_pool:
+                raise RuntimeError(
+                    f"Cannot sample validation negative for user {user_idx}: user has seen all items"
+                )
+            neg_items_list.append(int(rng.choice(neg_pool)))
         else:
-            negs: list[int] = []
-            while len(negs) < num_neg:
-                n = int(rng.integers(1, n_items + 1))
-                if n not in seen and n not in negs:
-                    negs.append(n)
+            neg_pool = [item for item in range(1, n_items + 1) if item not in seen]
+            if len(neg_pool) < num_neg:
+                raise RuntimeError(
+                    f"Cannot sample {num_neg} validation negatives for user {user_idx}: only {len(neg_pool)} available"
+                )
+            negs = rng.choice(neg_pool, size=num_neg, replace=False).tolist()
             neg_items_list.append(negs)
 
     input_seqs_t = torch.tensor(input_seqs, dtype=torch.long)

@@ -29,14 +29,12 @@ def test_collect_common_run_metadata_includes_required_fields():
         model_name="sasrec",
         seed=42,
         phase="benchmark",
-        git_commit="abc123",
         extra_params={"lr": 1e-3, "batch_size": 256},
     )
 
     assert data["model"] == "sasrec"
     assert data["seed"] == 42
     assert data["phase"] == "benchmark"
-    assert data["git_commit"] == "abc123"
     assert data["lr"] == 1e-3
     assert data["batch_size"] == 256
 
@@ -91,6 +89,13 @@ def test_train_script_uses_phase_to_select_experiment(monkeypatch, tmp_path):
     from training.mlflow_contract import get_experiment_name_for_phase
 
     assert get_experiment_name_for_phase("benchmark") == "mars_benchmark"
+
+
+def test_phase_lookup_rejects_non_phase_workflows():
+    from training.mlflow_contract import get_experiment_name_for_phase
+
+    with pytest.raises(ValueError, match="Unsupported MLflow phase"):
+        get_experiment_name_for_phase("rq2_tuning")
 
 
 def test_trainer_last_run_id_survives_close_for_post_train_promotion(monkeypatch, tmp_path):

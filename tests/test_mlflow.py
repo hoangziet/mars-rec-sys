@@ -1,34 +1,40 @@
+import sys
+import tempfile
 from pathlib import Path
 
 import mlflow
+from mlflow.artifacts import download_artifacts
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from training.mlflow_utils import configure_mlflow
 
 
-mlflow.set_tracking_uri("http://127.0.0.1:8080")
-mlflow.set_experiment("mars-recsys-test")
+def test_mlflow_round_trip_logs_params_metrics_and_artifact():
+    configure_mlflow(mlflow_module=mlflow)
+    experiment_name = "mars-recsys-test"
 
-with mlflow.start_run(run_name="first-run"):
-    mlflow.log_params(
-        {
-            "model": "dummy",
-            "seed": 42,
-            "learning_rate": 0.001,
-        }
-    )
+    mlflow.set_experiment(experiment_name)
+    with mlflow.start_run(run_name="first-run") as run:
+        mlflow.log_params(
+            {
+                "model": "dummy",
+                "seed": 42,
+                "learning_rate": 0.001,
+            }
+        )
 
-    # MLflow metric names reject '@' on this server; sanitize like the trainer.
-    mlflow.log_metrics(
-        {
-            "ndcg_at_10": 0.182,
-            "recall_at_10": 0.261,
-        }
-    )
+        mlflow.log_metrics(
+            {
+                "ndcg_at_10": 0.182,
+                "recall_at_10": 0.261,
+            }
+        )
 
-    artifact = Path("result.txt")
-    artifact.write_text(
-        "MLflow artifact upload works.",
-        encoding="utf-8",
-    )
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            artifact = Path(tmp_dir) / "result.txt"
+            artifact.write_text("MLflow artifact upload works.\n", encoding="utf-8")
+            mlflow.log_artifact(str(artifact))
 
-    mlflow.log_artifact(str(artifact))
-
-print("Logged successfully")
+        local_copy = download_artifacts(run_id=run.info.run_id, artifact_path="result.txt")
+        assert Path(local_copy).read_text(encoding="utf-8").strip() == "MLflow artifact upload works."

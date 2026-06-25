@@ -83,6 +83,8 @@ def _ranks_from_logits(
         )
     logits = logits.masked_fill(history_mask, float("-inf"))
     target_scores = logits.gather(1, target.unsqueeze(1))   # (B, 1)
+    if torch.isneginf(target_scores).any():
+        raise RuntimeError("Evaluation invariant violated: target item is masked by history")
     ranks = (logits >= target_scores).sum(dim=1)            # (B,) 1-indexed
     return ranks.cpu().tolist()
 

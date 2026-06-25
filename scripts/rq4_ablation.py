@@ -36,8 +36,8 @@ from scripts.rq4_per_user import (
     write_per_user_atomic,
 )
 from training.configs import build_model_config
-from training.mlflow_contract import build_run_name, build_training_tags
-from training.mlflow_utils import collect_common_run_metadata, configure_mlflow, get_git_commit
+from training.mlflow_contract import RQ4_EXPERIMENT_NAME, build_run_name, build_training_tags
+from training.mlflow_utils import collect_common_run_metadata, configure_mlflow
 from training.trainer import NoValidCheckpointError, Trainer
 
 
@@ -58,19 +58,16 @@ def _validate_protocol_backbone(protocol: dict) -> str:
     return backbone
 
 
-def _enforce_git_commit_match(protocol: dict) -> None:
-    """Deprecated no-op stub.
-
-    Git-commit runtime gating was removed from the RQ4 research contract.
-    Provenance is now lightweight: ``preprocessing_version`` and
-    ``data_source`` only. RQ4 no longer blocks runs on HEAD mismatch or
-    working-tree dirtiness. This symbol is kept only to avoid breaking
-    external imports; new code should not call it.
-    """
-    return None
-
-
-EXPERIMENT_NAME = "mars_final_ablation"
+def _validate_protocol_data_dir(protocol: dict, data_dir: Path) -> None:
+    expected = protocol.get("data_source")
+    actual = str(Path(data_dir).resolve())
+    if not expected:
+        raise RuntimeError("RQ4 protocol is missing data_source")
+    if actual != expected:
+        raise RuntimeError(
+            f"RQ4 data_source mismatch: protocol expects {expected!r}, got {actual!r}"
+        )
+EXPERIMENT_NAME = RQ4_EXPERIMENT_NAME
 
 METADATA_FLAGS = {
     "M0": (False, False),
@@ -151,10 +148,10 @@ def _run_single(args, backbone: str, variant: str, seed: int, variant_cfg: dict,
 
     trainer = Trainer(backbone, device, str(run_output_dir), use_mlflow=True, mlflow_config={
         "experiment_name": EXPERIMENT_NAME, "run_name": run_name, "log_artifacts": True,
-        "phase": "final", "variant": variant.lower(), "git_commit": get_git_commit(), "reportable": False,
+        "phase": "final", "variant": variant.lower(), "reportable": False,
     })
-    mlflow_cfg = collect_common_run_metadata(model_name=backbone, seed=seed, phase="final", git_commit=get_git_commit(), extra_params={**model_kwargs, **train_kwargs})
-    mlflow_cfg["tags"] = build_training_tags(model_name=backbone, phase="final", variant=variant.lower(), git_commit=get_git_commit(), reportable=False)
+    mlflow_cfg = collect_common_run_metadata(model_name=backbone, seed=seed, phase="final", extra_params={**model_kwargs, **train_kwargs})
+    mlflow_cfg["tags"] = build_training_tags(model_name=backbone, phase="final", variant=variant.lower(), reportable=False)
     mlflow_cfg["tags"]["ablation_variant"] = variant
     mlflow_cfg["tags"]["rq"] = "rq4"
     mlflow_cfg["tags"]["benchmark_id"] = benchmark_id
@@ -267,10 +264,10 @@ def main() -> None:
     # The backbone MUST come from the protocol manifest (frozen by
     # rq4-init from the gSASRec RQ2/RQ3 winners). We enforce gsasrec-only
     # here so a stale or hand-edited protocol cannot drive a non-gsasrec
-    # run. The RQ4 contract uses light provenance (preprocessing_version
-    # + data_source); git_commit is recorded as a tag for traceability
-    # only.
+    # run. The RQ4 contract uses light provenance only
+    # (preprocessing_version + data_source).
     backbone = _validate_protocol_backbone(protocol)
+    _validate_protocol_data_dir(protocol, Path(args.data_dir))
 
     total = len(variants_list) * len(seeds)
     print(f"RQ4 ablation: backbone={backbone}, {len(variants_list)} variants x {len(seeds)} seeds = {total} runs")

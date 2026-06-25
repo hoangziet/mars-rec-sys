@@ -7,7 +7,7 @@ Reference: Hidasi et al., ICLR 2016.
 Architecture:
     - Item embeddings with embedding dropout
     - GRU encoder (PackedSequence for variable-length left-padded inputs)
-    - Cross-Entropy loss over the full item catalog (RecBole convention)
+    - Pairwise ranking losses (BPR-max / TOP1) or optional full-catalog CE
     - Scoring via dot product with item embedding table
 
 Training interface
@@ -28,7 +28,7 @@ import torch.nn.functional as F
 
 
 class GRU4Rec(nn.Module):
-    """GRU4Rec model with Cross-Entropy loss (RecBole convention).
+    """GRU4Rec model with pairwise ranking losses and optional CE fallback.
 
     Parameters
     ----------
@@ -116,12 +116,10 @@ class GRU4Rec(nn.Module):
         pos_items: torch.Tensor,
         neg_items: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """Cross-Entropy loss over the full item catalog (default).
+        """Cross-Entropy loss over the full item catalog.
 
-        When neg_items is provided and _loss_fn is set, delegates to pairwise loss.
+        Pairwise benchmark paths call ``top1_loss`` or ``bpr_max_loss`` directly.
         """
-        if neg_items is not None and hasattr(self, "_loss_fn"):
-            return self._loss_fn(input_seq, pos_items, neg_items)
         h = self._encode(input_seq)
         logits = h @ self.item_emb.weight.T
         return F.cross_entropy(logits, pos_items)

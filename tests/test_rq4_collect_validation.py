@@ -215,3 +215,31 @@ def test_validate_run_tags_uses_best_metadata_variant():
         best_metadata_variant="M1", metadata_variants=METADATA_VARIANTS,
     )
     assert any("V3" in e and "use_text=false" in e for e in errors)
+
+
+def test_validate_provenance_tags_rejects_preprocessing_version_mismatch():
+    selected = [{"variant": "V0", "seed": 42, "run_id": "r1"}]
+    tags_by_run = {
+        "r1": {
+            "per_user_complete": "true",
+            "preprocessing_version": "v2",
+            "data_source": "/tmp/data",
+        }
+    }
+    protocol = {"preprocessing_version": "v1", "data_source": "/tmp/data"}
+    errors = rq4_collect._validate_provenance_tags(selected, tags_by_run, protocol)
+    assert any("preprocessing_version mismatch" in e for e in errors)
+
+
+def test_validate_provenance_tags_rejects_data_source_mismatch():
+    selected = [{"variant": "V0", "seed": 42, "run_id": "r1"}]
+    tags_by_run = {
+        "r1": {
+            "per_user_complete": "true",
+            "preprocessing_version": "v1",
+            "data_source": "/tmp/other",
+        }
+    }
+    protocol = {"preprocessing_version": "v1", "data_source": "/tmp/data"}
+    errors = rq4_collect._validate_provenance_tags(selected, tags_by_run, protocol)
+    assert any("data_source mismatch" in e for e in errors)

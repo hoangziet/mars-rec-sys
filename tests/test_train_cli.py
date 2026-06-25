@@ -95,8 +95,6 @@ def test_train_main_passes_model_kwargs_num_neg_to_loaders(monkeypatch, tmp_path
     monkeypatch.setattr(train, "build_training_tags", lambda **_kwargs: {})
     monkeypatch.setattr(train, "build_run_name", lambda *_args, **_kwargs: "run")
     monkeypatch.setattr(train, "get_experiment_name_for_phase", lambda *_args, **_kwargs: "exp")
-    monkeypatch.setattr(train, "get_git_commit", lambda: "deadbeef")
-
     train.main.__wrapped__(cfg)
 
     assert captured["train_loader_model_kwargs"]["num_neg"] == 32
@@ -139,8 +137,6 @@ def test_train_all_run_neural_model_passes_model_kwargs_num_neg_to_loaders(monke
     monkeypatch.setattr(train_all, "build_training_tags", lambda **_kwargs: {})
     monkeypatch.setattr(train_all, "build_run_name", lambda *_args, **_kwargs: "run")
     monkeypatch.setattr(train_all, "get_experiment_name_for_phase", lambda *_args, **_kwargs: "exp")
-    monkeypatch.setattr(train_all, "get_git_commit", lambda: "deadbeef")
-
     summary = train_all.run_neural_model(
         model_name="gsasrec",
         data_dir=tmp_path / "processed",

@@ -6,7 +6,12 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from training.mlflow_contract import (
+    BENCHMARK_EXPERIMENT_NAME,
+    RQ2_EXPERIMENT_NAME,
+    RQ3_EXPERIMENT_NAME,
+    RQ4_EXPERIMENT_NAME,
     SHARED_EXPERIMENTS,
+    SMOKE_EXPERIMENT_NAME,
     TRAINING_EXPERIMENTS,
     build_run_name,
     build_training_tags,
@@ -14,17 +19,14 @@ from training.mlflow_contract import (
 )
 
 
-def test_get_experiment_name_for_phase_maps_all_training_phases():
+def test_get_experiment_name_for_phase_maps_supported_phase_experiments():
     assert get_experiment_name_for_phase("smoke") == "mars_smoke"
     assert get_experiment_name_for_phase("benchmark") == "mars_benchmark"
-    assert get_experiment_name_for_phase("tuning") == "mars_tuning"
-    assert get_experiment_name_for_phase("ablation") == "mars_ablation"
-    assert get_experiment_name_for_phase("final") == "mars_final"
 
 
 def test_get_experiment_name_for_phase_rejects_unknown_phase():
     with pytest.raises(ValueError, match="Unsupported MLflow phase"):
-        get_experiment_name_for_phase("custom")
+        get_experiment_name_for_phase("tuning")
 
 
 def test_build_run_name_for_training_variant_without_alpha():
@@ -40,7 +42,6 @@ def test_build_training_tags_for_heuristic_model_uses_backbone_none():
         model_name="popularity",
         phase="benchmark",
         variant="base",
-        git_commit="abc123",
         reportable=True,
     )
 
@@ -49,8 +50,14 @@ def test_build_training_tags_for_heuristic_model_uses_backbone_none():
     assert tags["backbone"] == "none"
     assert tags["reportable"] == "true"
     assert "dataset_version" not in tags
+    assert "git_commit" not in tags
 
 
 def test_contract_constants_expose_expected_shared_experiments():
+    assert SMOKE_EXPERIMENT_NAME == "mars_smoke"
+    assert BENCHMARK_EXPERIMENT_NAME == "mars_benchmark"
+    assert RQ2_EXPERIMENT_NAME == "mars_confidence_tuning"
+    assert RQ3_EXPERIMENT_NAME == "mars_metadata_tuning"
+    assert RQ4_EXPERIMENT_NAME == "mars_final_ablation"
     assert SHARED_EXPERIMENTS == {"reports": "mars_reports"}
-    assert TRAINING_EXPERIMENTS["final"] == "mars_final"
+    assert TRAINING_EXPERIMENTS["rq4_final"] == "mars_final_ablation"

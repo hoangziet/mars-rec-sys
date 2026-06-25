@@ -327,7 +327,6 @@ def test_trainer_supports_legacy_mlflow_params_format(tmp_path, fake_mlflow):
         "model": "gsasrec",
         "seed": 42,
         "phase": "benchmark",
-        "git_commit": "abc",
         "tags": {"backbone": "gsasrec", "reportable": "true"},
     }
     trainer.train(
@@ -337,6 +336,6 @@ def test_trainer_supports_legacy_mlflow_params_format(tmp_path, fake_mlflow):
         mlflow_params=legacy_mlflow_params,
     )
 
-    for k in ("model", "seed", "phase", "git_commit"):
+    for k in ("model", "seed", "phase"):
         assert k in captured, f"missing legacy param {k}"
     assert "tags" not in captured

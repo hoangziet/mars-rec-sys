@@ -16,7 +16,6 @@ All selected runs are required to share the same:
     - benchmark_id
     - preprocessing_version
     - data_source
-    - git_commit
 Missing or mismatched provenance fails the report — there is no silent
 fallback to "mars-preprocess-v1" or "data/processed".
 
@@ -37,15 +36,15 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from training.mlflow_contract import RQ2_EXPERIMENT_NAME
 from training.mlflow_utils import configure_mlflow
 
-EXPERIMENT_NAME = "mars_confidence_tuning"
+EXPERIMENT_NAME = RQ2_EXPERIMENT_NAME
 PRIMARY_METRIC = "best_val_ndcg_at_10"
 
 REQUIRED_PROVENANCE_FIELDS = (
     "data_source",
     "preprocessing_version",
-    "git_commit",
     "benchmark_id",
     "backbone",
 )
@@ -103,7 +102,7 @@ def _validate_provenance(selected: list[dict]) -> dict:
     """All selected runs must share the same provenance.
 
     Required fields: backbone, benchmark_id, preprocessing_version,
-    data_source, git_commit. Missing any field on any run, or any
+    data_source. Missing any field on any run, or any
     disagreement across runs, fails the report.
     """
     expected: dict[str, str] = {}
@@ -177,7 +176,6 @@ def main() -> None:
             "benchmark_id": tags.get("benchmark_id"),
             "preprocessing_version": tags.get("preprocessing_version"),
             "data_source": tags.get("data_source"),
-            "git_commit": tags.get("git_commit"),
         }
         selected.append({
             "alpha": alpha,
@@ -245,7 +243,6 @@ def main() -> None:
             "selection_metric": PRIMARY_METRIC,
             "preprocessing_version": provenance["preprocessing_version"],
             "data_source": provenance["data_source"],
-            "git_commit": provenance["git_commit"],
         }
         json.dump(winner, f, indent=2)
 

@@ -10,7 +10,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scripts import rq4_compare
+from scripts import rq4_compare, rq4_subgroup
 
 
 # ---- _resolve_baseline ----
@@ -179,3 +179,17 @@ def test_main_fails_when_baseline_not_in_variants(tmp_path):
             rq4_compare.main()
     finally:
         sys.argv = saved
+
+
+def test_rq4_subgroup_uses_explicit_baseline_variant_not_v0():
+    subgroup_metrics = [
+        {"group": "watch", "subgroup": "has_watch", "variant": "V2", "mean": 0.40, "n_users": 10},
+        {"group": "watch", "subgroup": "has_watch", "variant": "V3", "mean": 0.45, "n_users": 10},
+    ]
+
+    improvements = rq4_subgroup._compute_improvements(subgroup_metrics, baseline_variant="V2")
+
+    assert len(improvements) == 1
+    assert improvements[0]["variant"] == "V3"
+    assert improvements[0]["baseline_variant"] == "V2"
+    assert improvements[0]["baseline_mean"] == 0.40

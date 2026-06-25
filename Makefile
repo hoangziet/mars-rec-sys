@@ -8,7 +8,7 @@ STATS_OUTPUT_DIR ?= experiments/benchmark/$(BENCHMARK_ID)/stats
 PREPROCESSING_VERSION ?= mars-preprocess-v1
 RQ4_BASELINE_VARIANT ?= V0
 
-.PHONY: preprocess rq1-smoke rq1-full rq1-report rq1-compare test rq2-tune rq2-report rq3-precompute rq3-tune rq3-report rq4-init rq4-ablation rq4-collect rq4-compare rq4-subgroup rq4-report
+.PHONY: preprocess rq1-smoke rq1-full rq1-report rq1-compare test rq2-tune rq2-report rq2-all rq3-precompute rq3-tune rq3-report rq3-all rq4-init rq4-ablation rq4-collect rq4-compare rq4-subgroup rq4-report rq4-all
 
 preprocess:
 	uv run python data/preprocess.py
@@ -46,6 +46,8 @@ rq2-tune:
 rq2-report:
 	uv run python scripts/rq2_report.py --benchmark-id $(RQ2_BENCHMARK_ID) --output-dir $(RQ2_OUTPUT_DIR)
 
+rq2-all: rq2-tune rq2-report
+
 # --- RQ3: Metadata Tuning ---
 RQ3_VARIANTS ?= M0 M1 M2 M3
 RQ3_SEEDS ?= 42 123 2024
@@ -61,6 +63,8 @@ rq3-tune: rq3-precompute
 
 rq3-report:
 	uv run python scripts/rq3_report.py --benchmark-id $(RQ3_BENCHMARK_ID) --output-dir $(RQ3_OUTPUT_DIR)
+
+rq3-all: rq3-tune rq3-report
 
 # --- RQ4: Final Ablation ---
 RQ4_SEEDS ?= 42 123 2024 3407 9999 7 21 77 314 1337
@@ -98,3 +102,5 @@ rq4-subgroup:
 
 rq4-report:
 	uv run python scripts/rq4_report.py --benchmark-id $(RQ4_BENCHMARK_ID) --comparison-dir $(RQ4_COMPARISON_DIR) --output-dir $(RQ4_OUTPUT_DIR)
+
+rq4-all: rq4-init rq4-ablation rq4-collect rq4-compare rq4-subgroup rq4-report

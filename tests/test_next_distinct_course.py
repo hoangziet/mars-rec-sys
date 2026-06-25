@@ -129,10 +129,11 @@ def test_full_sort_eval_does_not_unmask_target(tmp_path):
     assert history_mask[5].item() is False
 
 
-def test_full_sort_eval_target_unmasked_only_by_dedup_property(tmp_path):
-    """The target is not in history by the time the dataset sees it
-    (preprocessing dedup). This test verifies the natural property: if
-    target were in history, the dataset would NOT unmask it.
+def test_full_sort_eval_rejects_target_present_in_history(tmp_path):
+    """If target appears in history, the eval dataset must fail loud.
+
+    This should never happen under correct preprocessing, so accepting it
+    would silently corrupt metrics.
     """
     from pipeline.loaders import FullSortEvalDataset
 
@@ -143,9 +144,5 @@ def test_full_sort_eval_target_unmasked_only_by_dedup_property(tmp_path):
         "user_idx,item_sequence,target_item,sequence_length\n"
         "1,1 2 3 4 5,3,5\n"  # target=3 is in history
     )
-    dataset = FullSortEvalDataset(str(csv_path), n_items=10, max_len=10)
-    sample = dataset[0]
-    history_mask = sample["history_mask"]
-
-    # Item 3 is in history AND is the target — it's masked (no special handling)
-    assert history_mask[3].item() is True
+    with pytest.raises(RuntimeError, match="target item appears in history"):
+        FullSortEvalDataset(str(csv_path), n_items=10, max_len=10)

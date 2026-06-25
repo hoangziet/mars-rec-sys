@@ -29,7 +29,6 @@ def test_rq2_provenance_accepts_complete():
         "benchmark_id": "rq2-x",
         "preprocessing_version": "v1",
         "data_source": "/tmp",
-        "git_commit": "abc",
     }
     out = rq2_report._validate_provenance(_sel(p))
     assert out == p
@@ -46,7 +45,6 @@ def test_rq2_report_writes_explicit_gsasrec_backbone():
             "benchmark_id": "rq2-x",
             "preprocessing_version": "v1",
             "data_source": "/tmp/data",
-            "git_commit": "abc",
         },
         "run_id": "rid",
         "run_name": "rn",
@@ -58,11 +56,9 @@ def test_rq2_provenance_rejects_missing_field():
     p = {
         "backbone": "gsasrec",
         "benchmark_id": "rq2-x",
-        "preprocessing_version": "v1",
         "data_source": "/tmp",
-        # missing git_commit
     }
-    with pytest.raises(RuntimeError, match="missing provenance field 'git_commit'"):
+    with pytest.raises(RuntimeError, match="missing provenance field 'preprocessing_version'"):
         rq2_report._validate_provenance(_sel(p))
 
 
@@ -71,15 +67,13 @@ def test_rq2_provenance_rejects_mismatch_across_runs():
         {
             "alpha": 0.0, "seed": 42, "val_ndcg_at_10": 0.1,
             "provenance": {"backbone": "gsasrec", "benchmark_id": "rq2-x",
-                           "preprocessing_version": "v1", "data_source": "/a",
-                           "git_commit": "abc"},
+                           "preprocessing_version": "v1", "data_source": "/a"},
             "run_id": "r1", "run_name": "n1",
         },
         {
             "alpha": 0.5, "seed": 42, "val_ndcg_at_10": 0.2,
             "provenance": {"backbone": "gsasrec", "benchmark_id": "rq2-x",
-                           "preprocessing_version": "v1", "data_source": "/b",
-                           "git_commit": "abc"},
+                           "preprocessing_version": "v1", "data_source": "/b"},
             "run_id": "r2", "run_name": "n2",
         },
     ]
@@ -93,7 +87,6 @@ def test_rq2_provenance_rejects_empty_string_field():
         "benchmark_id": "rq2-x",
         "preprocessing_version": "",
         "data_source": "/tmp",
-        "git_commit": "abc",
     }
     with pytest.raises(RuntimeError, match="missing provenance field 'preprocessing_version'"):
         rq2_report._validate_provenance(_sel(p))
@@ -149,7 +142,6 @@ def test_rq3_provenance_accepts_complete():
         "benchmark_id": "rq3-x",
         "preprocessing_version": "v1",
         "data_source": "/tmp",
-        "git_commit": "abc",
     }
     selected = [{
         "variant": "M0", "seed": 42, "val_ndcg_at_10": 0.1,
@@ -170,7 +162,6 @@ def test_rq3_report_rejects_non_gsasrec_backbone():
             "benchmark_id": "rq3-x",
             "preprocessing_version": "v1",
             "data_source": "/tmp/data",
-            "git_commit": "abc",
         },
         "run_id": "rid",
         "run_name": "rn",
@@ -184,7 +175,6 @@ def test_rq3_provenance_rejects_missing_field():
         "backbone": "gsasrec",
         "benchmark_id": "rq3-x",
         # missing everything else
-        "git_commit": "abc",
     }
     selected = [{
         "variant": "M0", "seed": 42, "val_ndcg_at_10": 0.1,
