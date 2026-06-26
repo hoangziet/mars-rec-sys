@@ -103,3 +103,33 @@ def test_cli_override_phase_and_reportable():
     cfg = _compose(["model=sasrec", "phase=smoke", "reportable=false"])
     assert cfg.phase == "smoke"
     assert cfg.reportable is False
+
+
+# ---------------------------------------------------------------------------
+# Fairness contract regression tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "model_name",
+    ["sasrec", "gsasrec", "gru4rec", "bert4rec", "bprmf"],
+)
+def test_rq1_common_neural_recipe(model_name):
+    cfg = _compose([f"model={model_name}"])
+    train = cfg.model.train_kwargs
+
+    assert train.batch_size == 256
+    assert train.lr == pytest.approx(1e-3)
+    assert train.beta2 == pytest.approx(0.98)
+    assert train.weight_decay == pytest.approx(1e-4)
+    assert train.gradient_clip == pytest.approx(5.0)
+
+
+def test_gru4rec_keeps_bpr_max_exception():
+    cfg = _compose(["model=gru4rec"])
+    assert cfg.model.train_kwargs.loss_type == "bpr_max"
+
+
+def test_bert4rec_keeps_no_warmup_exception():
+    cfg = _compose(["model=bert4rec"])
+    assert cfg.model.train_kwargs.warmup_steps == 0
