@@ -91,7 +91,10 @@ class BERT4Rec(nn.Module):
             *real_item_logits.shape[:-1], 1,
             dtype=real_item_logits.dtype, device=real_item_logits.device,
         )
-        return torch.cat([padding_logits, real_item_logits], dim=-1)
+        return torch.nan_to_num(
+            torch.cat([padding_logits, real_item_logits], dim=-1),
+            nan=float("-inf"),
+        )
 
     def loss(self, input_seq, labels):
         logits = self.forward(input_seq)

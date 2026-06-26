@@ -206,7 +206,7 @@ class GSASRec(nn.Module):
             x = x.masked_fill(pad_hidden_mask, 0.0)
         x = self.final_ln(x)
         x = x.masked_fill(pad_hidden_mask, 0.0)
-        return x
+        return torch.nan_to_num(x, nan=0.0)
 
     def _last_hidden(self, input_seq: torch.Tensor) -> torch.Tensor:
         """Extract hidden state at the last non-padding position. Returns (B, D)."""
@@ -347,10 +347,12 @@ class GSASRec(nn.Module):
         """Return scores (B, n_items+1) via dot-product with output embedding."""
         h = self._last_hidden(input_seq)  # (B, D)
         if hasattr(self.output_emb, "weight"):
-            return h @ self.output_emb.weight.T
-        all_ids = torch.arange(self.n_items + 1, device=input_seq.device)
-        all_embs = self.output_emb(all_ids)
-        return h @ all_embs.T
+            scores = h @ self.output_emb.weight.T
+        else:
+            all_ids = torch.arange(self.n_items + 1, device=input_seq.device)
+            all_embs = self.output_emb(all_ids)
+            scores = h @ all_embs.T
+        return torch.nan_to_num(scores, nan=float("-inf"))
 
     def forward(self, input_seq: torch.Tensor) -> torch.Tensor:
         """Alias for predict — returns scores over full item vocab."""
