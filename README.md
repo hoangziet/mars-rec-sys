@@ -48,7 +48,8 @@ make rq1-full
 
 - Neural models train on every seed in `--seeds`. With the default `RQ1_SEEDS = 42 123 2024 3407 9999`, you get five runs per neural model.
 - Heuristic models (`popularity`, `itemcf`) run once per campaign because they are deterministic. The runner still produces a single output per heuristic model per `benchmark_id`.
-- Each `benchmark_id` must be a unique campaign ID. Do not reuse the same ID by only deleting the local output directory — MLflow runs persist and the reporter will collect both old and new runs, causing duplicate seed or wrong run count errors. Always pick a new `benchmark_id` for a fresh campaign.
+- `benchmark_id` is the immutable campaign key. Interrupted campaigns with `status=running` can be safely resumed: `train_all.py` skips already-finished `(model, seed)` combinations and reruns only missing/failed ones. Once all expected runs finish, the manifest is auto-marked `completed`.
+- `rq1_report.py` only accepts completed campaigns by default. A completed campaign with 5-seed results plus heuristic runs produces exactly the expected number of MLflow runs, preventing ambiguous seed-count or stale-run errors.
 
 ### 3. Benchmark report
 
