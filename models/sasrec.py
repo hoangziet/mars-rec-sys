@@ -81,13 +81,17 @@ class SASRecBlock(nn.Module):
             # Pre-LN
             residual = x
             z = self.ln1(x)
-            attn_out, _ = self.attn(z, z, z, attn_mask=attn_mask)
+            attn_out, _ = self.attn(z, z, z, attn_mask=attn_mask,
+                                     key_padding_mask=padding_mask)
+            attn_out = torch.nan_to_num(attn_out, nan=0.0)
             x = residual + self.dropout1(attn_out)
             residual = x
             x = residual + self.dropout2(self.ffn(self.ln2(x)))
         else:
             # Post-LN
-            attn_out, _ = self.attn(x, x, x, attn_mask=attn_mask)
+            attn_out, _ = self.attn(x, x, x, attn_mask=attn_mask,
+                                     key_padding_mask=padding_mask)
+            attn_out = torch.nan_to_num(attn_out, nan=0.0)
             x = self.ln1(x + self.dropout1(attn_out))
             x = self.ln2(x + self.dropout2(self.ffn(x)))
         return x
@@ -177,8 +181,9 @@ class SASRec(nn.Module):
             torch.ones(L, L, device=input_seq.device, dtype=torch.bool), diagonal=1
         )
 
+        attn_padding_mask = input_seq.eq(self.pad_token)
         for block in self.blocks:
-            x = block(x, attn_mask=causal_mask)
+            x = block(x, attn_mask=causal_mask, padding_mask=attn_padding_mask)
             x = x.masked_fill(pad_hidden_mask, 0.0)
 
         x = self.final_ln(x)

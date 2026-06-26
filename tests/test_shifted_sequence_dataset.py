@@ -141,8 +141,8 @@ def test_shifted_dataset_left_pads_short_sequence(tmp_path: Path):
     assert torch.all(sample["neg_items"][:3] == 0)
 
 
-def test_dataset_negatives_change_between_consecutive_calls(tmp_path: Path):
-    """Verify negatives are resampled on every __getitem__ call (fresh per call)."""
+def test_dataset_set_epoch_changes_negatives(tmp_path: Path):
+    """Negatives must rotate when epoch changes, stay stable within epoch."""
     csv_path = tmp_path / "train.csv"
     _write_train_csv(csv_path)
 
@@ -155,15 +155,19 @@ def test_dataset_negatives_change_between_consecutive_calls(tmp_path: Path):
         seed=42,
     )
 
-    first_call = dataset[0]["neg_items"]
-    second_call = dataset[0]["neg_items"]
+    dataset.set_epoch(0)
+    epoch0_a = dataset[0]["neg_items"].clone()
+    epoch0_b = dataset[0]["neg_items"].clone()
 
-    assert not torch.equal(first_call, second_call), \
-        "Negatives must change between consecutive __getitem__ calls"
+    dataset.set_epoch(1)
+    epoch1 = dataset[0]["neg_items"].clone()
+
+    assert torch.equal(epoch0_a, epoch0_b), "Same epoch must give same negatives"
+    assert not torch.equal(epoch0_a, epoch1), "Different epoch must give different negatives"
 
 
 def test_dataset_set_epoch_is_noop_does_not_crash(tmp_path: Path):
-    """set_epoch is kept for API compatibility but no longer changes behavior."""
+    """set_epoch must accept any int and not crash."""
     csv_path = tmp_path / "train.csv"
     _write_train_csv(csv_path)
 
@@ -176,7 +180,6 @@ def test_dataset_set_epoch_is_noop_does_not_crash(tmp_path: Path):
         seed=42,
     )
 
-    # Must not crash
     dataset.set_epoch(0)
     _ = dataset[0]
     dataset.set_epoch(5)

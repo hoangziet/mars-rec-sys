@@ -290,11 +290,11 @@ class ShiftedSequenceDataset(Dataset):
 
     def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
         sample = self.samples[idx]
-        # Use global np.random state (seeded by seed_everything) so
-        # negatives are fresh on every call, matching the old TrainSequenceDataset
-        # behaviour.  This is essential for convergence — fixed negatives per
-        # epoch prevent the model from learning a general discrimination signal.
-        rng = np.random.default_rng()
+        # Seeded per (seed, epoch, sample_idx) so the same run is reproducible
+        # and negatives rotate deterministically across epochs via set_epoch().
+        rng = np.random.default_rng(
+            np.random.SeedSequence([self.seed, self.epoch, idx])
+        )
 
         positives = np.asarray(sample["pos_items"], dtype=np.int64)
         loss_mask = np.asarray(sample["loss_mask"], dtype=np.bool_)
@@ -644,7 +644,7 @@ def get_rq1_train_loader(
 
     negative_sampling_map = {
         "sasrec": "unseen_user",
-        "gsasrec": "unseen_user",
+        "gsasrec": "catalog_except_positive",
         "gru4rec": "popularity_except_positive",
     }
     negative_sampling = kwargs.pop(
