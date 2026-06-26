@@ -8,7 +8,7 @@ STATS_OUTPUT_DIR ?= experiments/benchmark/$(BENCHMARK_ID)/stats
 PREPROCESSING_VERSION ?= mars-preprocess-v1
 RQ4_BASELINE_VARIANT ?= V0
 
-.PHONY: preprocess rq1-smoke rq1-full rq1-report rq1-compare test rq2-tune rq2-report rq2-all rq3-precompute rq3-tune rq3-report rq3-all rq4-init rq4-ablation rq4-collect rq4-compare rq4-subgroup rq4-report rq4-all
+.PHONY: preprocess rq1-smoke rq1-full rq1-report rq1-compare test rq2-alpha rq2-variants rq2-report rq2-compare rq2-all rq3-precompute rq3-tune rq3-report rq3-all rq4-init rq4-ablation rq4-collect rq4-compare rq4-subgroup rq4-report rq4-all
 
 preprocess:
 	uv run python data/preprocess.py
@@ -32,21 +32,28 @@ rq1-compare:
 test:
 	uv run pytest tests/ -v --ignore=tests/test_mlflow.py --ignore=tests/test_remote_mlflow_integration.py
 
-# --- RQ2: Confidence Tuning ---
-# RQ2/RQ3/RQ4 are gSASRec-only follow-up studies. The backbone is frozen
-# in each script (not sourced from the RQ1 winner artifact).
-RQ2_ALPHAS ?= 0.0 0.25 0.5 1.0 2.0
-RQ2_SEEDS ?= 42 123 2024
-RQ2_BENCHMARK_ID ?= rq2-alpha-tune
-RQ2_OUTPUT_DIR ?= experiments/rq2/$(RQ2_BENCHMARK_ID)
+# --- RQ2: Watch Integration ---
+RQ2_ALPHAS ?= 0.25 0.5 1.0 2.0
+RQ2_SEEDS ?= 42
+RQ2_VARIANT_SEEDS ?= 42 123 2024 3407 9999
+RQ2_ALPHA_BENCHMARK_ID ?= rq2-watch-alpha
+RQ2_VARIANT_BENCHMARK_ID ?= rq2-watch-variants
+RQ2_ALPHA_OUTPUT_DIR ?= experiments/rq2/$(RQ2_ALPHA_BENCHMARK_ID)
+RQ2_OUTPUT_DIR ?= experiments/rq2/$(RQ2_VARIANT_BENCHMARK_ID)
 
-rq2-tune:
-	uv run python scripts/rq2_tune_alpha.py --alphas $(RQ2_ALPHAS) --seeds $(RQ2_SEEDS) --benchmark-id $(RQ2_BENCHMARK_ID) --data-dir $(DATA_DIR)
+rq2-alpha:
+	uv run python scripts/rq2_tune_alpha.py --alphas $(RQ2_ALPHAS) --seeds $(RQ2_SEEDS) --benchmark-id $(RQ2_ALPHA_BENCHMARK_ID) --data-dir $(DATA_DIR)
+
+rq2-variants:
+	uv run python scripts/rq2_compare_variants.py --seeds $(RQ2_VARIANT_SEEDS) --benchmark-id $(RQ2_VARIANT_BENCHMARK_ID) --alpha-artifact $(RQ2_ALPHA_OUTPUT_DIR)/rq2_best_alpha.json --data-dir $(DATA_DIR)
 
 rq2-report:
-	uv run python scripts/rq2_report.py --benchmark-id $(RQ2_BENCHMARK_ID) --output-dir $(RQ2_OUTPUT_DIR)
+	uv run python scripts/rq2_report.py --benchmark-id $(RQ2_VARIANT_BENCHMARK_ID) --alpha-artifact $(RQ2_ALPHA_OUTPUT_DIR)/rq2_best_alpha.json --output-dir $(RQ2_OUTPUT_DIR)
 
-rq2-all: rq2-tune rq2-report
+rq2-compare:
+	uv run python scripts/rq2_compare.py --runs-file $(RQ2_OUTPUT_DIR)/rq2_runs.csv --summary-file $(RQ2_OUTPUT_DIR)/rq2_summary.json --output-dir $(RQ2_OUTPUT_DIR)
+
+rq2-all: rq2-alpha rq2-variants rq2-report rq2-compare
 
 # --- RQ3: Metadata Tuning ---
 RQ3_VARIANTS ?= M0 M1 M2 M3
@@ -72,7 +79,7 @@ RQ4_BENCHMARK_ID ?= rq4-ablation
 RQ4_OUTPUT_DIR ?= experiments/rq4/$(RQ4_BENCHMARK_ID)
 RQ4_COMPARISON_DIR ?= experiments/rq4/$(RQ4_BENCHMARK_ID)
 RQ4_MANIFEST ?= $(RQ4_COMPARISON_DIR)/rq4_protocol_manifest.json
-RQ2_WINNERS ?= $(RQ2_OUTPUT_DIR)/rq2_best_alpha.json
+RQ2_WINNERS ?= $(RQ2_OUTPUT_DIR)/rq2_best_watch.json
 RQ3_WINNERS ?= $(RQ3_OUTPUT_DIR)/rq3_best_variant.json
 
 rq4-init:
