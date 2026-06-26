@@ -193,7 +193,7 @@ class SASRec(nn.Module):
 
         x = self.final_ln(x)
         x = x.masked_fill(pad_hidden_mask, 0.0)
-        return x
+        return torch.nan_to_num(x, nan=0.0)
 
     def _last_hidden(self, input_seq: torch.Tensor) -> torch.Tensor:
         """Extract hidden state at the last non-padding position. Returns (B, D)."""
@@ -281,7 +281,8 @@ class SASRec(nn.Module):
 
     def predict(self, input_seq: torch.Tensor) -> torch.Tensor:
         """Return scores (B, n_items+1) via dot-product with item_emb."""
-        return self._last_hidden(input_seq) @ self.item_emb.weight.T
+        scores = self._last_hidden(input_seq) @ self.item_emb.weight.T
+        return torch.nan_to_num(scores, nan=float("-inf"))
 
     def forward(self, input_seq: torch.Tensor) -> torch.Tensor:
         """Alias for predict — returns scores over full item vocab."""
