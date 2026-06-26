@@ -45,20 +45,25 @@ def main() -> None:
     summary = json.loads(summary_file.read_text())
     winner = summary[0]["variant"]
 
+    if not run_rows:
+        raise RuntimeError("No run rows to compare")
     by_key: dict[tuple[str, str], float] = {}
     for row in run_rows:
         variant = row["variant"]
         seed = row["seed"]
-        val = float(row.get(PRIMARY_METRIC, 0))
-        by_key[(variant, seed)] = val
+        if PRIMARY_METRIC not in row:
+            raise KeyError(
+                f"Row variant={variant} seed={seed} missing {PRIMARY_METRIC!r}"
+            )
+        by_key[(variant, seed)] = float(row[PRIMARY_METRIC])
 
     all_seeds = sorted({int(row["seed"]) for row in run_rows})
     baselines = [v for v in ["M0", "M1", "M2", "M3"] if v != winner]
 
     results = []
     for baseline in baselines:
-        winner_vals = np.array([by_key.get((winner, str(s)), 0.0) for s in all_seeds])
-        baseline_vals = np.array([by_key.get((baseline, str(s)), 0.0) for s in all_seeds])
+        winner_vals = np.array([by_key[(winner, str(s))] for s in all_seeds])
+        baseline_vals = np.array([by_key[(baseline, str(s))] for s in all_seeds])
 
         stats = compute_seed_paired_t_test(winner_vals, baseline_vals)
         winner_mean = float(winner_vals.mean())
