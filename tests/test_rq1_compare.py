@@ -10,7 +10,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from scripts.rq1_compare import (
     _compute_paired_stats,
-    _count_wins_ties_losses,
     _format_p_value,
     _index_by_seed,
     _run_comparisons,
@@ -19,6 +18,7 @@ from scripts.rq1_compare import (
     relative_improvement,
     select_winner_and_baselines,
 )
+from training.stat_tests import count_wins_ties_losses
 
 
 # ---- select_winner_and_baselines ----
@@ -142,7 +142,7 @@ def test_counts_wins_ties_losses():
 
 def test_mutually_exclusive_wins_ties_losses():
     differences = np.array([0.05, 1e-10, -1e-10, 0.0, -0.02])
-    wins, ties, losses = _count_wins_ties_losses(differences)
+    wins, ties, losses = count_wins_ties_losses(differences)
     assert wins == 1
     assert ties == 3
     assert losses == 1
