@@ -23,4 +23,3 @@ train_kwargs:
   dupe_factor: 10
   prop_sliding_window: 0.1
   force_last_item_mask: true
-  confidence_alpha: 0.0
