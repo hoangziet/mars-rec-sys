@@ -7,6 +7,7 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from models.gsasrec import GSASRec
+from models.gru4rec import GRU4Rec
 from models.sasrec import SASRec
 
 
@@ -221,3 +222,41 @@ def test_gsasrec_batch_finite():
     assert torch.isfinite(enc).all().item()
     assert torch.isfinite(h).all().item()
     assert torch.isfinite(out).all().item()
+
+
+# ---------------------------------------------------------------------------
+# Backward-compatibility tests — legacy scalar loss must still work
+# ---------------------------------------------------------------------------
+
+
+def test_sasrec_legacy_loss_still_works():
+    torch.manual_seed(0)
+    model = _make_sasrec(num_layers=2).eval()
+    seq = torch.tensor([[0, 0, 1, 2, 3]])
+    pos = torch.tensor([4])
+    neg = torch.tensor([5])
+    with torch.no_grad():
+        loss = model.loss(seq, pos, neg)
+    assert torch.isfinite(loss).item()
+
+
+def test_gsasrec_legacy_loss_still_works():
+    torch.manual_seed(0)
+    model = _make_gsasrec(num_layers=2).eval()
+    seq = torch.tensor([[0, 0, 1, 2, 3]])
+    pos = torch.tensor([4])
+    neg = torch.tensor([[5, 6, 7, 8]])
+    with torch.no_grad():
+        loss = model.loss(seq, pos, neg)
+    assert torch.isfinite(loss).item()
+
+
+def test_gru_legacy_bpr_max_still_works():
+    torch.manual_seed(0)
+    model = GRU4Rec(n_items=20, emb_dim=8, hidden_dim=8, num_layers=1, dropout=0.0).eval()
+    seq = torch.tensor([[0, 1, 2, 3]])
+    pos = torch.tensor([4])
+    neg = torch.tensor([[5, 6]])
+    with torch.no_grad():
+        loss = model.bpr_max_loss(seq, pos, neg)
+    assert torch.isfinite(loss).item()
