@@ -161,17 +161,29 @@ is whatever `rq4-init` recorded into the protocol manifest (also
 
 ### Fairness scope
 
-RQ1 currently uses **architecture-appropriate defaults** from each
-model's Hydra config (e.g. different batch sizes, learning rates,
-hidden dims, optimizers). It does not yet enforce an equalized
-hyperparameter tuning budget across models. Treat RQ1 as a
-"best out-of-the-box" comparison, not a strictly fair head-to-head
-benchmark.
+RQ1 uses a **shared benchmark contract with declared model-specific
+exceptions**:
+
+- same processed split, item catalog, full-sort ranking contract, and primary metrics
+- same benchmark seed campaign for stochastic models
+- same validation-selection rule (`mean validation NDCG@10` across the campaign)
+- same early-stopping rule where a train loop exists
+- same common optimization recipe for neural models: `batch_size=256`, `epochs=50`, `lr=1e-3`, `beta2=0.98`, `weight_decay=1e-4`, `gradient_clip=5.0`, no warmup scheduler
+
+RQ1 is a next-distinct-course benchmark: preprocessing deduplicates `(user_id, item_id)` by first encounter, so validation and test targets must not already appear in the user history.
+
+Model-specific objectives and data-pipeline differences are still allowed
+when they are part of the implementation contract and documented up front.
+
+Current declared exceptions:
+
+- `GRU4Rec` uses a paper-near pairwise ranking objective (`bpr_max`) rather than the full-catalog CE fallback.
+- `BERT4Rec` keeps a simplified masking pipeline, so it remains an adapted benchmark implementation rather than a full paper-faithful reproduction.
 
 ### Provenance checks
 
 RQ2/RQ3 winner artifacts carry `backbone`, `data_source`,
-`preprocessing_version`, and `git_commit` tags from the run that
+and `preprocessing_version` tags from the run that
 produced them. `rq2-report` and `rq3-report` validate that **every
 selected run agrees on all of these** and that the backbone is
 `gsasrec` — any mismatch or missing tag fails the report rather than
@@ -182,7 +194,6 @@ The RQ4 protocol uses **lightweight provenance** only:
 
 - `preprocessing_version` and `data_source` from the validated RQ2/RQ3 winners
 - `backbone = "gsasrec"`
-- `git_commit` recorded as informational metadata (not a runtime gate)
 
 There is **no SHA256 hashing** of the dataset manifest, configs, or text
 embeddings, and **no git-commit runtime gate**. The research contract is
@@ -267,6 +278,9 @@ make rq1-report BENCHMARK_ID=rq1-smoke
 make rq1-full
 make rq1-report BENCHMARK_ID=rq1-v1
 make rq1-compare BENCHMARK_ID=rq1-v1
+make rq2-all
+make rq3-all
+make rq4-all
 make test
 ```
 
@@ -278,6 +292,7 @@ make test
 
 | Phase (script)               | Experiment                  |
 | ---------------------------- | --------------------------- |
+| Single-model smoke (`train.py phase=smoke`) | `mars_smoke`      |
 | RQ1 smoke (`train_all.py`)   | `mars_benchmark`            |
 | RQ1 (`benchmark`)            | `mars_benchmark`            |
 | RQ2 (tuning)                 | `mars_confidence_tuning`    |
@@ -382,11 +397,11 @@ SASRec-style backbone with gBCE loss and multiple negatives.
 
 ### GRU4Rec
 
-GRU encoder with cross-entropy loss over the full item catalog.
+GRU encoder with a paper-near `bpr_max` ranking loss and sampled negatives.
 
 ### BERT4Rec
 
-Bidirectional Transformer with masked item modeling.
+Bidirectional Transformer with masked item modeling; the current implementation uses a simplified masking pipeline rather than the canonical 80/10/10 corruption scheme.
 
 ### BPR-MF
 

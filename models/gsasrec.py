@@ -65,13 +65,13 @@ class GSASRecBlock(nn.Module):
             # Pre-LN
             residual = x
             z = self.ln1(x)
-            attn_out, _ = self.attn(z, z, z, attn_mask=attn_mask, key_padding_mask=padding_mask)
+            attn_out, _ = self.attn(z, z, z, attn_mask=attn_mask)
             x = residual + self.dropout1(attn_out)
             residual = x
             x = residual + self.dropout2(self.ffn(self.ln2(x)))
         else:
             # Post-LN
-            attn_out, _ = self.attn(x, x, x, attn_mask=attn_mask, key_padding_mask=padding_mask)
+            attn_out, _ = self.attn(x, x, x, attn_mask=attn_mask)
             x = self.ln1(x + self.dropout1(attn_out))
             x = self.ln2(x + self.dropout2(self.ffn(x)))
         return x
@@ -114,6 +114,7 @@ class GSASRec(nn.Module):
         pos_smoothing: float = 0.0,
         norm_first: bool = True,
         item_encoder=None,
+        reuse_item_embeddings: bool = False,
     ) -> None:
         super().__init__()
         if emb_dim is not None:
@@ -122,6 +123,7 @@ class GSASRec(nn.Module):
         self.n_items    = n_items
         self.max_len    = max_len
         self.hidden_dim = hidden_dim
+        self.num_heads  = num_heads
         self.pad_token  = 0
         self.t          = t
         self.num_neg    = num_neg
@@ -136,6 +138,18 @@ class GSASRec(nn.Module):
             with torch.no_grad():
                 self.item_emb.weight[0].zero_()
             self.item_emb_is_embedding = True
+
+        self.reuse_item_embeddings = reuse_item_embeddings
+        if self.reuse_item_embeddings:
+            if item_encoder is not None:
+                raise ValueError("reuse_item_embeddings=True conflicts with item_encoder")
+            self.output_emb = self.item_emb
+        else:
+            self.output_emb = nn.Embedding(n_items + 1, hidden_dim, padding_idx=0)
+            nn.init.normal_(self.output_emb.weight, std=0.01)
+            with torch.no_grad():
+                self.output_emb.weight[0].zero_()
+
         # 1-indexed positions; index 0 (padding_idx=0) → zero vector for padding tokens.
         self.pos_emb     = nn.Embedding(max_len + 1, hidden_dim, padding_idx=0)
         self.emb_dropout = nn.Dropout(dropout)
@@ -164,7 +178,7 @@ class GSASRec(nn.Module):
             # Only add noise at non-padding positions (pos_ids > 0).
             # Padding has pos_ids=0 and pos_emb(0)=0 — keep it that way.
             noise = noise * (pos_ids > 0).float()
-            pos_ids = (pos_ids.float() + noise).clamp(min=0.0).long()
+            pos_ids = (pos_ids.float() + noise).clamp(min=0.0, max=float(L)).long()
 
         x = self.item_emb(input_seq) * (self.hidden_dim ** 0.5) + self.pos_emb(pos_ids)
 
@@ -174,15 +188,21 @@ class GSASRec(nn.Module):
 
         x = self.emb_dropout(x)
 
-        causal_mask = torch.triu(
-            torch.ones(L, L, device=input_seq.device, dtype=torch.bool), diagonal=1
-        )
-        padding_mask = input_seq == self.pad_token
+        # RecBole-style additive attention mask: causal + padding-key exclusion.
+        # Padding queries are allowed to attend their own position (self-diagonal)
+        # so softmax never sees an entirely masked row (which would produce NaN).
+        causal = torch.tril(torch.ones(L, L, dtype=torch.bool, device=input_seq.device)).unsqueeze(0)   # [1, L, L]
+        valid_keys = input_seq.ne(self.pad_token).unsqueeze(1)                                           # [B, 1, L]
+        allowed = causal & valid_keys                                                                    # [B, L, L]
+        pad_queries = input_seq.eq(self.pad_token).unsqueeze(-1)                                         # [B, L, 1]
+        diag = torch.eye(L, dtype=torch.bool, device=input_seq.device).unsqueeze(0)                      # [1, L, L]
+        allowed = allowed | (pad_queries & diag)                                                         # [B, L, L]
+        add_mask = torch.zeros(allowed.shape, dtype=x.dtype, device=input_seq.device)
+        add_mask = add_mask.masked_fill(~allowed, -10000.0)
+        add_mask = add_mask.repeat_interleave(self.num_heads, dim=0)                                     # [B*H, L, L]
+
         for block in self.blocks:
-            x = block(x, attn_mask=causal_mask, padding_mask=padding_mask)
-            # Re-zero at padding positions: when a padded query has all keys
-            # masked, attention softmax becomes all -inf → NaN, which then
-            # propagates through the residual to valid positions in later blocks.
+            x = block(x, attn_mask=add_mask)
             x = x.masked_fill(pad_hidden_mask, 0.0)
         x = self.final_ln(x)
         x = x.masked_fill(pad_hidden_mask, 0.0)
@@ -202,7 +222,7 @@ class GSASRec(nn.Module):
     # Training: gBCE with multiple negatives
     # ------------------------------------------------------------------
 
-    def _gbce_transform_pos(self, pos_score: torch.Tensor, K: int) -> torch.Tensor:
+    def _gbce_transform_pos(self, pos_score: torch.Tensor, num_negatives: int) -> torch.Tensor:
         """Apply gBCE logit transformation to positive scores.
 
         Reference: Petrov & Macdonald, RecSys 2023.
@@ -213,7 +233,7 @@ class GSASRec(nn.Module):
         At t=0  → beta=1 → pos_score_t == pos_score (standard BCE).
         At t=0.5 and K=32, n_items=2300 → beta ≈ 0.51.
         """
-        alpha = K / max(self.n_items - 1, 1)
+        alpha = num_negatives / max(self.n_items - 1, 1)
         beta  = alpha * ((1.0 - 1.0 / alpha) * self.t + 1.0 / alpha)
         eps   = 1e-10
         # Use float64 for numerical stability (same as reference implementation)
@@ -252,8 +272,8 @@ class GSASRec(nn.Module):
             neg_items = neg_items.unsqueeze(1)                   # (B,) -> (B, 1)
 
         h = self._last_hidden(input_seq)                                      # (B, D)
-        pos_emb   = self.item_emb(pos_items)                                  # (B, D)
-        neg_emb   = self.item_emb(neg_items)                                  # (B, K, D)
+        pos_emb   = self.output_emb(pos_items)                                 # (B, D)
+        neg_emb   = self.output_emb(neg_items)                                 # (B, K, D)
         pos_score = (h * pos_emb).sum(dim=-1)                                 # (B,)
         neg_score = torch.bmm(neg_emb, h.unsqueeze(-1)).squeeze(-1)           # (B, K)
 
@@ -274,17 +294,62 @@ class GSASRec(nn.Module):
             return loss_per_sample
         return loss_per_sample.mean()
 
+    def _negative_sampling_rate(self, num_negatives: int) -> float:
+        if self.n_items <= 1:
+            raise ValueError("gBCE requires at least two catalogue items")
+        if not (1 <= num_negatives <= self.n_items - 1):
+            raise ValueError(f"num_negatives must be in [1, {self.n_items - 1}]")
+        return num_negatives / (self.n_items - 1)
+
+    def sequence_loss(
+        self,
+        input_seq: torch.Tensor,
+        pos_items: torch.Tensor,
+        neg_items: torch.Tensor,
+        loss_mask: torch.Tensor,
+        reduction: str = "mean",
+    ) -> torch.Tensor:
+        if neg_items.dim() != 3:
+            raise ValueError("neg_items must have shape [B, L, K]")
+        if reduction not in ("mean", "none"):
+            raise ValueError(f"Unsupported reduction: {reduction!r}")
+
+        hidden = self._encode(input_seq)
+
+        pos_emb = self.output_emb(pos_items)
+        neg_emb = self.output_emb(neg_items)
+
+        pos_score = (hidden * pos_emb).sum(dim=-1)
+        neg_score = torch.einsum("bld,blkd->blk", hidden, neg_emb)
+
+        K = neg_items.size(-1)
+        pos_score_t = self._gbce_transform_pos(pos_score, K)
+
+        logits = torch.cat([pos_score_t.unsqueeze(-1), neg_score], dim=-1)
+        labels = torch.zeros_like(logits)
+        labels[..., 0] = 1.0
+
+        per_position = (
+            F.binary_cross_entropy_with_logits(logits, labels, reduction="none")
+            .mean(dim=-1)
+            .masked_fill(~loss_mask, 0.0)
+        )
+
+        if reduction == "none":
+            return per_position
+        return per_position.sum() / loss_mask.sum().clamp_min(1)
+
     # ------------------------------------------------------------------
     # Inference
     # ------------------------------------------------------------------
 
     def predict(self, input_seq: torch.Tensor) -> torch.Tensor:
-        """Return scores (B, n_items+1) via dot-product with item_emb."""
+        """Return scores (B, n_items+1) via dot-product with output embedding."""
         h = self._last_hidden(input_seq)  # (B, D)
-        if hasattr(self.item_emb, "weight"):
-            return h @ self.item_emb.weight.T
+        if hasattr(self.output_emb, "weight"):
+            return h @ self.output_emb.weight.T
         all_ids = torch.arange(self.n_items + 1, device=input_seq.device)
-        all_embs = self.item_emb(all_ids)
+        all_embs = self.output_emb(all_ids)
         return h @ all_embs.T
 
     def forward(self, input_seq: torch.Tensor) -> torch.Tensor:

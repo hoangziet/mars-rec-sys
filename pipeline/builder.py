@@ -225,25 +225,27 @@ def build_criterion_fn(model_name: str, train_kwargs: dict):
 
     if model_name == "gru4rec":
         loss_type = train_kwargs.get("loss_type", "ce")
+
         def fn(model, batch, device):
             if loss_type == "ce":
                 return model.loss(
                     batch["input_seq"].to(device),
                     batch["pos_items"].to(device),
                 )
+
+            if loss_type == "top1":
+                loss_fn = model.top1_loss
+            elif loss_type == "bpr_max":
+                loss_fn = model.bpr_max_loss
             else:
-                if not hasattr(model, "_loss_fn"):
-                    if loss_type == "top1":
-                        model._loss_fn = model.top1_loss
-                    elif loss_type == "bpr_max":
-                        model._loss_fn = model.bpr_max_loss
-                    else:
-                        raise ValueError(f"Unknown GRU4Rec loss_type: {loss_type}")
-                return model.loss(
-                    batch["input_seq"].to(device),
-                    batch["pos_items"].to(device),
-                    batch["neg_items"].to(device),
-                )
+                raise ValueError(f"Unknown GRU4Rec loss_type: {loss_type}")
+
+            return loss_fn(
+                batch["input_seq"].to(device),
+                batch["pos_items"].to(device),
+                batch["neg_items"].to(device),
+            )
+
         return fn
 
     if model_name == "bert4rec":
@@ -274,6 +276,45 @@ def build_criterion_fn(model_name: str, train_kwargs: dict):
         return fn
 
     raise ValueError(f"No criterion defined for model: {model_name}")
+
+
+def build_rq1_train_criterion_fn(model_name: str, train_kwargs: dict):
+    """Return a callable ``(model, batch, device) -> loss scalar`` for the
+    RQ1 shifted-sequence training path.  The scalar ``build_criterion_fn()``
+    remains untouched for val-loss and shared workflows.
+    """
+    if model_name == "sasrec":
+        def fn(model, batch, device):
+            return model.sequence_loss(
+                batch["input_seq"].to(device),
+                batch["pos_items"].to(device),
+                batch["neg_items"].to(device),
+                batch["loss_mask"].to(device),
+            )
+        return fn
+
+    if model_name == "gsasrec":
+        def fn(model, batch, device):
+            return model.sequence_loss(
+                batch["input_seq"].to(device),
+                batch["pos_items"].to(device),
+                batch["neg_items"].to(device),
+                batch["loss_mask"].to(device),
+            )
+        return fn
+
+    if model_name == "gru4rec":
+        def fn(model, batch, device):
+            return model.sequence_bpr_max_loss(
+                batch["input_seq"].to(device),
+                batch["pos_items"].to(device),
+                batch["neg_items"].to(device),
+                batch["loss_mask"].to(device),
+            )
+        return fn
+
+    # For bert4rec / bprmf, the RQ1 criterion is identical to the scalar one.
+    return build_criterion_fn(model_name, train_kwargs)
 
 
 # ---------------------------------------------------------------------------

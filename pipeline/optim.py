@@ -5,7 +5,6 @@ Optimizer and scheduler helpers shared by training entry points.
 """
 
 import torch
-import torch.nn as nn
 
 
 class LinearWarmupDecayScheduler:
@@ -44,16 +43,6 @@ class LinearWarmupDecayScheduler:
         return [group["lr"] for group in self.optimizer.param_groups]
 
 
-def _layer_norm_param_names(model: torch.nn.Module) -> set[str]:
-    names: set[str] = set()
-    for module_name, module in model.named_modules():
-        if isinstance(module, nn.LayerNorm):
-            for param_name, _ in module.named_parameters(recurse=False):
-                full_name = f"{module_name}.{param_name}" if module_name else param_name
-                names.add(full_name)
-    return names
-
-
 def build_optimizer(
     model_name: str,
     model: torch.nn.Module,
@@ -62,29 +51,6 @@ def build_optimizer(
     lr = train_kwargs.get("lr", 1e-3)
     beta2 = train_kwargs.get("beta2", 0.999)
     weight_decay = train_kwargs.get("weight_decay", 0.0)
-
-    if model_name == "bert4rec":
-        layer_norm_names = _layer_norm_param_names(model)
-        decay_params = []
-        no_decay_params = []
-
-        for name, param in model.named_parameters():
-            if not param.requires_grad:
-                continue
-            if name.endswith("bias") or name in layer_norm_names:
-                no_decay_params.append(param)
-            else:
-                decay_params.append(param)
-
-        return torch.optim.AdamW(
-            [
-                {"params": decay_params, "weight_decay": weight_decay},
-                {"params": no_decay_params, "weight_decay": 0.0},
-            ],
-            lr=lr,
-            betas=(0.9, beta2),
-            eps=1e-6,
-        )
 
     return torch.optim.Adam(
         model.parameters(),

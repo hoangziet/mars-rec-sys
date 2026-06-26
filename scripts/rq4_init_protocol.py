@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess
 import sys
 from pathlib import Path
 
@@ -49,18 +48,6 @@ def build_parser() -> argparse.ArgumentParser:
 
 def parse_args() -> argparse.Namespace:
     return build_parser().parse_args()
-
-
-def _get_git_long_commit() -> str:
-    """Record the HEAD commit as a non-blocking provenance field.
-
-    The recorded value is informational only; the runner does not
-    enforce commit match at runtime.
-    """
-    try:
-        return subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
-    except Exception:
-        return "unknown"
 
 
 def main() -> None:
@@ -110,15 +97,19 @@ def main() -> None:
 
     # Light provenance: RQ2 and RQ3 must share the same preprocessing
     # version and data source before we freeze the RQ4 protocol.
-    rq2_pv = alpha_data.get("preprocessing_version", "unknown")
-    rq3_pv = variant_data.get("preprocessing_version", "unknown")
+    rq2_pv = alpha_data.get("preprocessing_version")
+    rq3_pv = variant_data.get("preprocessing_version")
+    if not rq2_pv or not rq3_pv:
+        raise RuntimeError("missing preprocessing_version in RQ2/RQ3 winner artifacts")
     if rq2_pv != rq3_pv:
         raise RuntimeError(
             f"RQ2 and RQ3 preprocessing_version differ: "
             f"RQ2={rq2_pv}, RQ3={rq3_pv}"
         )
-    rq2_ds = alpha_data.get("data_source", "unknown")
-    rq3_ds = variant_data.get("data_source", "unknown")
+    rq2_ds = alpha_data.get("data_source")
+    rq3_ds = variant_data.get("data_source")
+    if not rq2_ds or not rq3_ds:
+        raise RuntimeError("missing data_source in RQ2/RQ3 winner artifacts")
     if rq2_ds != rq3_ds:
         raise RuntimeError(
             f"RQ2 and RQ3 data_source differ: "
@@ -148,7 +139,6 @@ def main() -> None:
         "best_metadata_variant": str(variant_data["best_variant"]),
         "rq2_benchmark_id": alpha_data.get("benchmark_id"),
         "rq3_benchmark_id": variant_data.get("benchmark_id"),
-        "git_commit": _get_git_long_commit(),
         "preprocessing_version": rq2_pv,
         "data_source": rq2_ds,
         "metadata_variants": {
@@ -166,7 +156,6 @@ def main() -> None:
     print(f"  Baseline variant: {manifest['baseline_variant']}")
     print(f"  Best alpha: {manifest['best_alpha']}")
     print(f"  Best metadata variant: {manifest['best_metadata_variant']}")
-    print(f"  Git commit: {manifest['git_commit'][:12]}")
     print(f"  Variants: {args.variants}")
     print(f"  Seeds: {len(args.seeds)}")
     print(f"  Expected runs: {manifest['expected_runs']}")

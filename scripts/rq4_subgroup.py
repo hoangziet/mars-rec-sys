@@ -125,26 +125,27 @@ def _compute_subgroup_metrics(per_user: pd.DataFrame, group_col: str) -> list[di
     return results
 
 
-def _compute_improvements(subgroup_metrics: list[dict]) -> list[dict]:
-    """Compute improvement over V0 for each (group, subgroup, variant)."""
+def _compute_improvements(subgroup_metrics: list[dict], baseline_variant: str) -> list[dict]:
+    """Compute improvement over the explicit baseline for each subgroup."""
     by_key = {}
     for r in subgroup_metrics:
         by_key[(r["group"], r["subgroup"], r["variant"])] = r
 
     improvements = []
     for r in subgroup_metrics:
-        if r["variant"] == "V0":
+        if r["variant"] == baseline_variant:
             continue
-        v0 = by_key.get((r["group"], r["subgroup"], "V0"))
-        if v0 is None:
+        baseline = by_key.get((r["group"], r["subgroup"], baseline_variant))
+        if baseline is None:
             continue
-        diff = r["mean"] - v0["mean"]
-        rel = diff / v0["mean"] if v0["mean"] != 0 else None
+        diff = r["mean"] - baseline["mean"]
+        rel = diff / baseline["mean"] if baseline["mean"] != 0 else None
         improvements.append({
             "group": r["group"],
             "subgroup": r["subgroup"],
             "variant": r["variant"],
-            "v0_mean": v0["mean"],
+            "baseline_variant": baseline_variant,
+            "baseline_mean": baseline["mean"],
             "variant_mean": r["mean"],
             "absolute_improvement": diff,
             "relative_improvement": rel,
@@ -158,6 +159,7 @@ def main() -> None:
 
     manifest = json.loads(Path(args.manifest).read_text())
     variants = manifest["variants"]
+    baseline_variant = manifest.get("baseline_variant", "V0")
     seeds = [int(s) for s in manifest["neural_seeds"]]
     data_dir = Path(args.data_dir)
     per_user_dir = Path(args.per_user_dir)
@@ -187,7 +189,7 @@ def main() -> None:
     for group_col in ["watch", "history", "popularity", "meta"]:
         all_metrics.extend(_compute_subgroup_metrics(per_user, group_col))
 
-    improvements = _compute_improvements(all_metrics)
+    improvements = _compute_improvements(all_metrics, baseline_variant=baseline_variant)
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -222,7 +224,7 @@ def main() -> None:
 
             # Improvement table
             if group_imps:
-                f.write(f"\n### Improvement over V0\n\n")
+                f.write(f"\n### Improvement over {baseline_variant}\n\n")
                 f.write("| Subgroup | Variant | Δ | Relative | N |\n")
                 f.write("| --- | --- | ---: | ---: | ---: |\n")
                 for imp in group_imps:

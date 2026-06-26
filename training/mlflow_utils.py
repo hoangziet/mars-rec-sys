@@ -74,14 +74,12 @@ def collect_common_run_metadata(
     model_name: str,
     seed: int,
     phase: str,
-    git_commit: str,
     extra_params: dict,
 ) -> dict:
     payload = {
         "model": model_name,
         "seed": seed,
         "phase": phase,
-        "git_commit": git_commit,
     }
     payload.update(extra_params)
     return payload
@@ -106,17 +104,3 @@ def configure_mlflow(
 
     assert_tracking_server_reachable(settings, client=client)
     return settings
-
-
-def get_git_commit() -> str:
-    try:
-        import subprocess
-
-        return subprocess.check_output(
-            ["git", "rev-parse", "HEAD"],
-            cwd=Path(__file__).resolve().parent.parent,
-            stderr=subprocess.DEVNULL,
-            text=True,
-        ).strip()
-    except Exception:
-        return "unknown"

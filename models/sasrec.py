@@ -59,7 +59,7 @@ class SASRecBlock(nn.Module):
                  norm_first: bool = True) -> None:
         super().__init__()
         self.norm_first = norm_first
-        self.ln1 = nn.LayerNorm(hidden_dim, eps=1e-8)
+        self.ln1 = nn.LayerNorm(hidden_dim, eps=1e-5)
         self.attn = nn.MultiheadAttention(
             embed_dim=hidden_dim,
             num_heads=num_heads,
@@ -67,7 +67,7 @@ class SASRecBlock(nn.Module):
             batch_first=True,
         )
         self.dropout1 = nn.Dropout(dropout)
-        self.ln2 = nn.LayerNorm(hidden_dim, eps=1e-8)
+        self.ln2 = nn.LayerNorm(hidden_dim, eps=1e-5)
         self.ffn = PointWiseFeedForward(hidden_dim, dropout)
         self.dropout2 = nn.Dropout(dropout)
 
@@ -81,13 +81,13 @@ class SASRecBlock(nn.Module):
             # Pre-LN
             residual = x
             z = self.ln1(x)
-            attn_out, _ = self.attn(z, z, z, attn_mask=attn_mask, key_padding_mask=padding_mask)
+            attn_out, _ = self.attn(z, z, z, attn_mask=attn_mask)
             x = residual + self.dropout1(attn_out)
             residual = x
             x = residual + self.dropout2(self.ffn(self.ln2(x)))
         else:
             # Post-LN
-            attn_out, _ = self.attn(x, x, x, attn_mask=attn_mask, key_padding_mask=padding_mask)
+            attn_out, _ = self.attn(x, x, x, attn_mask=attn_mask)
             x = self.ln1(x + self.dropout1(attn_out))
             x = self.ln2(x + self.dropout2(self.ffn(x)))
         return x
@@ -134,6 +134,7 @@ class SASRec(nn.Module):
         self.n_items = n_items
         self.max_len = max_len
         self.hidden_dim = hidden_dim
+        self.num_heads = num_heads
         self.pad_token = 0
 
         self.item_emb = nn.Embedding(n_items + 1, hidden_dim, padding_idx=0)
@@ -146,7 +147,7 @@ class SASRec(nn.Module):
             [SASRecBlock(hidden_dim, num_heads, dropout, norm_first)
              for _ in range(num_layers)]
         )
-        self.final_ln = nn.LayerNorm(hidden_dim, eps=1e-8)
+        self.final_ln = nn.LayerNorm(hidden_dim, eps=1e-5)
 
         self._init_weights()
 
@@ -173,16 +174,21 @@ class SASRec(nn.Module):
 
         x = self.emb_dropout(x)
 
-        causal_mask = torch.triu(
-            torch.ones(L, L, device=input_seq.device, dtype=torch.bool), diagonal=1
-        )
-        padding_mask = input_seq == self.pad_token  # (B, L) True for padding
+        # RecBole-style additive attention mask: causal + padding-key exclusion.
+        # Padding queries are allowed to attend their own position (self-diagonal)
+        # so softmax never sees an entirely masked row (which would produce NaN).
+        causal = torch.tril(torch.ones(L, L, dtype=torch.bool, device=input_seq.device)).unsqueeze(0)   # [1, L, L]
+        valid_keys = input_seq.ne(self.pad_token).unsqueeze(1)                                           # [B, 1, L]
+        allowed = causal & valid_keys                                                                    # [B, L, L]
+        pad_queries = input_seq.eq(self.pad_token).unsqueeze(-1)                                         # [B, L, 1]
+        diag = torch.eye(L, dtype=torch.bool, device=input_seq.device).unsqueeze(0)                      # [1, L, L]
+        allowed = allowed | (pad_queries & diag)                                                         # [B, L, L]
+        add_mask = torch.zeros(allowed.shape, dtype=x.dtype, device=input_seq.device)
+        add_mask = add_mask.masked_fill(~allowed, -10000.0)
+        add_mask = add_mask.repeat_interleave(self.num_heads, dim=0)                                     # [B*H, L, L]
 
         for block in self.blocks:
-            x = block(x, attn_mask=causal_mask, padding_mask=padding_mask)
-            # Re-zero at padding positions: when a padded query has all keys
-            # masked, attention softmax becomes all -inf → NaN, which then
-            # propagates through the residual to valid positions in later blocks.
+            x = block(x, attn_mask=add_mask)
             x = x.masked_fill(pad_hidden_mask, 0.0)
 
         x = self.final_ln(x)
@@ -230,6 +236,48 @@ class SASRec(nn.Module):
                 ]
             ),
         )
+
+    def sequence_loss(
+        self,
+        input_seq: torch.Tensor,
+        pos_items: torch.Tensor,
+        neg_items: torch.Tensor,
+        loss_mask: torch.Tensor,
+        reduction: str = "mean",
+    ) -> torch.Tensor:
+        """BCE loss at every valid sequence position.
+
+        Parameters
+        ----------
+        input_seq : (B, L)
+        pos_items : (B, L)
+        neg_items : (B, L, 1) — exactly one negative per position
+        loss_mask : (B, L) bool — True for positions with a valid target
+        """
+        if neg_items.dim() != 3:
+            raise ValueError("neg_items must have shape [B, L, 1]")
+        if neg_items.size(-1) != 1:
+            raise ValueError("SASRec requires exactly one negative per valid position")
+        if reduction not in ("mean", "none"):
+            raise ValueError(f"Unsupported reduction: {reduction!r}")
+
+        hidden = self._encode(input_seq)
+
+        pos_logits = (hidden * self.item_emb(pos_items)).sum(dim=-1)        # (B, L)
+        neg_logits = (hidden.unsqueeze(2) * self.item_emb(neg_items)).sum(dim=-1).squeeze(-1)  # (B, L)
+
+        pos_loss = F.binary_cross_entropy_with_logits(
+            pos_logits, torch.ones_like(pos_logits), reduction="none",
+        )
+        neg_loss = F.binary_cross_entropy_with_logits(
+            neg_logits, torch.zeros_like(neg_logits), reduction="none",
+        )
+
+        per_position = (pos_loss + neg_loss).masked_fill(~loss_mask, 0.0)
+
+        if reduction == "none":
+            return per_position
+        return per_position.sum() / loss_mask.sum().clamp_min(1)
 
     def predict(self, input_seq: torch.Tensor) -> torch.Tensor:
         """Return scores (B, n_items+1) via dot-product with item_emb."""

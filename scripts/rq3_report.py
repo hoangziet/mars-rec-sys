@@ -13,7 +13,6 @@ All selected runs are required to share the same:
     - benchmark_id
     - preprocessing_version
     - data_source
-    - git_commit
 Missing or mismatched provenance fails the report — there is no silent
 fallback to "mars-preprocess-v1" or "data/processed".
 
@@ -34,19 +33,26 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from training.mlflow_contract import RQ3_EXPERIMENT_NAME
 from training.mlflow_utils import configure_mlflow
 
-EXPERIMENT_NAME = "mars_metadata_tuning"
+EXPERIMENT_NAME = RQ3_EXPERIMENT_NAME
 PRIMARY_METRIC = "best_val_ndcg_at_10"
 VARIANT_ORDER = {"M0": 0, "M1": 1, "M2": 2, "M3": 3}
 
 REQUIRED_PROVENANCE_FIELDS = (
     "data_source",
     "preprocessing_version",
-    "git_commit",
     "benchmark_id",
     "backbone",
 )
+
+
+def _validate_variant_names(selected: list[dict]) -> None:
+    allowed = set(VARIANT_ORDER)
+    invalid = sorted({str(r["variant"]) for r in selected if str(r["variant"]) not in allowed})
+    if invalid:
+        raise RuntimeError(f"Invalid metadata_variant values in selected runs: {invalid}")
 
 def _validate_rq3_grid(selected: list[dict]) -> None:
     """Validate that every (variant, seed) appears exactly once and seeds are
@@ -97,7 +103,7 @@ def _validate_provenance(selected: list[dict]) -> dict:
     """All selected runs must share the same provenance.
 
     Required fields: backbone, benchmark_id, preprocessing_version,
-    data_source, git_commit. Missing any field on any run, or any
+    data_source. Missing any field on any run, or any
     disagreement across runs, fails the report.
     """
     expected: dict[str, str] = {}
@@ -165,7 +171,6 @@ def main() -> None:
             "benchmark_id": tags.get("benchmark_id"),
             "preprocessing_version": tags.get("preprocessing_version"),
             "data_source": tags.get("data_source"),
-            "git_commit": tags.get("git_commit"),
         }
         selected.append({
             "variant": variant,
@@ -178,6 +183,7 @@ def main() -> None:
 
     if not selected:
         raise RuntimeError(f"No reportable runs found for benchmark {args.benchmark_id}")
+    _validate_variant_names(selected)
     _validate_rq3_grid(selected)
     provenance = _validate_provenance(selected)
     if provenance["backbone"] != "gsasrec":
@@ -229,7 +235,6 @@ def main() -> None:
             "selection_metric": PRIMARY_METRIC,
             "preprocessing_version": provenance["preprocessing_version"],
             "data_source": provenance["data_source"],
-            "git_commit": provenance["git_commit"],
         }
         json.dump(winner, f, indent=2)
 

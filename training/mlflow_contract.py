@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+SMOKE_EXPERIMENT_NAME = "mars_smoke"
+BENCHMARK_EXPERIMENT_NAME = "mars_benchmark"
+RQ2_EXPERIMENT_NAME = "mars_confidence_tuning"
+RQ3_EXPERIMENT_NAME = "mars_metadata_tuning"
+RQ4_EXPERIMENT_NAME = "mars_final_ablation"
+
 TRAINING_EXPERIMENTS = {
-    "smoke": "mars_smoke",
-    "benchmark": "mars_benchmark",
-    "tuning": "mars_tuning",
-    "ablation": "mars_ablation",
-    "final": "mars_final",
+    "smoke": SMOKE_EXPERIMENT_NAME,
+    "benchmark": BENCHMARK_EXPERIMENT_NAME,
+    "rq2_tuning": RQ2_EXPERIMENT_NAME,
+    "rq3_tuning": RQ3_EXPERIMENT_NAME,
+    "rq4_final": RQ4_EXPERIMENT_NAME,
 }
 
 SHARED_EXPERIMENTS = {
@@ -33,7 +39,10 @@ ARTIFACT_PATHS = {
 
 def get_experiment_name_for_phase(phase: str) -> str:
     try:
-        return TRAINING_EXPERIMENTS[phase]
+        return {
+            "smoke": SMOKE_EXPERIMENT_NAME,
+            "benchmark": BENCHMARK_EXPERIMENT_NAME,
+        }[phase]
     except KeyError as exc:
         raise ValueError(f"Unsupported MLflow phase: {phase}") from exc
 
@@ -57,7 +66,6 @@ def build_training_tags(
     model_name: str,
     phase: str,
     variant: str,
-    git_commit: str,
     reportable: bool,
 ) -> dict[str, str]:
     return {
@@ -68,6 +76,5 @@ def build_training_tags(
         "backbone": infer_backbone(model_name),
         "scope": "run",
         "artifact_class": "training",
-        "git_commit": git_commit,
         "reportable": str(reportable).lower(),
     }

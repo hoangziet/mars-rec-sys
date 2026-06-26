@@ -83,6 +83,8 @@ def _ranks_from_logits(
         )
     logits = logits.masked_fill(history_mask, float("-inf"))
     target_scores = logits.gather(1, target.unsqueeze(1))   # (B, 1)
+    if torch.isneginf(target_scores).any():
+        raise RuntimeError("Evaluation invariant violated: target item is masked by history")
     ranks = (logits >= target_scores).sum(dim=1)            # (B,) 1-indexed
     return ranks.cpu().tolist()
 
@@ -180,10 +182,13 @@ def evaluate_bert4rec(
         )
         input_seq = torch.cat([input_seq[:, 1:], mask_col], dim=1)
 
-        logits      = model(input_seq)             # (B, L, vocab_size=n_items+2)
-        # Slice to n_items+1 to exclude the mask_token column (index n_items+1).
-        # history_mask has shape (B, n_items+1) so dimensions must match.
-        last_logits = logits[:, -1, :model.n_items + 1]   # (B, n_items+1)
+        logits      = model(input_seq)             # (B, L, n_items + 1)
+        # The model now outputs n_items+1 columns (padding + real items) after
+        # the input-only MASK token was removed from the output vocabulary.
+        assert logits.size(-1) == model.n_items + 1, (
+            f"BERT4Rec output must have n_items + 1 columns, got {logits.size(-1)}"
+        )
+        last_logits = logits[:, -1, :]   # (B, n_items+1)
 
         all_ranks.extend(_ranks_from_logits(last_logits, history_mask, target))
 

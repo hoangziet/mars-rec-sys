@@ -19,6 +19,12 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader, Dataset
 
+from pipeline.negative_sampling import (
+    PopularityNegativeSampler,
+    sample_uniform_excluding_targets,
+    sample_unseen_user,
+)
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -156,6 +162,187 @@ class TrainSequenceDataset(Dataset):
             "neg_items": neg_tensor,
             "engagement": torch.tensor(s["engagement"], dtype=torch.float32),
             "mask": torch.tensor(mask, dtype=torch.bool),
+        }
+
+
+# ---------------------------------------------------------------------------
+# 1b. ShiftedSequenceDataset  — RQ1 shifted training path
+# ---------------------------------------------------------------------------
+
+
+class ShiftedSequenceDataset(Dataset):
+    """One sample per user sequence.  Shifted input/positives for per-position training.
+
+    A sequence ``[v1, v2, ..., vn]`` produces:
+
+        input_seq  = [v1, v2, ..., v(n-1)]
+        pos_items  = [v2, v3, ..., vn]
+
+    Both arrays are truncated to the most recent ``max_len`` items and left-padded.
+    Negatives are computed only for valid (non-padding) positions.
+
+    Items returned per sample
+    -------------------------
+    - ``user``        : LongTensor []          — user index
+    - ``input_seq``   : LongTensor [L]         — left-padded input items
+    - ``pos_items``   : LongTensor [L]         — left-padded target items
+    - ``neg_items``   : LongTensor [L, K]      — negatives per position
+    - ``loss_mask``   : BoolTensor  [L]        — True where pos_items != pad
+    - ``mask``        : BoolTensor  [L]        — alias for loss_mask
+    - ``engagement``  : FloatTensor [L]        — per-position engagement
+    """
+
+    VALID_SAMPLERS = {
+        "unseen_user",
+        "catalog_except_positive",
+        "popularity_except_positive",
+    }
+
+    def __init__(
+        self,
+        csv_path: str,
+        *,
+        n_items: int,
+        max_len: int = 50,
+        pad_token: int = 0,
+        num_negatives: int = 1,
+        negative_sampling: str,
+        sample_alpha: float = 0.5,
+        seed: int = 0,
+    ) -> None:
+        if negative_sampling not in self.VALID_SAMPLERS:
+            raise ValueError(
+                f"negative_sampling must be one of "
+                f"{sorted(self.VALID_SAMPLERS)}, "
+                f"got {negative_sampling!r}"
+            )
+        if num_negatives < 1:
+            raise ValueError("num_negatives must be >= 1")
+
+        frame = pd.read_csv(csv_path)
+        self.n_items = int(n_items)
+        self.max_len = int(max_len)
+        self.pad_token = int(pad_token)
+        self.num_negatives = int(num_negatives)
+        self.negative_sampling = negative_sampling
+        self.seed = int(seed)
+        self.epoch = 0
+        self.samples: list[dict] = []
+
+        item_counts = np.zeros(self.n_items + 1, dtype=np.float64)
+
+        has_engagement = "engagement_sequence" in frame.columns
+
+        for row in frame.itertuples(index=False):
+            sequence = parse_seq(row.item_sequence)
+            if len(sequence) < 2:
+                continue
+
+            if has_engagement:
+                engagement = parse_float_seq(row.engagement_sequence)
+            else:
+                engagement = [0.0] * len(sequence)
+
+            if len(engagement) != len(sequence):
+                raise ValueError(
+                    f"user_idx={int(row.user_idx)} "
+                    f"has {len(sequence)} items but "
+                    f"{len(engagement)} engagement values"
+                )
+
+            for item in sequence:
+                item_counts[int(item)] += 1.0
+
+            window = sequence[-(self.max_len + 1):]
+            engagement_window = engagement[-(self.max_len + 1):]
+
+            inputs = window[:-1]
+            positives = window[1:]
+            target_engagement = engagement_window[1:]
+            valid_length = len(inputs)
+            padding_length = self.max_len - valid_length
+
+            self.samples.append(
+                {
+                    "user": int(row.user_idx),
+                    "input_seq": [self.pad_token] * padding_length + inputs,
+                    "pos_items": [self.pad_token] * padding_length + positives,
+                    "engagement": [0.0] * padding_length + target_engagement,
+                    "loss_mask": [False] * padding_length + [True] * valid_length,
+                    "seen_items": set(sequence),
+                }
+            )
+
+        self.popularity_sampler = (
+            PopularityNegativeSampler(
+                item_counts=item_counts,
+                sample_alpha=sample_alpha,
+            )
+            if self.negative_sampling == "popularity_except_positive"
+            else None
+        )
+
+    def set_epoch(self, epoch: int) -> None:
+        self.epoch = int(epoch)
+
+    def __len__(self) -> int:
+        return len(self.samples)
+
+    def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
+        sample = self.samples[idx]
+        # Seeded per (seed, epoch, sample_idx) so the same run is reproducible
+        # and negatives rotate deterministically across epochs via set_epoch().
+        rng = np.random.default_rng(
+            np.random.SeedSequence([self.seed, self.epoch, idx])
+        )
+
+        positives = np.asarray(sample["pos_items"], dtype=np.int64)
+        loss_mask = np.asarray(sample["loss_mask"], dtype=np.bool_)
+        valid_targets = positives[loss_mask]
+        valid_positions = int(loss_mask.sum())
+
+        if self.negative_sampling == "unseen_user":
+            valid_negatives = sample_unseen_user(
+                rng=rng,
+                seen_items=sample["seen_items"],
+                n_items=self.n_items,
+                valid_positions=valid_positions,
+                num_negatives=self.num_negatives,
+            )
+        elif self.negative_sampling == "catalog_except_positive":
+            valid_negatives = sample_uniform_excluding_targets(
+                rng=rng,
+                targets=valid_targets,
+                n_items=self.n_items,
+                num_negatives=self.num_negatives,
+            )
+        else:
+            if self.popularity_sampler is None:
+                raise RuntimeError(
+                    "Popularity sampler was not initialized"
+                )
+            valid_negatives = self.popularity_sampler.sample(
+                rng=rng,
+                targets=valid_targets,
+                num_negatives=self.num_negatives,
+            )
+
+        negatives = np.zeros(
+            (self.max_len, self.num_negatives),
+            dtype=np.int64,
+        )
+        negatives[loss_mask] = valid_negatives
+
+        mask_tensor = torch.tensor(sample["loss_mask"], dtype=torch.bool)
+
+        return {
+            "user": torch.tensor(sample["user"], dtype=torch.long),
+            "input_seq": torch.tensor(sample["input_seq"], dtype=torch.long),
+            "pos_items": torch.tensor(sample["pos_items"], dtype=torch.long),
+            "neg_items": torch.tensor(negatives, dtype=torch.long),
+            "loss_mask": mask_tensor,
+            "mask": mask_tensor,
+            "engagement": torch.tensor(sample["engagement"], dtype=torch.float32),
         }
 
 
@@ -351,6 +538,12 @@ class FullSortEvalDataset(Dataset):
         self.seqs = [parse_seq(s) for s in df[seq_col]]
         self.targets = df[tgt_col].tolist()
 
+        for i, (seq, target) in enumerate(zip(self.seqs, self.targets, strict=False)):
+            if int(target) in set(seq):
+                raise RuntimeError(
+                    f"FullSortEvalDataset invariant violated at row {i}: target item appears in history"
+                )
+
         self._padded_seqs = [
             pad_sequence(seq, max_len, pad_token) for seq in self.seqs
         ]
@@ -421,6 +614,55 @@ def get_train_loader(
         dataset = BPRDataset(train_csv, n_items=n_items)
     else:
         return None
+
+    return DataLoader(
+        dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers
+    )
+
+
+def get_rq1_train_loader(
+    model_type: str,
+    train_csv: str,
+    stats: dict,
+    batch_size: int = 256,
+    max_len: int = 50,
+    num_workers: int = 0,
+    num_neg: int = 1,
+    seed: int = 0,
+    **kwargs,
+) -> DataLoader | None:
+    """Build a shifted-sequence DataLoader for RQ1 neural models.
+
+    Only ``sasrec``, ``gsasrec``, and ``gru4rec`` use ``ShiftedSequenceDataset``.
+    Other model types return ``None`` — the caller should fall back to the shared
+    scalar ``get_train_loader()``.
+    """
+    if model_type not in ("sasrec", "gsasrec", "gru4rec"):
+        return None
+
+    n_items = stats["n_items"]
+
+    negative_sampling_map = {
+        "sasrec": "unseen_user",
+        "gsasrec": "catalog_except_positive",
+        "gru4rec": "popularity_except_positive",
+    }
+    negative_sampling = kwargs.pop(
+        "negative_sampling",
+        negative_sampling_map[model_type],
+    )
+    sample_alpha = kwargs.pop("sample_alpha", 0.5)
+
+    dataset = ShiftedSequenceDataset(
+        train_csv,
+        n_items=n_items,
+        max_len=max_len,
+        pad_token=0,
+        num_negatives=num_neg,
+        negative_sampling=negative_sampling,
+        sample_alpha=sample_alpha,
+        seed=seed,
+    )
 
     return DataLoader(
         dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers
@@ -502,16 +744,19 @@ def get_val_loss_loader(
         user_list.append(user_idx)
 
         if num_neg == 1:
-            neg = int(rng.integers(1, n_items + 1))
-            while neg in seen:
-                neg = int(rng.integers(1, n_items + 1))
-            neg_items_list.append(neg)
+            neg_pool = [item for item in range(1, n_items + 1) if item not in seen]
+            if not neg_pool:
+                raise RuntimeError(
+                    f"Cannot sample validation negative for user {user_idx}: user has seen all items"
+                )
+            neg_items_list.append(int(rng.choice(neg_pool)))
         else:
-            negs: list[int] = []
-            while len(negs) < num_neg:
-                n = int(rng.integers(1, n_items + 1))
-                if n not in seen and n not in negs:
-                    negs.append(n)
+            neg_pool = [item for item in range(1, n_items + 1) if item not in seen]
+            if len(neg_pool) < num_neg:
+                raise RuntimeError(
+                    f"Cannot sample {num_neg} validation negatives for user {user_idx}: only {len(neg_pool)} available"
+                )
+            negs = rng.choice(neg_pool, size=num_neg, replace=False).tolist()
             neg_items_list.append(negs)
 
     input_seqs_t = torch.tensor(input_seqs, dtype=torch.long)
