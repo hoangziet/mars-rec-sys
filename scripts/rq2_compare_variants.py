@@ -91,6 +91,8 @@ def _run_single(args, variant_name: str, best_alpha: float, seed: int) -> dict:
     eval_fn = build_eval_fn(backbone)
     val_loss_loader = get_val_loss_loader(backbone, data_dir / "splits" / "val_sequences.csv", stats, batch_size=batch_size, max_len=max_len, num_neg=model_kwargs.get("num_neg", train_kwargs.get("num_neg", 1)), seed=seed)
 
+    test_loader = get_eval_loader(data_dir / "splits" / "test_sequences.csv", stats, batch_size=batch_size, max_len=max_len)
+
     run_name = build_run_name(backbone, seed, variant=variant_name)
     run_output_dir = Path(args.output_dir) / "rq2" / args.benchmark_id / variant_name / f"seed_{seed}"
 
@@ -107,7 +109,7 @@ def _run_single(args, variant_name: str, best_alpha: float, seed: int) -> dict:
     mlflow_cfg["tags"]["preprocessing_version"] = args.preprocessing_version
     mlflow_cfg["tags"]["data_source"] = str(data_dir.resolve())
 
-    return trainer.train(model=model, train_loader=train_loader, val_loader=val_loader, optimizer=optimizer, epochs=train_kwargs["epochs"], criterion_fn=criterion_fn, eval_fn=eval_fn, gradient_clip=train_kwargs.get("gradient_clip", 5.0), val_loss_loader=val_loss_loader, early_stop_patience=train_kwargs.get("early_stop_patience", 10), early_stop_min_delta=train_kwargs.get("early_stop_min_delta", 1e-4), scheduler=scheduler, mlflow_params=mlflow_cfg)
+    return trainer.train(model=model, train_loader=train_loader, val_loader=val_loader, test_loader=test_loader, optimizer=optimizer, epochs=train_kwargs["epochs"], criterion_fn=criterion_fn, eval_fn=eval_fn, gradient_clip=train_kwargs.get("gradient_clip", 5.0), val_loss_loader=val_loss_loader, early_stop_patience=train_kwargs.get("early_stop_patience", 10), early_stop_min_delta=train_kwargs.get("early_stop_min_delta", 1e-4), scheduler=scheduler, mlflow_params=mlflow_cfg)
 
 
 def main() -> None:

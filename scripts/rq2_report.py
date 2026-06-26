@@ -30,8 +30,6 @@ EXPERIMENT_NAME = RQ2_VARIANT_EXPERIMENT_NAME
 PRIMARY_METRIC = "best_val_ndcg_at_10"
 VARIANT_ORDER = {"baseline": 0, "wl": 1, "we": 2, "wlwe": 3}
 
-REQUIRED_PROVENANCE_FIELDS = ("data_source", "preprocessing_version", "benchmark_id", "backbone")
-
 
 def write_outputs(selected_runs: list[dict], alpha_artifact: dict, output_dir: Path, benchmark_id: str) -> str:
     """Write summary CSV, JSON, runs CSV, markdown, and best-watch JSON artifact.
@@ -153,16 +151,18 @@ def main() -> None:
         test_ndcg = run.data.metrics.get("test_NDCG_at_10")
         if val_ndcg is None:
             continue
-        selected.append({
+        row = {
             "variant": variant,
             "seed": seed,
             "val_ndcg_at_10": val_ndcg,
-            "test_NDCG_at_10": test_ndcg,
             "run_id": run.info.run_id,
             "run_name": run.info.run_name,
             "preprocessing_version": tags.get("preprocessing_version", "unknown"),
             "data_source": tags.get("data_source", "unknown"),
-        })
+        }
+        if test_ndcg is not None:
+            row["test_NDCG_at_10"] = test_ndcg
+        selected.append(row)
 
     if not selected:
         raise RuntimeError(f"No reportable runs found for benchmark {args.benchmark_id}")
