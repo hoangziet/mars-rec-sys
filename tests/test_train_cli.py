@@ -106,8 +106,15 @@ def test_train_all_run_neural_model_passes_model_kwargs_num_neg_to_loaders(monke
 
     monkeypatch.setattr(train_all, "build_model", lambda *_args, **_kwargs: __import__("torch").nn.Linear(1, 1))
 
-    def fake_build_train_loader(model_name, data_dir, stats, train_kwargs, model_kwargs=None):
-        captured["train_loader_model_kwargs"] = model_kwargs
+    def fake_build_train_loader(model_name, data_dir, stats, train_kwargs, model_kwargs=None, **extra):
+        if model_kwargs is not None:
+            captured["train_loader_model_kwargs"] = model_kwargs
+        captured.setdefault("build_train_extra", extra)
+        return [0]
+
+    def fake_get_rq1_train_loader(*, model_type, num_neg, seed, **extra):
+        captured["rq1_num_neg"] = num_neg
+        captured["rq1_seed"] = seed
         return [0]
 
     def fake_get_val_loss_loader(*_args, **kwargs):
@@ -126,6 +133,8 @@ def test_train_all_run_neural_model_passes_model_kwargs_num_neg_to_loaders(monke
             return _T()
 
     monkeypatch.setattr(train_all, "build_train_loader", fake_build_train_loader)
+    monkeypatch.setattr(train_all, "get_rq1_train_loader", fake_get_rq1_train_loader)
+    monkeypatch.setattr(train_all, "build_rq1_train_criterion_fn", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(train_all, "get_eval_loader", lambda *_args, **_kwargs: [0])
     monkeypatch.setattr(train_all, "get_val_loss_loader", fake_get_val_loss_loader)
     monkeypatch.setattr(train_all, "build_optimizer", lambda *_args, **_kwargs: object())
@@ -152,5 +161,6 @@ def test_train_all_run_neural_model_passes_model_kwargs_num_neg_to_loaders(monke
     )
 
     assert summary["best_val_ndcg"] == 0.1
-    assert captured["train_loader_model_kwargs"]["num_neg"] == 32
+    assert captured["rq1_num_neg"] == 32
+    assert captured["rq1_seed"] == 42
     assert captured["val_loss_num_neg"] == 32
