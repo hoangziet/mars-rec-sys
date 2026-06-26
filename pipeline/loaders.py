@@ -24,6 +24,7 @@ from pipeline.negative_sampling import (
     sample_uniform_excluding_targets,
     sample_unseen_user,
 )
+from pipeline.watch_features import WATCH_MASK_ID, WATCH_PAD_ID, engagement_to_watch_bin
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -371,6 +372,7 @@ class MaskedSequenceDataset(Dataset):
         dupe_factor: int = 1,
         prop_sliding_window: float = -1.0,
         force_last_item_mask: bool = False,
+        watch_num_bins: int = 5,
     ) -> None:
         df = pd.read_csv(csv_path)
         self.max_len = max_len
@@ -381,16 +383,21 @@ class MaskedSequenceDataset(Dataset):
         self.dupe_factor = max(1, int(dupe_factor))
         self.prop_sliding_window = prop_sliding_window
         self.force_last_item_mask = force_last_item_mask
+        self.watch_num_bins = int(watch_num_bins)
 
         if is_train:
             raw_seqs = [parse_seq(s) for s in df["item_sequence"]]
-            self.instances: list[tuple[list[int], str]] = []
-            for seq in raw_seqs:
+            engagement_col = "engagement_sequence" if "engagement_sequence" in df.columns else None
+            raw_engagements = [parse_float_seq(s) for s in df[engagement_col]] if engagement_col else [[0.0] * len(s) for s in raw_seqs]
+            self.instances: list[tuple[list[int], str, list[float]]] = []
+            for seq, eng in zip(raw_seqs, raw_engagements):
                 for window in self._build_train_windows(seq):
+                    start_idx = len(seq) - len(window)
+                    engagement_window = eng[start_idx:]
                     for _ in range(self.dupe_factor):
-                        self.instances.append((window, "random"))
+                        self.instances.append((window, "random", engagement_window))
                     if self.force_last_item_mask and window:
-                        self.instances.append((window, "last"))
+                        self.instances.append((window, "last", engagement_window))
             self.seqs = None
             self.targets = None
         else:
@@ -421,23 +428,29 @@ class MaskedSequenceDataset(Dataset):
 
     def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
         if self.is_train:
-            seq, mode = self.instances[idx]
+            seq, mode, engagement_seq = self.instances[idx]
             masked_seq = seq.copy()
             labels = [0] * len(seq)
+            watch_ids = [engagement_to_watch_bin(v, self.watch_num_bins) for v in engagement_seq]
             if mode == "last":
                 masked_seq[-1] = self.mask_token
                 labels[-1] = seq[-1]
+                watch_ids[-1] = WATCH_MASK_ID
             else:
                 for i, item in enumerate(seq):
                     if np.random.random() < self.mask_prob:
                         masked_seq[i] = self.mask_token
                         labels[i] = item
+                        watch_ids[i] = WATCH_MASK_ID
                 if seq and not any(labels):
                     force = np.random.randint(len(seq))
                     masked_seq[force] = self.mask_token
                     labels[force] = seq[force]
+                    watch_ids[force] = WATCH_MASK_ID
             padded_seq = pad_sequence(masked_seq, self.max_len, self.pad_token)
             padded_lbl = pad_sequence(labels, self.max_len, 0)
+            padded_watch = [WATCH_PAD_ID] * (self.max_len - len(watch_ids)) + watch_ids
+            padded_engagement = [0.0] * (self.max_len - len(engagement_seq)) + engagement_seq
         else:
             seq = self.seqs[idx]
             masked_seq = seq + [self.mask_token]
@@ -445,10 +458,14 @@ class MaskedSequenceDataset(Dataset):
             labels[-1] = self.targets[idx]
             padded_seq = pad_sequence(masked_seq, self.max_len, self.pad_token)
             padded_lbl = pad_sequence(labels, self.max_len, 0)
+            padded_watch = [WATCH_PAD_ID] * self.max_len
+            padded_engagement = [0.0] * self.max_len
 
         return {
             "input_seq": torch.tensor(padded_seq, dtype=torch.long),
             "labels": torch.tensor(padded_lbl, dtype=torch.long),
+            "engagement": torch.tensor(padded_engagement, dtype=torch.float32),
+            "watch_input_ids": torch.tensor(padded_watch, dtype=torch.long),
         }
 
 
