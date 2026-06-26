@@ -49,7 +49,7 @@ def main() -> None:
     for row in run_rows:
         variant = row["variant"]
         seed = row["seed"]
-        val = float(row.get(PRIMARY_METRIC, row.get("best_val_ndcg_at_10", 0)))
+        val = float(row.get(PRIMARY_METRIC, 0))
         by_key[(variant, seed)] = val
 
     all_seeds = sorted({int(row["seed"]) for row in run_rows})
