@@ -463,7 +463,7 @@ class MaskedSequenceDataset(Dataset):
             labels[-1] = self.targets[idx]
             padded_seq = pad_sequence(masked_seq, self.max_len, self.pad_token)
             padded_lbl = pad_sequence(labels, self.max_len, 0)
-            padded_watch = [WATCH_PAD_ID] * self.max_len
+            padded_watch = [WATCH_PAD_ID] * (self.max_len - 1) + [WATCH_MASK_ID]
             padded_engagement = [0.0] * self.max_len
 
         return {
@@ -631,6 +631,7 @@ def get_train_loader(
             dupe_factor=dupe_factor,
             prop_sliding_window=prop_sliding_window,
             force_last_item_mask=force_last_item_mask,
+            watch_num_bins=kwargs.pop("watch_num_bins", 5),
         )
     elif model_type == "bprmf":
         dataset = BPRDataset(train_csv, n_items=n_items)
