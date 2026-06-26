@@ -103,6 +103,49 @@ def _reject_if_completed(manifest: dict) -> None:
         )
 
 
+def _validate_or_prepare_manifest_for_resume(
+    *,
+    manifest_path: Path,
+    benchmark_id: str,
+    protocol_version: str,
+    preprocessing_version: str,
+    expected_models: list[str] | None = None,
+    neural_seeds: list[int] | None = None,
+    heuristic_seed: int | None = None,
+) -> dict:
+    if manifest_path.exists():
+        manifest = json.loads(manifest_path.read_text())
+        _reject_if_completed(manifest)
+        if manifest.get("status") != "running":
+            raise RuntimeError(
+                f"Benchmark campaign {benchmark_id} has unexpected status "
+                f"'{manifest.get('status')}'. Expected 'running' or 'completed'."
+            )
+        if manifest.get("protocol_version") != protocol_version:
+            raise RuntimeError(
+                f"Manifest protocol_version '{manifest.get('protocol_version')}' "
+                f"does not match requested '{protocol_version}'."
+            )
+        if manifest.get("preprocessing_version") != preprocessing_version:
+            raise RuntimeError(
+                f"Manifest preprocessing_version '{manifest.get('preprocessing_version')}' "
+                f"does not match requested '{preprocessing_version}'."
+            )
+        return manifest
+
+    manifest = build_benchmark_manifest(
+        benchmark_id=benchmark_id,
+        protocol_version=protocol_version,
+        preprocessing_version=preprocessing_version,
+        expected_models=expected_models or [],
+        neural_seeds=neural_seeds or [],
+        heuristic_seed=heuristic_seed or 0,
+    )
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(json.dumps(manifest, indent=2))
+    return manifest
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train all models for benchmark orchestration.")
     parser.add_argument("models", nargs="*", default=None, choices=list(MODEL_CONFIGS.keys()),
@@ -463,13 +506,9 @@ def main() -> None:
 
     comp_dir = Path(args.output_dir) / "benchmark" / args.benchmark_id
     manifest_path = comp_dir / "benchmark_manifest.json"
-    if manifest_path.exists():
-        raise RuntimeError(
-            f"Benchmark manifest already exists for benchmark_id={args.benchmark_id}: {manifest_path}. Use a new benchmark_id."
-        )
-    comp_dir.mkdir(parents=True, exist_ok=True)
 
-    manifest = build_benchmark_manifest(
+    manifest = _validate_or_prepare_manifest_for_resume(
+        manifest_path=manifest_path,
         benchmark_id=args.benchmark_id,
         protocol_version=args.protocol_version,
         preprocessing_version=args.preprocessing_version,
@@ -477,8 +516,6 @@ def main() -> None:
         neural_seeds=list(args.seeds),
         heuristic_seed=args.seeds[0],
     )
-    with open(manifest_path, "w") as f:
-        json.dump(manifest, f, indent=2)
 
     raw_runs: list[dict] = []
     run_records: list[dict]      = []
