@@ -90,3 +90,42 @@ def test_finished_run_key_is_skipped():
 
     assert train_all._build_run_key("sasrec", 42, "base") in finished
     assert train_all._build_run_key("gsasrec", 99, "base") not in finished
+
+
+# ---------------------------------------------------------------------------
+# RQ1 report tests
+# ---------------------------------------------------------------------------
+
+from scripts import rq1_report
+
+
+def test_rq1_report_rejects_running_manifest(tmp_path):
+    manifest_path = tmp_path / "benchmark_manifest.json"
+    manifest_path.write_text(json.dumps({
+        "status": "running",
+        "benchmark_id": "rq1-x",
+        "protocol_version": "rq1-v1",
+        "preprocessing_version": "mars-preprocess-v1",
+        "expected_models": ["sasrec"],
+        "neural_seeds": [42],
+        "heuristic_seed": 42,
+    }))
+
+    with pytest.raises(RuntimeError, match="not completed"):
+        rq1_report._validate_manifest_completed(manifest_path)
+
+
+def test_rq1_report_accepts_completed_manifest(tmp_path):
+    manifest_path = tmp_path / "benchmark_manifest.json"
+    manifest_path.write_text(json.dumps({
+        "status": "completed",
+        "benchmark_id": "rq1-x",
+        "protocol_version": "rq1-v1",
+        "preprocessing_version": "mars-preprocess-v1",
+        "expected_models": ["sasrec"],
+        "neural_seeds": [42],
+        "heuristic_seed": 42,
+    }))
+
+    manifest = rq1_report._validate_manifest_completed(manifest_path)
+    assert manifest["status"] == "completed"

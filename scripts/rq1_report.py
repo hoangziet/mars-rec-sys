@@ -100,6 +100,20 @@ def validate_data_source_consistency(runs: list) -> str:
     return next(iter(data_sources))
 
 
+def _validate_manifest_completed(manifest_path: Path) -> dict:
+    manifest = json.loads(manifest_path.read_text())
+    status = manifest.get("status")
+    if status == "completed":
+        return manifest
+    if status is None:
+        # Legacy manifests (before lifecycle state was added) are grandfathered.
+        return manifest
+    raise RuntimeError(
+        f"Benchmark campaign {manifest.get('benchmark_id', '?')} is not completed "
+        f"(status={status}). Complete all expected runs first."
+    )
+
+
 def main() -> None:
     args = parse_args()
     configure_mlflow(mlflow_module=mlflow)
@@ -107,7 +121,7 @@ def main() -> None:
     manifest_path = Path(args.manifest) if args.manifest else Path("experiments") / "benchmark" / args.benchmark_id / "benchmark_manifest.json"
     if not manifest_path.exists():
         raise FileNotFoundError(f"Benchmark manifest does not exist: {manifest_path}")
-    manifest = json.loads(manifest_path.read_text())
+    manifest = _validate_manifest_completed(manifest_path)
 
     client = mlflow.tracking.MlflowClient()
     experiment = client.get_experiment_by_name("mars_benchmark")
