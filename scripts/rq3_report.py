@@ -131,6 +131,7 @@ def _validate_provenance(selected: list[dict]) -> dict:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="RQ3: report metadata tuning results.")
     parser.add_argument("--benchmark-id", required=True)
+    parser.add_argument("--rq2-winner", required=True, help="Path to rq2_best_watch.json")
     parser.add_argument("--output-dir", default=None)
     return parser
 
@@ -142,6 +143,8 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     configure_mlflow(mlflow_module=mlflow)
+
+    rq2_winner = json.loads(Path(args.rq2_winner).read_text())
 
     client = mlflow.tracking.MlflowClient()
     experiment = client.get_experiment_by_name(EXPERIMENT_NAME)
@@ -172,6 +175,7 @@ def main() -> None:
             "preprocessing_version": tags.get("preprocessing_version"),
             "data_source": tags.get("data_source"),
         }
+        test_ndcg = run.data.metrics.get("test_NDCG_at_10")
         selected.append({
             "variant": variant,
             "seed": seed,
@@ -179,6 +183,7 @@ def main() -> None:
             "provenance": provenance,
             "run_id": run.info.run_id,
             "run_name": run.info.run_name,
+            **({"test_NDCG_at_10": test_ndcg} if test_ndcg is not None else {}),
         })
 
     if not selected:
@@ -186,9 +191,9 @@ def main() -> None:
     _validate_variant_names(selected)
     _validate_rq3_grid(selected)
     provenance = _validate_provenance(selected)
-    if provenance["backbone"] != "gsasrec":
+    if provenance["backbone"] != "bert4rec":
         raise RuntimeError(
-            f"RQ3 is gSASRec-only, but selected runs report backbone={provenance['backbone']!r}"
+            f"RQ3 is BERT4Rec-only, but selected runs report backbone={provenance['backbone']!r}"
         )
 
     by_variant: dict[str, list[float]] = {}
@@ -213,6 +218,19 @@ def main() -> None:
         writer.writeheader()
         writer.writerows(summary_rows)
 
+    # Write summary JSON (for compare stage)
+    with open(output_dir / "rq3_summary.json", "w") as f:
+        json.dump(summary_rows, f, indent=2)
+
+    # Write runs CSV (for compare stage)
+    run_fields = ["variant", "seed", "val_ndcg_at_10"]
+    if any("test_NDCG_at_10" in r for r in selected):
+        run_fields.append("test_NDCG_at_10")
+    with open(output_dir / "rq3_runs.csv", "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=run_fields, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(selected)
+
     with open(output_dir / "rq3_variant_table.md", "w") as f:
         f.write("# RQ3 Metadata Variant Tuning\n\n")
         f.write(f"Best variant: **{best_variant}**\n\n")
@@ -229,7 +247,9 @@ def main() -> None:
         winner = {
             "best_variant": best_variant,
             "benchmark_id": args.benchmark_id,
-            "backbone": "gsasrec",
+            "backbone": "bert4rec",
+            "base_watch_variant": rq2_winner["best_variant"],
+            "base_watch_alpha": rq2_winner.get("best_alpha"),
             "candidate_grid": observed_variants,
             "seeds": observed_seeds,
             "selection_metric": PRIMARY_METRIC,
