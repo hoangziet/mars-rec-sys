@@ -114,6 +114,7 @@ class GSASRec(nn.Module):
         pos_smoothing: float = 0.0,
         norm_first: bool = True,
         item_encoder=None,
+        reuse_item_embeddings: bool = False,
     ) -> None:
         super().__init__()
         if emb_dim is not None:
@@ -137,6 +138,18 @@ class GSASRec(nn.Module):
             with torch.no_grad():
                 self.item_emb.weight[0].zero_()
             self.item_emb_is_embedding = True
+
+        self.reuse_item_embeddings = reuse_item_embeddings
+        if self.reuse_item_embeddings:
+            if item_encoder is not None:
+                raise ValueError("reuse_item_embeddings=True conflicts with item_encoder")
+            self.output_emb = self.item_emb
+        else:
+            self.output_emb = nn.Embedding(n_items + 1, hidden_dim, padding_idx=0)
+            nn.init.normal_(self.output_emb.weight, std=0.01)
+            with torch.no_grad():
+                self.output_emb.weight[0].zero_()
+
         # 1-indexed positions; index 0 (padding_idx=0) → zero vector for padding tokens.
         self.pos_emb     = nn.Embedding(max_len + 1, hidden_dim, padding_idx=0)
         self.emb_dropout = nn.Dropout(dropout)
@@ -259,8 +272,8 @@ class GSASRec(nn.Module):
             neg_items = neg_items.unsqueeze(1)                   # (B,) -> (B, 1)
 
         h = self._last_hidden(input_seq)                                      # (B, D)
-        pos_emb   = self.item_emb(pos_items)                                  # (B, D)
-        neg_emb   = self.item_emb(neg_items)                                  # (B, K, D)
+        pos_emb   = self.output_emb(pos_items)                                 # (B, D)
+        neg_emb   = self.output_emb(neg_items)                                 # (B, K, D)
         pos_score = (h * pos_emb).sum(dim=-1)                                 # (B,)
         neg_score = torch.bmm(neg_emb, h.unsqueeze(-1)).squeeze(-1)           # (B, K)
 
@@ -303,8 +316,8 @@ class GSASRec(nn.Module):
 
         hidden = self._encode(input_seq)
 
-        pos_emb = self.item_emb(pos_items)
-        neg_emb = self.item_emb(neg_items)
+        pos_emb = self.output_emb(pos_items)
+        neg_emb = self.output_emb(neg_items)
 
         pos_score = (hidden * pos_emb).sum(dim=-1)
         neg_score = torch.einsum("bld,blkd->blk", hidden, neg_emb)
@@ -331,12 +344,12 @@ class GSASRec(nn.Module):
     # ------------------------------------------------------------------
 
     def predict(self, input_seq: torch.Tensor) -> torch.Tensor:
-        """Return scores (B, n_items+1) via dot-product with item_emb."""
+        """Return scores (B, n_items+1) via dot-product with output embedding."""
         h = self._last_hidden(input_seq)  # (B, D)
-        if hasattr(self.item_emb, "weight"):
-            return h @ self.item_emb.weight.T
+        if hasattr(self.output_emb, "weight"):
+            return h @ self.output_emb.weight.T
         all_ids = torch.arange(self.n_items + 1, device=input_seq.device)
-        all_embs = self.item_emb(all_ids)
+        all_embs = self.output_emb(all_ids)
         return h @ all_embs.T
 
     def forward(self, input_seq: torch.Tensor) -> torch.Tensor:
