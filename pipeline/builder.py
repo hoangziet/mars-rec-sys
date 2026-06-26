@@ -278,6 +278,45 @@ def build_criterion_fn(model_name: str, train_kwargs: dict):
     raise ValueError(f"No criterion defined for model: {model_name}")
 
 
+def build_rq1_train_criterion_fn(model_name: str, train_kwargs: dict):
+    """Return a callable ``(model, batch, device) -> loss scalar`` for the
+    RQ1 shifted-sequence training path.  The scalar ``build_criterion_fn()``
+    remains untouched for val-loss and shared workflows.
+    """
+    if model_name == "sasrec":
+        def fn(model, batch, device):
+            return model.sequence_loss(
+                batch["input_seq"].to(device),
+                batch["pos_items"].to(device),
+                batch["neg_items"].to(device),
+                batch["loss_mask"].to(device),
+            )
+        return fn
+
+    if model_name == "gsasrec":
+        def fn(model, batch, device):
+            return model.sequence_loss(
+                batch["input_seq"].to(device),
+                batch["pos_items"].to(device),
+                batch["neg_items"].to(device),
+                batch["loss_mask"].to(device),
+            )
+        return fn
+
+    if model_name == "gru4rec":
+        def fn(model, batch, device):
+            return model.sequence_bpr_max_loss(
+                batch["input_seq"].to(device),
+                batch["pos_items"].to(device),
+                batch["neg_items"].to(device),
+                batch["loss_mask"].to(device),
+            )
+        return fn
+
+    # For bert4rec / bprmf, the RQ1 criterion is identical to the scalar one.
+    return build_criterion_fn(model_name, train_kwargs)
+
+
 # ---------------------------------------------------------------------------
 # Eval function
 # ---------------------------------------------------------------------------

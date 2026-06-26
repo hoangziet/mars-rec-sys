@@ -233,7 +233,8 @@ class Trainer:
               early_stop_patience: int = 0,
               early_stop_min_delta: float = 1e-4,
               scheduler=None,
-              mlflow_params: dict | None = None):
+              mlflow_params: dict | None = None,
+              val_criterion_fn=None):
         """
         Full training pipeline.
 
@@ -301,7 +302,7 @@ class Trainer:
                 val_loss_loader=val_loss_loader, test_loader=test_loader,
                 early_stop_patience=early_stop_patience,
                 early_stop_min_delta=early_stop_min_delta, scheduler=scheduler,
-                mlflow_params=mlflow_params,
+                mlflow_params=mlflow_params, val_criterion_fn=val_criterion_fn,
             )
             mlflow_status = "FINISHED"
             return result
@@ -312,7 +313,7 @@ class Trainer:
                            optimizer, epochs, criterion_fn, eval_fn,
                            gradient_clip, val_loss_loader, test_loader,
                            early_stop_patience, early_stop_min_delta,
-                           scheduler, mlflow_params) -> "ExperimentTracker":
+                           scheduler, mlflow_params, val_criterion_fn=None) -> "ExperimentTracker":
         """Inner loop body — same logic as before, but isolated so train()
         can wrap it in a single try/except/finally for MLflow cleanup."""
         best_val_ndcg = -1.0
@@ -338,7 +339,8 @@ class Trainer:
             # Validate
             val_metrics = eval_fn(model, val_loader, self.device)
             val_loss = (
-                self._compute_val_loss(model, val_loss_loader, criterion_fn)
+                self._compute_val_loss(model, val_loss_loader,
+                                       val_criterion_fn if val_criterion_fn is not None else criterion_fn)
                 if val_loss_loader is not None
                 else val_metrics.get("val_loss")
             )

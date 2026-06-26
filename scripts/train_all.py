@@ -27,8 +27,8 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from training.configs import DEFAULT_DATA_DIR, DEFAULT_OUTPUT_DIR, DEFAULT_SEED, MODEL_CONFIGS
-from pipeline.builder import build_criterion_fn, build_eval_fn, build_model, build_train_loader
-from pipeline.loaders import get_eval_loader, get_val_loss_loader, load_stats
+from pipeline.builder import build_criterion_fn, build_eval_fn, build_model, build_rq1_train_criterion_fn, build_train_loader
+from pipeline.loaders import get_eval_loader, get_rq1_train_loader, get_val_loss_loader, load_stats
 from pipeline.metrics import (
     evaluate_itemcf,
     evaluate_popularity,
@@ -133,11 +133,27 @@ def run_neural_model(
     batch_size = train_kwargs.get("batch_size", 256)
 
     model        = build_model(model_name, stats["n_items"], stats["n_users"], model_kwargs, max_len).to(device)
-    train_loader = build_train_loader(model_name, data_dir, stats, train_kwargs, model_kwargs=model_kwargs)
+
+    if model_name in {"sasrec", "gsasrec", "gru4rec"}:
+        train_loader = get_rq1_train_loader(
+            model_type=model_name,
+            train_csv=str(data_dir / "splits" / "train_sequences.csv"),
+            stats=stats,
+            batch_size=batch_size,
+            max_len=max_len,
+            num_neg=model_kwargs.get("num_neg", train_kwargs.get("num_neg", 1)),
+            seed=seed,
+        )
+        train_criterion_fn = build_rq1_train_criterion_fn(model_name, train_kwargs)
+    else:
+        train_loader = build_train_loader(model_name, data_dir, stats, train_kwargs, model_kwargs=model_kwargs)
+        train_criterion_fn = build_criterion_fn(model_name, train_kwargs)
+
+    val_criterion_fn = build_criterion_fn(model_name, train_kwargs)
+
     val_loader   = get_eval_loader(data_dir / "splits" / "val_sequences.csv",  stats, batch_size=batch_size, max_len=max_len)
     test_loader  = get_eval_loader(data_dir / "splits" / "test_sequences.csv", stats, batch_size=batch_size, max_len=max_len)
 
-    criterion_fn    = build_criterion_fn(model_name, train_kwargs)
     eval_fn         = build_eval_fn(model_name)
     val_loss_loader = get_val_loss_loader(
         model_name,
@@ -194,7 +210,8 @@ def run_neural_model(
         test_loader=test_loader,
         optimizer=optimizer,
         epochs=train_kwargs["epochs"],
-        criterion_fn=criterion_fn,
+        criterion_fn=train_criterion_fn,
+        val_criterion_fn=val_criterion_fn,
         eval_fn=eval_fn,
         gradient_clip=train_kwargs.get("gradient_clip", 5.0),
         val_loss_loader=val_loss_loader,
