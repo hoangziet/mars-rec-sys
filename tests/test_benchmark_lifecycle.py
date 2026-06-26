@@ -78,3 +78,15 @@ def test_new_benchmark_creates_manifest(tmp_path):
 
     assert result["status"] == "running"
     assert manifest_path.exists()
+
+
+def test_build_run_key_format():
+    assert train_all._build_run_key("gsasrec", 42, "base") == "gsasrec:42:base"
+
+
+def test_finished_run_key_is_skipped():
+    """Completed run keys should be detected and skipped."""
+    finished = {"sasrec:42:base", "gsasrec:123:base"}
+
+    assert train_all._build_run_key("sasrec", 42, "base") in finished
+    assert train_all._build_run_key("gsasrec", 99, "base") not in finished

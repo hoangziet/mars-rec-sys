@@ -146,6 +146,42 @@ def _validate_or_prepare_manifest_for_resume(
     return manifest
 
 
+def _build_run_key(model_name: str, seed: int, variant: str) -> str:
+    return f"{model_name}:{seed}:{variant}"
+
+
+def _run_model_if_needed(
+    *,
+    model_name: str,
+    seed: int,
+    finished_run_keys: set[str],
+    failed_run_keys: set[str],
+    variant: str,
+    runner,
+) -> dict | None:
+    key = _build_run_key(model_name, seed, variant)
+    if key in finished_run_keys:
+        print(f"  [{key}] already finished — skipping")
+        return None
+    if key in failed_run_keys:
+        print(f"  [{key}] previously failed — rerunning")
+    else:
+        print(f"  [{key}] new — running")
+    return runner()
+
+    manifest = build_benchmark_manifest(
+        benchmark_id=benchmark_id,
+        protocol_version=protocol_version,
+        preprocessing_version=preprocessing_version,
+        expected_models=expected_models or [],
+        neural_seeds=neural_seeds or [],
+        heuristic_seed=heuristic_seed or 0,
+    )
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(json.dumps(manifest, indent=2))
+    return manifest
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train all models for benchmark orchestration.")
     parser.add_argument("models", nargs="*", default=None, choices=list(MODEL_CONFIGS.keys()),
@@ -520,12 +556,20 @@ def main() -> None:
     raw_runs: list[dict] = []
     run_records: list[dict]      = []
 
+    finished_keys = set(manifest.get("completed_run_keys", []))
+    failed_keys   = set(manifest.get("failed_run_keys", []))
+
     for name in args.models:
         cfg = MODEL_CONFIGS[name]
         for seed in get_seeds_for_model(name, args.seeds):
+            key = _build_run_key(name, seed, "base")
             print(f"\n{'=' * 60}")
-            print(f"  Running: {name.upper()} | seed={seed}")
+            print(f"  Running: {name.upper()} | seed={seed}  [{key}]")
             print(f"{'=' * 60}")
+
+            if key in finished_keys:
+                print(f"  Already finished — skipping.")
+                continue
 
             if name in NEURAL_MODELS:
                 summary = run_neural_model(
@@ -545,11 +589,28 @@ def main() -> None:
 
             raw_runs.append({"model": name, "seed": seed, "summary": summary})
             run_records.append(build_run_record(name, seed, summary))
+            finished_keys.add(key)
+            manifest["completed_run_keys"] = sorted(finished_keys)
+            manifest_path.write_text(json.dumps(manifest, indent=2))
 
     with open(comp_dir / "raw_runs.json", "w") as f:
         json.dump(raw_runs, f, indent=2)
     with open(comp_dir / "run_records.json", "w") as f:
         json.dump(run_records, f, indent=2)
+
+    # Finalize: check if all expected runs are now complete.
+    manifest = json.loads(manifest_path.read_text())
+    expected: set[str] = set()
+    for m in manifest["expected_models"]:
+        for s in get_seeds_for_model(m, args.seeds):
+            expected.add(_build_run_key(m, s, "base"))
+    if expected <= set(manifest.get("completed_run_keys", [])):
+        manifest["status"] = "completed"
+        manifest_path.write_text(json.dumps(manifest, indent=2))
+        print(f"\n  Campaign {args.benchmark_id} COMPLETED ({len(expected)}/{len(expected)} runs)")
+    else:
+        missing = expected - set(manifest.get("completed_run_keys", []))
+        print(f"\n  Campaign {args.benchmark_id} still RUNNING ({len(expected) - len(missing)}/{len(expected)} done, {len(missing)} remaining)")
 
     print(f"\nBenchmark run records saved to: {comp_dir}/run_records.json")
     print(f"Use scripts/rq1_report.py --benchmark-id {args.benchmark_id} to aggregate RQ1 results.")
