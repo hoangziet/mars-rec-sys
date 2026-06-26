@@ -14,7 +14,7 @@ def _compose(overrides: list[str]):
 def test_default_model_is_sasrec():
     cfg = _compose([])
     assert cfg.model.name == "sasrec"
-    assert cfg.model.train_kwargs.batch_size == 32
+    assert cfg.model.train_kwargs.batch_size == 256
 
 
 def test_sasrec_config_values():
@@ -118,13 +118,7 @@ def test_rq1_common_neural_recipe(model_name):
     cfg = _compose([f"model={model_name}"])
     train = cfg.model.train_kwargs
 
-    # Shifted-sequence models use batch_size=32 users (≈ 320 targets/update);
-    # Scalar-sample models (bert4rec, bprmf) use batch_size=256 samples.
-    if model_name in ("sasrec", "gsasrec", "gru4rec"):
-        assert train.batch_size == 32, f"{model_name}: shifted batch must be 32"
-    else:
-        assert train.batch_size == 256, f"{model_name}: scalar batch must be 256"
-
+    assert train.batch_size == 256
     assert train.lr == pytest.approx(1e-3)
     assert train.beta2 == pytest.approx(0.98)
     assert train.weight_decay == pytest.approx(1e-4)

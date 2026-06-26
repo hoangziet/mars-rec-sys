@@ -7,7 +7,7 @@ model_kwargs:
   dropout: 0.2
   norm_first: true
 train_kwargs:
-  batch_size: 32
+  batch_size: 256
   epochs: 100
   lr: 1e-3
   weight_decay: 1e-4

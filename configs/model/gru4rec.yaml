@@ -6,7 +6,7 @@ model_kwargs:
   num_layers: 1
   dropout: 0.2
 train_kwargs:
-  batch_size: 32
+  batch_size: 256
   epochs: 100
   lr: 1e-3
   weight_decay: 1e-4
