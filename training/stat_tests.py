@@ -12,6 +12,9 @@ def count_wins_ties_losses(differences) -> tuple[int, int, int]:
     wins = int(np.sum((values > 0) & ~tie_mask))
     ties = int(np.sum(tie_mask))
     losses = int(np.sum((values < 0) & ~tie_mask))
+    assert wins + ties + losses == len(values), (
+        f"wins({wins}) + ties({ties}) + losses({losses}) != {len(values)}"
+    )
     return wins, ties, losses
 
 
