@@ -34,8 +34,8 @@ def test_bpr_max_matches_reference_formula():
 
     with torch.no_grad():
         hidden = model._encode_sequence(input_seq)
-        positive_score = (hidden * model.item_emb(positives)).sum(dim=-1)
-        negative_score = torch.einsum("bld,blkd->blk", hidden, model.item_emb(negatives))
+        positive_score = (hidden * model.item_emb(positives)).sum(dim=-1) + model.item_bias(positives).squeeze(-1)
+        negative_score = torch.einsum("bld,blkd->blk", hidden, model.item_emb(negatives)) + model.item_bias(negatives).squeeze(-1)
         positive_score = F.elu(positive_score, alpha=elu_param)
         negative_score = F.elu(negative_score, alpha=elu_param)
         weights = torch.softmax(negative_score, dim=-1)
