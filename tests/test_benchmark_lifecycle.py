@@ -38,3 +38,43 @@ def test_completed_manifest_rejects_new_runs():
 
     with pytest.raises(RuntimeError, match="already completed"):
         train_all._reject_if_completed(manifest)
+
+
+def test_running_manifest_allows_resume(tmp_path):
+    manifest_path = tmp_path / "benchmark_manifest.json"
+    manifest = train_all.build_benchmark_manifest(
+        benchmark_id="rq1-x",
+        protocol_version="rq1-v1",
+        preprocessing_version="mars-preprocess-v1",
+        expected_models=["sasrec"],
+        neural_seeds=[42],
+        heuristic_seed=42,
+    )
+    manifest_path.write_text(json.dumps(manifest))
+
+    result = train_all._validate_or_prepare_manifest_for_resume(
+        manifest_path=manifest_path,
+        benchmark_id="rq1-x",
+        protocol_version="rq1-v1",
+        preprocessing_version="mars-preprocess-v1",
+    )
+
+    assert result["status"] == "running"
+
+
+def test_new_benchmark_creates_manifest(tmp_path):
+    """When no manifest exists, a new one should be created with status=running."""
+    manifest_path = tmp_path / "benchmark_manifest.json"
+
+    result = train_all._validate_or_prepare_manifest_for_resume(
+        manifest_path=manifest_path,
+        benchmark_id="rq1-x",
+        protocol_version="rq1-v1",
+        preprocessing_version="mars-preprocess-v1",
+        expected_models=["sasrec"],
+        neural_seeds=[42],
+        heuristic_seed=42,
+    )
+
+    assert result["status"] == "running"
+    assert manifest_path.exists()
