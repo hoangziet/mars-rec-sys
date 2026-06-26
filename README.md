@@ -170,6 +170,8 @@ exceptions**:
 - same early-stopping rule where a train loop exists
 - same common optimization recipe for neural models: `batch_size=256`, `epochs=50`, `lr=1e-3`, `beta2=0.98`, `weight_decay=1e-4`, `gradient_clip=5.0`, no warmup scheduler
 
+RQ1 is a next-distinct-course benchmark: preprocessing deduplicates `(user_id, item_id)` by first encounter, so validation and test targets must not already appear in the user history.
+
 Model-specific objectives and data-pipeline differences are still allowed
 when they are part of the implementation contract and documented up front.
 
