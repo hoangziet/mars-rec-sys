@@ -1,11 +1,11 @@
+import csv
+import json
 import sys
 from pathlib import Path
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from scripts import rq2_report, rq3_report
 
 
 def test_rq2_tune_forces_batch_size_128():
@@ -19,37 +19,47 @@ def test_rq2_tune_forces_batch_size_128():
     assert train_kwargs["batch_size"] == 256
 
 
-def test_rq2_grid_rejects_duplicate_alpha_seed():
+def test_rq2_write_outputs_handles_multiple_variants():
+    from scripts.rq2_report import write_outputs
+
     selected = [
-        {"alpha": 0.0, "seed": 42, "val_ndcg_at_10": 0.1},
-        {"alpha": 0.0, "seed": 42, "val_ndcg_at_10": 0.2},
+        {"variant": "baseline", "seed": 42, "val_ndcg_at_10": 0.30, "test_NDCG_at_10": 0.29},
+        {"variant": "wl", "seed": 42, "val_ndcg_at_10": 0.32, "test_NDCG_at_10": 0.31},
+        {"variant": "we", "seed": 42, "val_ndcg_at_10": 0.31, "test_NDCG_at_10": 0.30},
+        {"variant": "wlwe", "seed": 42, "val_ndcg_at_10": 0.33, "test_NDCG_at_10": 0.32},
     ]
-    with pytest.raises(RuntimeError, match="Duplicate"):
-        rq2_report._validate_rq2_grid(selected)
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        out = Path(td)
+        best = write_outputs(selected, {"best_alpha": 1.0}, out, "test")
+        assert best == "wlwe"
+        with open(out / "rq2_summary.csv") as f:
+            rows = list(csv.DictReader(f))
+            assert len(rows) == 4
+            assert rows[0]["variant"] == "wlwe"
+            assert float(rows[0]["val_ndcg_at_10_mean"]) == 0.33
 
 
-def test_rq2_grid_rejects_inconsistent_seed_sets():
+def test_rq2_write_outputs_runs_csv_format():
+    from scripts.rq2_report import write_outputs
+
     selected = [
-        {"alpha": 0.0, "seed": 42, "val_ndcg_at_10": 0.1},
-        {"alpha": 0.5, "seed": 123, "val_ndcg_at_10": 0.1},
+        {"variant": "wl", "seed": 42, "val_ndcg_at_10": 0.30, "test_NDCG_at_10": 0.29},
     ]
-    with pytest.raises(RuntimeError, match="same seed set"):
-        rq2_report._validate_rq2_grid(selected)
-
-
-def test_rq2_grid_accepts_custom_grid():
-    """A custom sweep (e.g. only alpha=[0.5, 1.0] with 2 seeds) is valid
-    as long as every (alpha, seed) appears exactly once and seed sets match."""
-    selected = [
-        {"alpha": 0.5, "seed": 42, "val_ndcg_at_10": 0.1},
-        {"alpha": 0.5, "seed": 123, "val_ndcg_at_10": 0.1},
-        {"alpha": 1.0, "seed": 42, "val_ndcg_at_10": 0.1},
-        {"alpha": 1.0, "seed": 123, "val_ndcg_at_10": 0.1},
-    ]
-    rq2_report._validate_rq2_grid(selected)
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        out = Path(td)
+        write_outputs(selected, {"best_alpha": 0.5}, out, "test")
+        with open(out / "rq2_runs.csv") as f:
+            rows = list(csv.DictReader(f))
+            assert len(rows) == 1
+            assert rows[0]["variant"] == "wl"
+            assert rows[0]["seed"] == "42"
 
 
 def test_rq3_grid_rejects_duplicate_variant_seed():
+    from scripts import rq3_report
+
     selected = [
         {"variant": "M0", "seed": 42, "val_ndcg_at_10": 0.1},
         {"variant": "M0", "seed": 42, "val_ndcg_at_10": 0.2},
@@ -59,6 +69,8 @@ def test_rq3_grid_rejects_duplicate_variant_seed():
 
 
 def test_rq3_grid_rejects_inconsistent_seed_sets():
+    from scripts import rq3_report
+
     selected = [
         {"variant": "M0", "seed": 42, "val_ndcg_at_10": 0.1},
         {"variant": "M1", "seed": 123, "val_ndcg_at_10": 0.1},
@@ -69,6 +81,8 @@ def test_rq3_grid_rejects_inconsistent_seed_sets():
 
 def test_rq3_grid_accepts_custom_variants():
     """A partial variant sweep (e.g. only M1, M3) is valid."""
+    from scripts import rq3_report
+
     selected = [
         {"variant": "M1", "seed": 42, "val_ndcg_at_10": 0.1},
         {"variant": "M1", "seed": 123, "val_ndcg_at_10": 0.1},

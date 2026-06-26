@@ -58,9 +58,16 @@ def test_bprmf_config_values():
 
 
 def test_all_neural_models_have_confidence_alpha():
-    for model_name in ("sasrec", "gsasrec", "gru4rec", "bert4rec", "bprmf"):
+    for model_name in ("sasrec", "gsasrec", "gru4rec", "bprmf"):
         cfg = _compose([f"model={model_name}"])
         assert "confidence_alpha" in cfg.model.train_kwargs, model_name
+
+
+def test_bert4rec_has_watch_params_instead_of_confidence_alpha():
+    cfg = _compose(["model=bert4rec"])
+    assert "confidence_alpha" not in cfg.model.train_kwargs
+    assert "watch_alpha" in cfg.model.model_kwargs
+    assert "watch_mode" in cfg.model.model_kwargs
 
 
 def test_cli_override_batch_size():

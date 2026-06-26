@@ -93,9 +93,9 @@ class BERT4Rec(nn.Module):
         x = self._item_input_embedding(input_seq) + self.pos_embedding(pos_ids)
 
         # ponytail: watch embeddings are a training-time augmentation only.
-    # At inference (watch_input_ids=None), the model runs on base item+position
-    # representations, analogous to how dropout is disabled at eval time.
-    if self.watch_mode in {"embedding", "both"} and watch_input_ids is not None:
+        # At inference (watch_input_ids=None), the model runs on base item+position
+        # representations, analogous to how dropout is disabled at eval time.
+        if self.watch_mode in {"embedding", "both"} and watch_input_ids is not None:
             x = x + self.watch_embedding(watch_input_ids)
 
         x = self.input_ln(x)   # LayerNorm before dropout (BERT convention)
