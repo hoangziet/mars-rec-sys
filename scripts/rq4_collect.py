@@ -60,44 +60,57 @@ def _get_run_tags(client, experiment_id):
     return run_tag_cache
 
 
-def _validate_run_tags(selected, tags_by_run, expected_alpha, best_metadata_variant, metadata_variants):
+def _validate_run_tags(selected, tags_by_run, protocol):
     """Validate that each run's tags match the expected config per variant.
 
     Returns a list of error strings (empty if all valid).  ``tags_by_run``
     is a {run_id: tags} dict produced by ``_get_run_tags``.
     """
     errors = []
+    best_metadata_variant = protocol.get("best_metadata_variant", "M3")
+    metadata_variants = protocol.get("metadata_variants", {})
     variant_flags = metadata_variants.get(best_metadata_variant, {})
     expected_structured = str(bool(variant_flags.get("use_structured", True))).lower()
     expected_text = str(bool(variant_flags.get("use_text", True))).lower()
+
+    rq2_variant = protocol.get("rq2_best_variant", "baseline")
+    rq2_alpha = float(protocol.get("rq2_best_alpha", 0) or 0)
+    watch_mode_map = {"baseline": "none", "wl": "loss", "we": "embedding", "wlwe": "both"}
+    expected_watch_mode = watch_mode_map.get(rq2_variant, "none")
 
     for r in selected:
         tags = tags_by_run.get(r["run_id"], {})
         variant = r["variant"]
 
-        run_alpha_str = tags.get("confidence_alpha")
-        if run_alpha_str is None:
-            errors.append(
-                f"{variant} seed={r['seed']}: missing confidence_alpha tag"
-            )
-        else:
-            try:
-                run_alpha = float(run_alpha_str)
-            except (ValueError, TypeError):
+        # Validate watch_mode
+        actual_mode = tags.get("watch_mode", "none")
+        if variant in ("V0", "V2"):
+            if actual_mode != "none":
                 errors.append(
-                    f"{variant} seed={r['seed']}: confidence_alpha tag is not numeric: {run_alpha_str!r}"
+                    f"{variant} seed={r['seed']}: expected watch_mode=none, got {actual_mode}"
                 )
-            else:
-                if variant in ("V0", "V2"):
-                    if abs(run_alpha) > 1e-9:
-                        errors.append(
-                            f"{variant} seed={r['seed']}: expected alpha=0.0, got {run_alpha}"
-                        )
-                elif variant in ("V1", "V3"):
-                    if abs(run_alpha - expected_alpha) > 1e-9:
-                        errors.append(
-                            f"{variant} seed={r['seed']}: expected alpha={expected_alpha}, got {run_alpha}"
-                        )
+        else:
+            if actual_mode != expected_watch_mode:
+                errors.append(
+                    f"{variant} seed={r['seed']}: expected watch_mode={expected_watch_mode}, got {actual_mode}"
+                )
+
+        # Validate watch_alpha
+        actual_alpha_str = tags.get("watch_alpha", "0")
+        try:
+            actual_alpha = float(actual_alpha_str)
+        except (ValueError, TypeError):
+            actual_alpha = -1.0
+        if variant in ("V0", "V2"):
+            if abs(actual_alpha) > 1e-9:
+                errors.append(
+                    f"{variant} seed={r['seed']}: expected watch_alpha=0, got {actual_alpha_str}"
+                )
+        elif variant in ("V1", "V3"):
+            if abs(actual_alpha - rq2_alpha) > 1e-9:
+                errors.append(
+                    f"{variant} seed={r['seed']}: expected watch_alpha={rq2_alpha}, got {actual_alpha_str}"
+                )
 
         if variant in ("V2", "V3"):
             actual_structured = tags.get("use_structured", "missing")
@@ -260,7 +273,6 @@ def main() -> None:
     expected_variants = set(protocol["variants"])
     expected_seeds = {int(s) for s in protocol["neural_seeds"]}
     expected_runs = len(expected_variants) * len(expected_seeds)
-    expected_alpha = float(protocol["best_alpha"])
 
     actual_variants = {r["variant"] for r in selected}
     actual_seeds = {r["seed"] for r in selected}
@@ -285,15 +297,11 @@ def main() -> None:
         errors.append(f"Expected {expected_runs} runs, got {len(actual_pairs)}")
 
     tags_by_run = _get_run_tags(client, experiment.experiment_id)
-    best_metadata_variant = protocol.get("best_metadata_variant", "M3")
-    metadata_variants = protocol.get("metadata_variants", {})
     errors.extend(
         _validate_run_tags(
             selected,
             tags_by_run,
-            expected_alpha,
-            best_metadata_variant,
-            metadata_variants,
+            protocol,
         )
     )
     errors.extend(_validate_provenance_tags(selected, tags_by_run, protocol))

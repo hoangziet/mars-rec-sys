@@ -74,6 +74,7 @@ def main() -> None:
         f.write(f"Benchmark: {args.benchmark_id}\n\n")
 
         f.write("## Primary Findings\n\n")
+        f.write("Interpretation: V0 = baseline BERT4Rec, V1 = watch integration, V2 = metadata integration, V3 = full model.\n\n")
         f.write(
             "Each primary finding reports the effect size (Δ, relative %), the 95% bootstrap CI, "
             "the Holm-corrected permutation p-value, Cohen's d, and wins/ties/losses. "
