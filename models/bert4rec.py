@@ -52,7 +52,7 @@ class BERT4Rec(nn.Module):
         self.pred_ln  = nn.LayerNorm(hidden_dim, eps=1e-12)
 
         # Output projection shares weights with item_embedding (weight tying).
-        self.out_bias = nn.Parameter(torch.zeros(self.vocab_size))
+        self.out_bias = nn.Parameter(torch.zeros(n_items))
 
         self._init_weights()
 
@@ -65,6 +65,8 @@ class BERT4Rec(nn.Module):
         nn.init.zeros_(self.input_ln.bias)
         nn.init.ones_(self.pred_ln.weight)
         nn.init.zeros_(self.pred_ln.bias)
+        with torch.no_grad():
+            self.item_embedding.weight[0].zero_()
 
     def forward(self, input_seq):
         B, L = input_seq.shape
@@ -80,16 +82,33 @@ class BERT4Rec(nn.Module):
         x = F.gelu(self.pred_ffn(x))
         x = self.pred_ln(x)
 
-        # Weight-tied output: logits = x @ item_embedding.weight^T + bias
-        return F.linear(x, self.item_embedding.weight, self.out_bias)
+        # Output logits cover only padding (col 0) + real items (cols 1..n_items).
+        # The MASK token (index n_items+1) is an input-only token, not an output class.
+        real_item_weight = self.item_embedding.weight[1 : self.n_items + 1]
+        real_item_logits = F.linear(x, real_item_weight, self.out_bias)
+
+        padding_logits = torch.zeros(
+            *real_item_logits.shape[:-1], 1,
+            dtype=real_item_logits.dtype, device=real_item_logits.device,
+        )
+        return torch.cat([padding_logits, real_item_logits], dim=-1)
 
     def loss(self, input_seq, labels):
         logits = self.forward(input_seq)
-        return F.cross_entropy(
-            logits.view(-1, logits.size(-1)),
-            labels.view(-1),
-            ignore_index=0,
-        )
+
+        valid_mask = labels.ne(self.pad_token)
+        if not valid_mask.any():
+            return torch.zeros((), device=input_seq.device, requires_grad=True)
+
+        valid_labels = labels[valid_mask]
+        if torch.any((valid_labels < 1) | (valid_labels > self.n_items)):
+            raise ValueError(
+                f"BERT4Rec labels must be real item IDs in [1, {self.n_items}]"
+            )
+
+        real_item_logits = logits[..., 1:][valid_mask]
+        zero_based_labels = valid_labels - 1
+        return F.cross_entropy(real_item_logits, zero_based_labels)
 
 
 def get_model(n_items, **kwargs):
