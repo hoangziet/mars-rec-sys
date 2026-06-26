@@ -365,6 +365,7 @@ def build_train_loader(
             extra["dupe_factor"] = train_kwargs.get("dupe_factor", 1)
             extra["prop_sliding_window"] = train_kwargs.get("prop_sliding_window", -1.0)
             extra["force_last_item_mask"] = train_kwargs.get("force_last_item_mask", False)
+            extra["watch_num_bins"] = train_kwargs.get("watch_num_bins", 5)
         return get_train_loader(
             model_name,
             data_dir / "splits" / "train_sequences.csv",
