@@ -389,11 +389,16 @@ class MaskedSequenceDataset(Dataset):
             raw_seqs = [parse_seq(s) for s in df["item_sequence"]]
             engagement_col = "engagement_sequence" if "engagement_sequence" in df.columns else None
             raw_engagements = [parse_float_seq(s) for s in df[engagement_col]] if engagement_col else [[0.0] * len(s) for s in raw_seqs]
+            for seq, eng in zip(raw_seqs, raw_engagements):
+                if len(eng) != len(seq):
+                    raise ValueError(
+                        f"Engagement sequence length ({len(eng)}) does not match "
+                        f"item sequence length ({len(seq)})"
+                    )
             self.instances: list[tuple[list[int], str, list[float]]] = []
             for seq, eng in zip(raw_seqs, raw_engagements):
-                for window in self._build_train_windows(seq):
-                    start_idx = len(seq) - len(window)
-                    engagement_window = eng[start_idx:]
+                for window, start_idx in self._build_train_windows(seq):
+                    engagement_window = eng[start_idx : start_idx + len(window)]
                     for _ in range(self.dupe_factor):
                         self.instances.append((window, "random", engagement_window))
                     if self.force_last_item_mask and window:
@@ -407,12 +412,12 @@ class MaskedSequenceDataset(Dataset):
             self.targets = df[tgt_col].tolist()
             self.instances = []
 
-    def _build_train_windows(self, seq: list[int]) -> list[list[int]]:
+    def _build_train_windows(self, seq: list[int]) -> list[tuple[list[int], int]]:
         """Expand long sequences using the sliding-window strategy from BERT4Rec."""
         if not seq:
             return []
         if len(seq) <= self.max_len:
-            return [seq]
+            return [(seq, 0)]
 
         if self.prop_sliding_window == -1.0:
             sliding_step = self.max_len
@@ -421,7 +426,7 @@ class MaskedSequenceDataset(Dataset):
 
         begin_indices = list(range(len(seq) - self.max_len, 0, -sliding_step))
         begin_indices.append(0)
-        return [seq[i:i + self.max_len] for i in begin_indices[::-1]]
+        return [(seq[i:i + self.max_len], i) for i in begin_indices[::-1]]
 
     def __len__(self) -> int:
         return len(self.instances) if self.is_train else len(self.seqs)
