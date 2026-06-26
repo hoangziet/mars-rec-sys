@@ -88,7 +88,19 @@ def build_benchmark_manifest(
         "expected_models": expected_models,
         "neural_seeds": neural_seeds,
         "heuristic_seed": heuristic_seed,
+        "status": "running",
+        "completed_run_keys": [],
+        "failed_run_keys": [],
     }
+
+
+def _reject_if_completed(manifest: dict) -> None:
+    """Raise if the manifest is already in a completed state."""
+    if manifest.get("status") == "completed":
+        raise RuntimeError(
+            f"Benchmark campaign {manifest['benchmark_id']} is already completed. "
+            "Use a new benchmark_id for a fresh campaign."
+        )
 
 
 def parse_args() -> argparse.Namespace:
