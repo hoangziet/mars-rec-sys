@@ -1,4 +1,4 @@
-"""Smoke tests: verify RQ2/RQ3/RQ4 are gSASRec-only (no RQ1 winner-artifact wiring)."""
+"""Smoke tests: verify RQ2/RQ3/RQ4 are BERT4Rec-only (no RQ1 winner-artifact wiring)."""
 
 import json
 import sys
@@ -28,7 +28,7 @@ def test_rq3_tune_help_has_no_winner_artifact_flag():
 
 
 def test_rq4_init_help_has_no_winner_artifact_flag():
-    """RQ4 is gSASRec-only: no --winner-artifact flag should be exposed."""
+    """RQ4 is BERT4Rec-only: no --winner-artifact flag should be exposed."""
     from scripts.rq4_init_protocol import build_parser
 
     parser = build_parser()
@@ -40,8 +40,8 @@ def test_rq4_init_help_has_no_winner_artifact_flag():
     assert not hasattr(args, "winner_artifact")
 
 
-def test_rq4_init_rejects_non_gsasrec_rq2_backbone(tmp_path):
-    """If RQ2 winner declares a non-gsasrec backbone, rq4-init must refuse."""
+def test_rq4_init_rejects_non_bert4rec_rq2_backbone(tmp_path):
+    """If RQ2 winner declares a non-bert4rec backbone, rq4-init must refuse."""
     from scripts.rq4_init_protocol import main as rq4_init_main
 
     rq2 = tmp_path / "rq2.json"
@@ -56,7 +56,7 @@ def test_rq4_init_rejects_non_gsasrec_rq2_backbone(tmp_path):
     rq3.write_text(json.dumps({
         "best_variant": "M3",
         "benchmark_id": "y",
-        "backbone": "gsasrec",
+        "backbone": "bert4rec",
         "preprocessing_version": "v1",
         "data_source": "/tmp/data",
     }))
@@ -73,21 +73,21 @@ def test_rq4_init_rejects_non_gsasrec_rq2_backbone(tmp_path):
         "--data-dir", str(tmp_path),
     ]
     try:
-        with pytest.raises(RuntimeError, match="RQ2 winner artifact backbone must be 'gsasrec'"):
+        with pytest.raises(RuntimeError, match="RQ2 winner artifact backbone must be 'bert4rec'"):
             rq4_init_main()
     finally:
         sys.argv = saved
 
 
-def test_rq4_init_rejects_non_gsasrec_rq3_backbone(tmp_path):
-    """If RQ3 winner declares a non-gsasrec backbone, rq4-init must refuse."""
+def test_rq4_init_rejects_non_bert4rec_rq3_backbone(tmp_path):
+    """If RQ3 winner declares a non-bert4rec backbone, rq4-init must refuse."""
     from scripts.rq4_init_protocol import main as rq4_init_main
 
     rq2 = tmp_path / "rq2.json"
     rq2.write_text(json.dumps({
         "best_alpha": 0.5,
         "benchmark_id": "x",
-        "backbone": "gsasrec",
+        "backbone": "bert4rec",
         "preprocessing_version": "v1",
         "data_source": "/tmp/data",
     }))
@@ -112,37 +112,37 @@ def test_rq4_init_rejects_non_gsasrec_rq3_backbone(tmp_path):
         "--data-dir", str(tmp_path),
     ]
     try:
-        with pytest.raises(RuntimeError, match="RQ3 winner artifact backbone must be 'gsasrec'"):
+        with pytest.raises(RuntimeError, match="RQ3 winner artifact backbone must be 'bert4rec'"):
             rq4_init_main()
     finally:
         sys.argv = saved
 
 
-def test_rq4_ablation_rejects_protocol_backbone_not_gsasrec():
-    """rq4_ablation must refuse to train against a non-gsasrec protocol."""
+def test_rq4_ablation_rejects_protocol_backbone_not_bert4rec():
+    """rq4_ablation must refuse to train against a non-bert4rec protocol."""
     from scripts import rq4_ablation
 
     protocol = {"backbone": "sasrec"}
-    with pytest.raises(RuntimeError, match="RQ4 is gSASRec-only"):
+    with pytest.raises(RuntimeError, match="RQ4 is BERT4Rec-only"):
         rq4_ablation._validate_protocol_backbone(protocol)
 
 
-def test_rq4_ablation_accepts_protocol_backbone_gsasrec():
-    """rq4_ablation accepts a gsasrec protocol and returns 'gsasrec'."""
+def test_rq4_ablation_accepts_protocol_backbone_bert4rec():
+    """rq4_ablation accepts a bert4rec protocol and returns 'bert4rec'."""
     from scripts import rq4_ablation
 
-    assert rq4_ablation._validate_protocol_backbone({"backbone": "gsasrec"}) == "gsasrec"
+    assert rq4_ablation._validate_protocol_backbone({"backbone": "bert4rec"}) == "bert4rec"
 
 
 def test_rq4_ablation_rejects_missing_protocol_backbone():
     """rq4_ablation must refuse a protocol with no backbone field at all."""
     from scripts import rq4_ablation
 
-    with pytest.raises(RuntimeError, match="RQ4 is gSASRec-only"):
+    with pytest.raises(RuntimeError, match="RQ4 is BERT4Rec-only"):
         rq4_ablation._validate_protocol_backbone({})
 
 
-def test_rq4_collect_result_manifest_carries_gsasrec_backbone(tmp_path, monkeypatch):
+def test_rq4_collect_result_manifest_carries_bert4rec_backbone(tmp_path, monkeypatch):
     """End-to-end: rq4_collect propagates the protocol backbone to the result
     manifest so downstream reports can show it.
     """
@@ -151,17 +151,18 @@ def test_rq4_collect_result_manifest_carries_gsasrec_backbone(tmp_path, monkeypa
     protocol = {
         "variants": ["V0", "V1"],
         "neural_seeds": [42, 43],
-        "best_alpha": 0.5,
+        "rq2_best_alpha": 0.5,
+        "rq2_best_variant": "wlwe",
         "best_metadata_variant": "M3",
         "metadata_variants": {"M3": {"use_structured": True, "use_text": True}},
         "benchmark_id": "rq4-test",
-        "backbone": "gsasrec",
+        "backbone": "bert4rec",
         "preprocessing_version": "v1",
         "data_source": "/tmp/data",
     }
     (tmp_path / "protocol.json").write_text(json.dumps(protocol))
 
-    def _make_run(variant, seed, alpha, use_structured, use_text):
+    def _make_run(variant, seed, watch_mode, watch_alpha, use_structured, use_text):
         from types import SimpleNamespace
         rid = f"rid_{variant}_s{seed}"
         return SimpleNamespace(
@@ -171,7 +172,8 @@ def test_rq4_collect_result_manifest_carries_gsasrec_backbone(tmp_path, monkeypa
                     "reportable": "true",
                     "benchmark_id": "rq4-test",
                     "ablation_variant": variant,
-                    "confidence_alpha": str(alpha),
+                    "watch_mode": watch_mode,
+                    "watch_alpha": str(watch_alpha),
                     "use_structured": str(use_structured).lower(),
                     "use_text": str(use_text).lower(),
                     "per_user_complete": "true",
@@ -188,12 +190,12 @@ def test_rq4_collect_result_manifest_carries_gsasrec_backbone(tmp_path, monkeypa
         )
 
     runs = []
-    for variant, alpha, us, ut in [
-        ("V0", 0.0, False, False),
-        ("V1", 0.5, False, False),
+    for variant, watch_mode, watch_alpha, us, ut in [
+        ("V0", "none", 0.0, False, False),
+        ("V1", "both", 0.5, False, False),
     ]:
         for seed in (42, 43):
-            runs.append(_make_run(variant, seed, alpha, us, ut))
+            runs.append(_make_run(variant, seed, watch_mode, watch_alpha, us, ut))
 
     class _FakeExperiment:
         experiment_id = "exp-1"
@@ -232,19 +234,20 @@ def test_rq4_collect_result_manifest_carries_gsasrec_backbone(tmp_path, monkeypa
         sys.argv = saved
 
     manifest = json.loads((out / "rq4_result_manifest.json").read_text())
-    assert manifest["backbone"] == "gsasrec"
+    assert manifest["backbone"] == "bert4rec"
 
 
-def test_rq4_init_freezes_backbone_as_gsasrec(tmp_path):
-    """When RQ2 and RQ3 winners both declare gsasrec, the manifest records
-    backbone='gsasrec' without any RQ1 winner-artifact input."""
+def test_rq4_init_freezes_backbone_as_bert4rec(tmp_path):
+    """When RQ2 and RQ3 winners both declare bert4rec, the manifest records
+    backbone='bert4rec' without any RQ1 winner-artifact input."""
     from scripts.rq4_init_protocol import main as rq4_init_main
 
     rq2 = tmp_path / "rq2.json"
     rq2.write_text(json.dumps({
         "best_alpha": 0.5,
+        "best_variant": "wlwe",
         "benchmark_id": "x",
-        "backbone": "gsasrec",
+        "backbone": "bert4rec",
         "preprocessing_version": "v1",
         "data_source": str(tmp_path),
     }))
@@ -252,7 +255,7 @@ def test_rq4_init_freezes_backbone_as_gsasrec(tmp_path):
     rq3.write_text(json.dumps({
         "best_variant": "M3",
         "benchmark_id": "y",
-        "backbone": "gsasrec",
+        "backbone": "bert4rec",
         "preprocessing_version": "v1",
         "data_source": str(tmp_path),
     }))
@@ -275,7 +278,7 @@ def test_rq4_init_freezes_backbone_as_gsasrec(tmp_path):
         sys.argv = saved
 
     manifest = json.loads((tmp_path / "out" / "rq4_protocol_manifest.json").read_text())
-    assert manifest["backbone"] == "gsasrec", manifest
+    assert manifest["backbone"] == "bert4rec", manifest
     assert manifest["baseline_variant"] == "V0"
     assert "rq1_benchmark_id" not in manifest
 
@@ -286,14 +289,15 @@ def test_rq4_init_rejects_unknown_light_provenance(tmp_path):
     rq2 = tmp_path / "rq2.json"
     rq2.write_text(json.dumps({
         "best_alpha": 0.5,
+        "best_variant": "wlwe",
         "benchmark_id": "x",
-        "backbone": "gsasrec",
+        "backbone": "bert4rec",
     }))
     rq3 = tmp_path / "rq3.json"
     rq3.write_text(json.dumps({
         "best_variant": "M3",
         "benchmark_id": "y",
-        "backbone": "gsasrec",
+        "backbone": "bert4rec",
     }))
 
     saved = sys.argv

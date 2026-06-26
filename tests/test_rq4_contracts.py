@@ -11,9 +11,10 @@ from scripts import rq4_ablation, rq4_collect
 
 def test_rq4_ablation_rejects_data_dir_mismatch_with_protocol(tmp_path):
     protocol = {
-        "backbone": "gsasrec",
+        "backbone": "bert4rec",
         "benchmark_id": "rq4-x",
-        "best_alpha": 0.5,
+        "rq2_best_alpha": 0.5,
+        "rq2_best_variant": "wlwe",
         "best_metadata_variant": "M3",
         "neural_seeds": [42],
         "variants": ["V0"],

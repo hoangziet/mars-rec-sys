@@ -16,8 +16,18 @@ METADATA_VARIANTS = {
 }
 
 
-def _make_run(variant, seed, alpha, use_structured=False, use_text=False,
-              drop_alpha=False, drop_flags=False, run_idx=0):
+def _make_protocol(best_variant="M3", rq2_variant="wlwe", rq2_alpha=0.5):
+    return {
+        "best_metadata_variant": best_variant,
+        "metadata_variants": METADATA_VARIANTS,
+        "rq2_best_variant": rq2_variant,
+        "rq2_best_alpha": rq2_alpha,
+    }
+
+
+def _make_run(variant, seed, watch_mode="none", watch_alpha=0.0,
+              use_structured=False, use_text=False,
+              drop_watch_mode=False, drop_watch_alpha=False, drop_flags=False, run_idx=0):
     run_id = f"run_{variant}_{seed}_{run_idx}"
     tags = {
         "reportable": "true",
@@ -25,8 +35,10 @@ def _make_run(variant, seed, alpha, use_structured=False, use_text=False,
         "use_structured": str(use_structured).lower(),
         "use_text": str(use_text).lower(),
     }
-    if not drop_alpha:
-        tags["confidence_alpha"] = str(alpha)
+    if not drop_watch_mode:
+        tags["watch_mode"] = watch_mode
+    if not drop_watch_alpha:
+        tags["watch_alpha"] = str(watch_alpha)
     if drop_flags:
         tags.pop("use_structured", None)
         tags.pop("use_text", None)
@@ -38,17 +50,14 @@ def _to_tags_lookup(selected):
 
 
 def _valid_grid(best_variant="M3"):
-    """4 variants x 3 seeds, all valid given best_alpha=0.5 and best_variant.
-
-    V0/V1: use_structured=False, use_text=False
-    V2/V3: use_structured and use_text taken from the best_variant flags
-    """
+    """4 variants x 3 seeds, all valid given wlwe/0.5 and best_variant."""
     flags = METADATA_VARIANTS[best_variant]
     use_meta_structured = flags["use_structured"]
     use_meta_text = flags["use_text"]
     runs = []
     for variant in ("V0", "V1", "V2", "V3"):
-        alpha = 0.0 if variant in ("V0", "V2") else 0.5
+        watch_mode = "both" if variant in ("V1", "V3") else "none"
+        watch_alpha = 0.5 if variant in ("V1", "V3") else 0.0
         if variant in ("V2", "V3"):
             use_structured = use_meta_structured
             use_text = use_meta_text
@@ -56,7 +65,8 @@ def _valid_grid(best_variant="M3"):
             use_structured = False
             use_text = False
         for seed in (42, 123, 2024):
-            runs.append(_make_run(variant, seed, alpha, use_structured, use_text))
+            runs.append(_make_run(variant, seed, watch_mode=watch_mode, watch_alpha=watch_alpha,
+                                 use_structured=use_structured, use_text=use_text))
     return runs
 
 
@@ -64,82 +74,74 @@ def test_validate_run_tags_accepts_valid_grid():
     selected = _valid_grid()
     tags_by_run = _to_tags_lookup(selected)
     errors = rq4_collect._validate_run_tags(
-        selected, tags_by_run, expected_alpha=0.5,
-        best_metadata_variant="M3", metadata_variants=METADATA_VARIANTS,
+        selected, tags_by_run, _make_protocol(),
     )
     assert errors == []
 
 
-def test_validate_run_tags_rejects_v0_with_nonzero_alpha():
+def test_validate_run_tags_rejects_v0_with_nonzero_watch_alpha():
     selected = _valid_grid()
-    selected[0]["tags"]["confidence_alpha"] = "0.5"  # V0 seed=42
+    selected[0]["tags"]["watch_alpha"] = "0.5"  # V0 seed=42, should be 0
     tags_by_run = _to_tags_lookup(selected)
     errors = rq4_collect._validate_run_tags(
-        selected, tags_by_run, expected_alpha=0.5,
-        best_metadata_variant="M3", metadata_variants=METADATA_VARIANTS,
+        selected, tags_by_run, _make_protocol(),
     )
-    assert any("V0" in e and "expected alpha=0" in e for e in errors)
+    assert any("V0" in e and "watch_alpha=0" in e for e in errors)
 
 
-def test_validate_run_tags_rejects_v2_with_nonzero_alpha():
+def test_validate_run_tags_rejects_v2_with_nonzero_watch_alpha():
     selected = _valid_grid()
-    # Find V2 in grid
     v2_run = next(r for r in selected if r["variant"] == "V2")
-    v2_run["tags"]["confidence_alpha"] = "0.5"
+    v2_run["tags"]["watch_alpha"] = "0.5"
     tags_by_run = _to_tags_lookup(selected)
     errors = rq4_collect._validate_run_tags(
-        selected, tags_by_run, expected_alpha=0.5,
-        best_metadata_variant="M3", metadata_variants=METADATA_VARIANTS,
+        selected, tags_by_run, _make_protocol(),
     )
-    assert any("V2" in e and "expected alpha=0" in e for e in errors)
+    assert any("V2" in e and "watch_alpha=0" in e for e in errors)
 
 
-def test_validate_run_tags_rejects_v1_with_wrong_alpha():
+def test_validate_run_tags_rejects_v1_with_wrong_watch_alpha():
     selected = _valid_grid()
     v1_run = next(r for r in selected if r["variant"] == "V1")
-    v1_run["tags"]["confidence_alpha"] = "0.0"  # should be 0.5
+    v1_run["tags"]["watch_alpha"] = "0.0"  # should be 0.5
     tags_by_run = _to_tags_lookup(selected)
     errors = rq4_collect._validate_run_tags(
-        selected, tags_by_run, expected_alpha=0.5,
-        best_metadata_variant="M3", metadata_variants=METADATA_VARIANTS,
+        selected, tags_by_run, _make_protocol(),
     )
-    assert any("V1" in e and "expected alpha=0.5" in e for e in errors)
+    assert any("V1" in e and "watch_alpha=0.5" in e for e in errors)
 
 
-def test_validate_run_tags_rejects_v3_with_wrong_alpha():
+def test_validate_run_tags_rejects_v3_with_wrong_watch_alpha():
     selected = _valid_grid()
     v3_run = next(r for r in selected if r["variant"] == "V3")
-    v3_run["tags"]["confidence_alpha"] = "0.3"  # should be 0.5
+    v3_run["tags"]["watch_alpha"] = "0.3"  # should be 0.5
     tags_by_run = _to_tags_lookup(selected)
     errors = rq4_collect._validate_run_tags(
-        selected, tags_by_run, expected_alpha=0.5,
-        best_metadata_variant="M3", metadata_variants=METADATA_VARIANTS,
+        selected, tags_by_run, _make_protocol(),
     )
-    assert any("V3" in e and "expected alpha=0.5" in e for e in errors)
+    assert any("V3" in e and "watch_alpha=0.5" in e for e in errors)
 
 
-def test_validate_run_tags_rejects_missing_alpha_tag():
+def test_validate_run_tags_rejects_v0_with_wrong_watch_mode():
     selected = _valid_grid()
     v0_run = next(r for r in selected if r["variant"] == "V0")
-    del v0_run["tags"]["confidence_alpha"]
+    v0_run["tags"]["watch_mode"] = "both"  # V0 should be none
     tags_by_run = _to_tags_lookup(selected)
     errors = rq4_collect._validate_run_tags(
-        selected, tags_by_run, expected_alpha=0.5,
-        best_metadata_variant="M3", metadata_variants=METADATA_VARIANTS,
+        selected, tags_by_run, _make_protocol(),
     )
-    assert any("V0" in e and "missing confidence_alpha" in e for e in errors)
+    assert any("V0" in e and "watch_mode=none" in e for e in errors)
 
 
-def test_validate_run_tags_rejects_non_numeric_alpha_tag():
+def test_validate_run_tags_rejects_v1_with_wrong_watch_mode():
     selected = _valid_grid()
-    v0_run = next(r for r in selected if r["variant"] == "V0")
-    v0_run["tags"]["confidence_alpha"] = "not_a_number"
+    v1_run = next(r for r in selected if r["variant"] == "V1")
+    v1_run["tags"]["watch_mode"] = "embedding"  # should be "both" for wlwe
     tags_by_run = _to_tags_lookup(selected)
     errors = rq4_collect._validate_run_tags(
-        selected, tags_by_run, expected_alpha=0.5,
-        best_metadata_variant="M3", metadata_variants=METADATA_VARIANTS,
+        selected, tags_by_run, _make_protocol(),
     )
-    assert any("V0" in e and "not numeric" in e for e in errors)
+    assert any("V1" in e and "watch_mode=both" in e for e in errors)
 
 
 def test_validate_run_tags_rejects_v2_wrong_use_structured():
@@ -148,8 +150,7 @@ def test_validate_run_tags_rejects_v2_wrong_use_structured():
     v2_run["tags"]["use_structured"] = "false"  # M3 expects true
     tags_by_run = _to_tags_lookup(selected)
     errors = rq4_collect._validate_run_tags(
-        selected, tags_by_run, expected_alpha=0.5,
-        best_metadata_variant="M3", metadata_variants=METADATA_VARIANTS,
+        selected, tags_by_run, _make_protocol(),
     )
     assert any("V2" in e and "use_structured=true" in e for e in errors)
 
@@ -160,8 +161,7 @@ def test_validate_run_tags_rejects_v3_wrong_use_text():
     v3_run["tags"]["use_text"] = "false"  # M3 expects true
     tags_by_run = _to_tags_lookup(selected)
     errors = rq4_collect._validate_run_tags(
-        selected, tags_by_run, expected_alpha=0.5,
-        best_metadata_variant="M3", metadata_variants=METADATA_VARIANTS,
+        selected, tags_by_run, _make_protocol(),
     )
     assert any("V3" in e and "use_text=true" in e for e in errors)
 
@@ -172,8 +172,7 @@ def test_validate_run_tags_rejects_v0_with_non_false_use_text():
     v0_run["tags"]["use_text"] = "true"  # V0 expects false
     tags_by_run = _to_tags_lookup(selected)
     errors = rq4_collect._validate_run_tags(
-        selected, tags_by_run, expected_alpha=0.5,
-        best_metadata_variant="M3", metadata_variants=METADATA_VARIANTS,
+        selected, tags_by_run, _make_protocol(),
     )
     assert any("V0" in e and "use_text=false" in e for e in errors)
 
@@ -184,8 +183,7 @@ def test_validate_run_tags_rejects_v1_with_non_false_use_structured():
     v1_run["tags"]["use_structured"] = "true"  # V1 expects false
     tags_by_run = _to_tags_lookup(selected)
     errors = rq4_collect._validate_run_tags(
-        selected, tags_by_run, expected_alpha=0.5,
-        best_metadata_variant="M3", metadata_variants=METADATA_VARIANTS,
+        selected, tags_by_run, _make_protocol(),
     )
     assert any("V1" in e and "use_structured=false" in e for e in errors)
 
@@ -199,20 +197,17 @@ def test_validate_run_tags_v0_v1_missing_flags_is_ok():
             r["tags"].pop("use_text", None)
     tags_by_run = _to_tags_lookup(selected)
     errors = rq4_collect._validate_run_tags(
-        selected, tags_by_run, expected_alpha=0.5,
-        best_metadata_variant="M3", metadata_variants=METADATA_VARIANTS,
+        selected, tags_by_run, _make_protocol(),
     )
     assert errors == []
 
 
 def test_validate_run_tags_uses_best_metadata_variant():
     """best_variant=M1 means use_text should be false for V2/V3."""
-    # Build grid with M3 (V2/V3 have use_text=true); validator expects M1.
     selected = _valid_grid(best_variant="M3")
     tags_by_run = _to_tags_lookup(selected)
     errors = rq4_collect._validate_run_tags(
-        selected, tags_by_run, expected_alpha=0.5,
-        best_metadata_variant="M1", metadata_variants=METADATA_VARIANTS,
+        selected, tags_by_run, _make_protocol(best_variant="M1"),
     )
     assert any("V3" in e and "use_text=false" in e for e in errors)
 

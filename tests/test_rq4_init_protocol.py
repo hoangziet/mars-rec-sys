@@ -15,7 +15,7 @@ def _write_winners(
     variant="M3",
     rq2_bid="rq2-x",
     rq3_bid="rq3-x",
-    backbone="gsasrec",
+    backbone="bert4rec",
     preprocessing_version="mars-preprocess-v1",
     data_source=None,
 ):
@@ -24,6 +24,7 @@ def _write_winners(
     rq2 = tmp_path / "rq2_best_alpha.json"
     rq2.write_text(json.dumps({
         "best_alpha": alpha,
+        "best_variant": "wlwe",
         "benchmark_id": rq2_bid,
         "backbone": backbone,
         "preprocessing_version": preprocessing_version,
@@ -63,12 +64,13 @@ def test_init_reads_winners_from_json(tmp_path):
     ])
 
     manifest = json.loads((output / "rq4_protocol_manifest.json").read_text())
-    assert manifest["best_alpha"] == 0.5
+    assert manifest["rq2_best_alpha"] == 0.5
+    assert manifest["rq2_best_variant"] == "wlwe"
     assert manifest["best_metadata_variant"] == "M3"
     assert manifest["rq2_benchmark_id"] == "rq2-x"
     assert manifest["rq3_benchmark_id"] == "rq3-x"
     assert manifest["neural_seeds"] == [42, 123]
-    assert manifest["backbone"] == "gsasrec"
+    assert manifest["backbone"] == "bert4rec"
     assert manifest["baseline_variant"] == "V0"
 
 
@@ -106,7 +108,7 @@ def test_init_rejects_rq2_winner_missing_key(tmp_path):
     rq2 = tmp_path / "rq2_best_alpha.json"
     rq2.write_text(json.dumps({"benchmark_id": "rq2-x"}))  # missing best_alpha
     rq3 = tmp_path / "rq3_best_variant.json"
-    rq3.write_text(json.dumps({"best_variant": "M3", "benchmark_id": "rq3-x", "backbone": "gsasrec", "preprocessing_version": "v1", "data_source": "/tmp"}))
+    rq3.write_text(json.dumps({"best_variant": "M3", "benchmark_id": "rq3-x", "backbone": "bert4rec", "preprocessing_version": "v1", "data_source": "/tmp"}))
 
     output = tmp_path / "out"
 
@@ -127,7 +129,7 @@ def test_init_rejects_rq2_winner_missing_key(tmp_path):
 
 def test_init_rejects_rq3_winner_missing_key(tmp_path):
     rq2 = tmp_path / "rq2_best_alpha.json"
-    rq2.write_text(json.dumps({"best_alpha": 0.5, "benchmark_id": "rq2-x", "backbone": "gsasrec", "preprocessing_version": "v1", "data_source": "/tmp"}))
+    rq2.write_text(json.dumps({"best_alpha": 0.5, "best_variant": "wlwe", "benchmark_id": "rq2-x", "backbone": "bert4rec", "preprocessing_version": "v1", "data_source": "/tmp"}))
     rq3 = tmp_path / "rq3_best_variant.json"
     rq3.write_text(json.dumps({"benchmark_id": "rq3-x"}))  # missing best_variant
     output = tmp_path / "out"
@@ -169,9 +171,8 @@ def test_init_rejects_existing_manifest(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# gSASRec-only contract: RQ4 freezes backbone="gsasrec" without RQ1 artifact.
+# BERT4Rec-only contract: RQ4 freezes backbone="bert4rec" without RQ1 artifact.
 # ---------------------------------------------------------------------------
-
 
 def test_rq4_init_does_not_require_winner_artifact(tmp_path):
     rq2, rq3 = _write_winners(tmp_path)
@@ -187,13 +188,14 @@ def test_rq4_init_does_not_require_winner_artifact(tmp_path):
     ])
 
     manifest = json.loads((output / "rq4_protocol_manifest.json").read_text())
-    assert manifest["backbone"] == "gsasrec"
+    assert manifest["backbone"] == "bert4rec"
 
 
-def test_rq4_init_rejects_non_gsasrec_rq2_backbone(tmp_path):
+def test_rq4_init_rejects_non_bert4rec_rq2_backbone(tmp_path):
     rq2 = tmp_path / "rq2_best_alpha.json"
     rq2.write_text(json.dumps({
         "best_alpha": 0.5,
+        "best_variant": "wlwe",
         "benchmark_id": "x",
         "backbone": "sasrec",
         "preprocessing_version": "v1",
@@ -203,7 +205,7 @@ def test_rq4_init_rejects_non_gsasrec_rq2_backbone(tmp_path):
     rq3.write_text(json.dumps({
         "best_variant": "M3",
         "benchmark_id": "y",
-        "backbone": "gsasrec",
+        "backbone": "bert4rec",
         "preprocessing_version": "v1",
         "data_source": "/tmp/data",
     }))
@@ -219,18 +221,19 @@ def test_rq4_init_rejects_non_gsasrec_rq2_backbone(tmp_path):
         "--data-dir", str(tmp_path),
     ]
     try:
-        with pytest.raises(RuntimeError, match="RQ2 winner artifact backbone must be 'gsasrec'"):
+        with pytest.raises(RuntimeError, match="RQ2 winner artifact backbone must be 'bert4rec'"):
             rq4_init_protocol.main()
     finally:
         sys.argv = saved
 
 
-def test_rq4_init_rejects_non_gsasrec_rq3_backbone(tmp_path):
+def test_rq4_init_rejects_non_bert4rec_rq3_backbone(tmp_path):
     rq2 = tmp_path / "rq2_best_alpha.json"
     rq2.write_text(json.dumps({
         "best_alpha": 0.5,
+        "best_variant": "wlwe",
         "benchmark_id": "x",
-        "backbone": "gsasrec",
+        "backbone": "bert4rec",
         "preprocessing_version": "v1",
         "data_source": "/tmp/data",
     }))
@@ -254,14 +257,14 @@ def test_rq4_init_rejects_non_gsasrec_rq3_backbone(tmp_path):
         "--data-dir", str(tmp_path),
     ]
     try:
-        with pytest.raises(RuntimeError, match="RQ3 winner artifact backbone must be 'gsasrec'"):
+        with pytest.raises(RuntimeError, match="RQ3 winner artifact backbone must be 'bert4rec'"):
             rq4_init_protocol.main()
     finally:
         sys.argv = saved
 
 
-def test_rq4_init_freezes_backbone_as_gsasrec_no_rq1_leak(tmp_path):
-    """Manifest must record backbone='gsasrec' and must NOT include
+def test_rq4_init_freezes_backbone_as_bert4rec_no_rq1_leak(tmp_path):
+    """Manifest must record backbone='bert4rec' and must NOT include
     rq1_benchmark_id (no RQ1 leak in the protocol)."""
     rq2, rq3 = _write_winners(tmp_path)
     output = tmp_path / "out"
@@ -275,5 +278,5 @@ def test_rq4_init_freezes_backbone_as_gsasrec_no_rq1_leak(tmp_path):
     ])
 
     manifest = json.loads((output / "rq4_protocol_manifest.json").read_text())
-    assert manifest["backbone"] == "gsasrec"
+    assert manifest["backbone"] == "bert4rec"
     assert "rq1_benchmark_id" not in manifest
