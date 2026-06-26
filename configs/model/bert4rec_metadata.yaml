@@ -1,4 +1,4 @@
-# configs/model/bert4rec.yaml
+# configs/model/bert4rec_metadata.yaml
 name: bert4rec
 model_kwargs:
   hidden_dim: 64
@@ -8,6 +8,9 @@ model_kwargs:
   watch_mode: none
   watch_num_bins: 5
   watch_alpha: 1.0
+  item_encoder:
+    use_structured: true
+    use_text: true
 train_kwargs:
   batch_size: 256
   epochs: 100
