@@ -227,6 +227,48 @@ class SASRec(nn.Module):
             ),
         )
 
+    def sequence_loss(
+        self,
+        input_seq: torch.Tensor,
+        pos_items: torch.Tensor,
+        neg_items: torch.Tensor,
+        loss_mask: torch.Tensor,
+        reduction: str = "mean",
+    ) -> torch.Tensor:
+        """BCE loss at every valid sequence position.
+
+        Parameters
+        ----------
+        input_seq : (B, L)
+        pos_items : (B, L)
+        neg_items : (B, L, 1) — exactly one negative per position
+        loss_mask : (B, L) bool — True for positions with a valid target
+        """
+        if neg_items.dim() != 3:
+            raise ValueError("neg_items must have shape [B, L, 1]")
+        if neg_items.size(-1) != 1:
+            raise ValueError("SASRec requires exactly one negative per valid position")
+        if reduction not in ("mean", "none"):
+            raise ValueError(f"Unsupported reduction: {reduction!r}")
+
+        hidden = self._encode(input_seq)
+
+        pos_logits = (hidden * self.item_emb(pos_items)).sum(dim=-1)        # (B, L)
+        neg_logits = (hidden.unsqueeze(2) * self.item_emb(neg_items)).sum(dim=-1).squeeze(-1)  # (B, L)
+
+        pos_loss = F.binary_cross_entropy_with_logits(
+            pos_logits, torch.ones_like(pos_logits), reduction="none",
+        )
+        neg_loss = F.binary_cross_entropy_with_logits(
+            neg_logits, torch.zeros_like(neg_logits), reduction="none",
+        )
+
+        per_position = (pos_loss + neg_loss).masked_fill(~loss_mask, 0.0)
+
+        if reduction == "none":
+            return per_position
+        return per_position.sum() / loss_mask.sum().clamp_min(1)
+
     def predict(self, input_seq: torch.Tensor) -> torch.Tensor:
         """Return scores (B, n_items+1) via dot-product with item_emb."""
         return self._last_hidden(input_seq) @ self.item_emb.weight.T

@@ -110,6 +110,19 @@ class GRU4Rec(nn.Module):
 
         return last
 
+    def _encode_sequence(self, input_seq: torch.Tensor) -> torch.Tensor:
+        """Run GRU and return hidden state at every timestep.  Returns (B, L, E)."""
+        x = self.emb_dropout(self.item_emb(input_seq))
+        output, _ = self.gru(x)
+        output = self.output_dropout(output)
+
+        if self.proj is not None:
+            output = self.proj(output)
+
+        return output.masked_fill(
+            input_seq.eq(self.pad_token).unsqueeze(-1), 0.0,
+        )
+
     def loss(
         self,
         input_seq: torch.Tensor,
@@ -160,6 +173,35 @@ class GRU4Rec(nn.Module):
         loss_bpr = -torch.log((neg_softmax * bpr_term).sum(dim=1) + 1e-24).mean()
         loss_reg = (neg_softmax * neg_score.pow(2)).sum(dim=1).mean()
         return loss_bpr + 0.5 * loss_reg
+
+    def sequence_bpr_max_loss(
+        self,
+        input_seq: torch.Tensor,
+        pos_items: torch.Tensor,
+        neg_items: torch.Tensor,
+        loss_mask: torch.Tensor,
+        *,
+        bpreg: float = 0.5,
+        elu_param: float = 0.5,
+    ) -> torch.Tensor:
+        if neg_items.dim() != 3:
+            raise ValueError("neg_items must have shape [B, L, K]")
+
+        hidden = self._encode_sequence(input_seq)
+
+        pos_score = (hidden * self.item_emb(pos_items)).sum(dim=-1)
+        neg_score = torch.einsum("bld,blkd->blk", hidden, self.item_emb(neg_items))
+
+        pos_score = F.elu(pos_score, alpha=elu_param)
+        neg_score = F.elu(neg_score, alpha=elu_param)
+
+        weights = torch.softmax(neg_score, dim=-1)
+        pair_prob = torch.sigmoid(pos_score.unsqueeze(-1) - neg_score)
+        ranking = -torch.log((weights * pair_prob).sum(dim=-1) + 1e-24)
+        regularization = bpreg * (weights * neg_score.pow(2)).sum(dim=-1)
+
+        per_position = (ranking + regularization).masked_fill(~loss_mask, 0.0)
+        return per_position.sum() / loss_mask.sum().clamp_min(1)
 
     def predict(self, input_seq: torch.Tensor) -> torch.Tensor:
         """Return scores (B, n_items+1) via dot-product with item_emb."""

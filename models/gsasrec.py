@@ -198,7 +198,7 @@ class GSASRec(nn.Module):
     # Training: gBCE with multiple negatives
     # ------------------------------------------------------------------
 
-    def _gbce_transform_pos(self, pos_score: torch.Tensor, K: int) -> torch.Tensor:
+    def _gbce_transform_pos(self, pos_score: torch.Tensor, num_negatives: int) -> torch.Tensor:
         """Apply gBCE logit transformation to positive scores.
 
         Reference: Petrov & Macdonald, RecSys 2023.
@@ -209,7 +209,7 @@ class GSASRec(nn.Module):
         At t=0  → beta=1 → pos_score_t == pos_score (standard BCE).
         At t=0.5 and K=32, n_items=2300 → beta ≈ 0.51.
         """
-        alpha = K / max(self.n_items - 1, 1)
+        alpha = num_negatives / max(self.n_items - 1, 1)
         beta  = alpha * ((1.0 - 1.0 / alpha) * self.t + 1.0 / alpha)
         eps   = 1e-10
         # Use float64 for numerical stability (same as reference implementation)
@@ -269,6 +269,51 @@ class GSASRec(nn.Module):
         if reduction == "none":
             return loss_per_sample
         return loss_per_sample.mean()
+
+    def _negative_sampling_rate(self, num_negatives: int) -> float:
+        if self.n_items <= 1:
+            raise ValueError("gBCE requires at least two catalogue items")
+        if not (1 <= num_negatives <= self.n_items - 1):
+            raise ValueError(f"num_negatives must be in [1, {self.n_items - 1}]")
+        return num_negatives / (self.n_items - 1)
+
+    def sequence_loss(
+        self,
+        input_seq: torch.Tensor,
+        pos_items: torch.Tensor,
+        neg_items: torch.Tensor,
+        loss_mask: torch.Tensor,
+        reduction: str = "mean",
+    ) -> torch.Tensor:
+        if neg_items.dim() != 3:
+            raise ValueError("neg_items must have shape [B, L, K]")
+        if reduction not in ("mean", "none"):
+            raise ValueError(f"Unsupported reduction: {reduction!r}")
+
+        hidden = self._encode(input_seq)
+
+        pos_emb = self.item_emb(pos_items)
+        neg_emb = self.item_emb(neg_items)
+
+        pos_score = (hidden * pos_emb).sum(dim=-1)
+        neg_score = torch.einsum("bld,blkd->blk", hidden, neg_emb)
+
+        K = neg_items.size(-1)
+        pos_score_t = self._gbce_transform_pos(pos_score, K)
+
+        logits = torch.cat([pos_score_t.unsqueeze(-1), neg_score], dim=-1)
+        labels = torch.zeros_like(logits)
+        labels[..., 0] = 1.0
+
+        per_position = (
+            F.binary_cross_entropy_with_logits(logits, labels, reduction="none")
+            .mean(dim=-1)
+            .masked_fill(~loss_mask, 0.0)
+        )
+
+        if reduction == "none":
+            return per_position
+        return per_position.sum() / loss_mask.sum().clamp_min(1)
 
     # ------------------------------------------------------------------
     # Inference
