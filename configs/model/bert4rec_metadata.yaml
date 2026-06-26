@@ -11,6 +11,9 @@ model_kwargs:
   item_encoder:
     use_structured: true
     use_text: true
+    text_emb_path: data/processed/item_features/text_embeddings.pt
+    metadata_vocab_path: data/processed/item_features/metadata_vocab.json
+    metadata_csv_path: data/processed/item_features/item_metadata.csv
 train_kwargs:
   batch_size: 256
   epochs: 100
@@ -26,4 +29,3 @@ train_kwargs:
   dupe_factor: 10
   prop_sliding_window: 0.1
   force_last_item_mask: true
-  confidence_alpha: 0.0
