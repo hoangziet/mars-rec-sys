@@ -8,7 +8,7 @@ STATS_OUTPUT_DIR ?= experiments/benchmark/$(BENCHMARK_ID)/stats
 PREPROCESSING_VERSION ?= mars-preprocess-v1
 RQ4_BASELINE_VARIANT ?= V0
 
-.PHONY: preprocess rq1-smoke rq1-full rq1-report rq1-compare test rq2-alpha rq2-variants rq2-report rq2-compare rq2-all rq3-precompute rq3-tune rq3-report rq3-all rq4-init rq4-ablation rq4-collect rq4-compare rq4-subgroup rq4-report rq4-all
+.PHONY: preprocess rq1-smoke rq1-full rq1-report rq1-compare test rq2-alpha rq2-alpha-report rq2-variants rq2-report rq2-compare rq2-all rq3-precompute rq3-tune rq3-report rq3-all rq4-init rq4-ablation rq4-collect rq4-compare rq4-subgroup rq4-report rq4-all
 
 preprocess:
 	uv run python data/preprocess.py
@@ -44,6 +44,9 @@ RQ2_OUTPUT_DIR ?= experiments/rq2/$(RQ2_VARIANT_BENCHMARK_ID)
 rq2-alpha:
 	uv run python scripts/rq2_tune_alpha.py --alphas $(RQ2_ALPHAS) --seeds $(RQ2_SEEDS) --benchmark-id $(RQ2_ALPHA_BENCHMARK_ID) --data-dir $(DATA_DIR)
 
+rq2-alpha-report:
+	uv run python scripts/rq2_alpha_report.py --benchmark-id $(RQ2_ALPHA_BENCHMARK_ID) --output-dir $(RQ2_ALPHA_OUTPUT_DIR)
+
 rq2-variants:
 	uv run python scripts/rq2_compare_variants.py --seeds $(RQ2_VARIANT_SEEDS) --benchmark-id $(RQ2_VARIANT_BENCHMARK_ID) --alpha-artifact $(RQ2_ALPHA_OUTPUT_DIR)/rq2_best_alpha.json --data-dir $(DATA_DIR)
 
@@ -53,7 +56,7 @@ rq2-report:
 rq2-compare:
 	uv run python scripts/rq2_compare.py --runs-file $(RQ2_OUTPUT_DIR)/rq2_runs.csv --summary-file $(RQ2_OUTPUT_DIR)/rq2_summary.json --output-dir $(RQ2_OUTPUT_DIR)
 
-rq2-all: rq2-alpha rq2-variants rq2-report rq2-compare
+rq2-all: rq2-alpha rq2-alpha-report rq2-variants rq2-report rq2-compare
 
 # --- RQ3: Metadata Tuning ---
 RQ3_VARIANTS ?= M0 M1 M2 M3
