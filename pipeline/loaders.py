@@ -644,7 +644,7 @@ def get_rq1_train_loader(
 
     negative_sampling_map = {
         "sasrec": "unseen_user",
-        "gsasrec": "catalog_except_positive",
+        "gsasrec": "unseen_user",
         "gru4rec": "popularity_except_positive",
     }
     negative_sampling = kwargs.pop(
