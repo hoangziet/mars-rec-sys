@@ -1,10 +1,10 @@
 """
 scripts/rq3_tune_metadata.py
 =============================
-RQ3: Compare metadata variants M0-M3 (gSASRec-only).
+RQ3: Compare metadata variants M0-M3 (BERT4Rec-only, on top of RQ2 winner).
 
 Variants:
-    M0: Base gSASRec (no metadata)
+    M0: Base BERT4Rec (no metadata)
     M1: Structured metadata only
     M2: Text embeddings only
     M3: Structured + Text
@@ -12,14 +12,16 @@ Variants:
 Seeds: {42, 123, 2024} per variant
 Selection: highest mean validation NDCG@10
 Tie-break: prefer simpler config (fewer params)
+Watch: locked to RQ2 winner configuration
 
 Usage:
-    uv run python scripts/rq3_tune_metadata.py
+    uv run python scripts/rq3_tune_metadata.py --rq2-winner path/to/rq2_best_watch.json
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import random
 import sys
 from pathlib import Path
@@ -41,18 +43,51 @@ from training.trainer import Trainer
 
 EXPERIMENT_NAME = RQ3_EXPERIMENT_NAME
 DEFAULT_SEEDS = [42, 123, 2024]
-BACKBONE = "gsasrec"
+BACKBONE = "bert4rec"
 
 VARIANTS = {
-    "M0": {"config_name": "gsasrec", "use_structured": False, "use_text": False, "label": "Base"},
-    "M1": {"config_name": "gsasrec_metadata", "use_structured": True, "use_text": False, "label": "Structured"},
-    "M2": {"config_name": "gsasrec_metadata", "use_structured": False, "use_text": True, "label": "Text"},
-    "M3": {"config_name": "gsasrec_metadata", "use_structured": True, "use_text": True, "label": "Both"},
+    "M0": {"config_name": "bert4rec", "use_structured": False, "use_text": False, "label": "Base"},
+    "M1": {"config_name": "bert4rec_metadata", "use_structured": True, "use_text": False, "label": "Structured"},
+    "M2": {"config_name": "bert4rec_metadata", "use_structured": False, "use_text": True, "label": "Text"},
+    "M3": {"config_name": "bert4rec_metadata", "use_structured": True, "use_text": True, "label": "Both"},
 }
 
 
+def load_rq2_winner(path: Path) -> dict:
+    """Load RQ2 watch winner artifact and validate backbone."""
+    data = json.loads(path.read_text())
+    if data.get("backbone") != "bert4rec":
+        raise RuntimeError(
+            f"RQ3 requires bert4rec RQ2 winner, got {data.get('backbone')!r}"
+        )
+    return data
+
+
+def apply_watch_winner(model_kwargs: dict, winner: dict) -> dict:
+    """Apply RQ2 watch configuration to model kwargs."""
+    updated = dict(model_kwargs)
+    best_variant = winner["best_variant"]
+    updated["watch_num_bins"] = updated.get("watch_num_bins", 5)
+    if best_variant == "baseline":
+        updated["watch_mode"] = "none"
+        updated["watch_alpha"] = 0.0
+    elif best_variant == "wl":
+        updated["watch_mode"] = "loss"
+        updated["watch_alpha"] = winner.get("best_alpha", 1.0)
+    elif best_variant == "we":
+        updated["watch_mode"] = "embedding"
+        updated["watch_alpha"] = 0.0
+    elif best_variant == "wlwe":
+        updated["watch_mode"] = "both"
+        updated["watch_alpha"] = winner.get("best_alpha", 1.0)
+    else:
+        raise ValueError(f"Unknown RQ2 watch variant: {best_variant!r}")
+    return updated
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="RQ3: gSASRec metadata variant comparison.")
+    parser = argparse.ArgumentParser(description="RQ3: BERT4Rec metadata variant comparison on top of RQ2 winner.")
+    parser.add_argument("--rq2-winner", required=True, help="Path to rq2_best_watch.json")
     parser.add_argument("--data-dir", default="data/processed")
     parser.add_argument("--output-dir", default="experiments")
     parser.add_argument("--variants", nargs="+", default=["M0", "M1", "M2", "M3"], choices=["M0", "M1", "M2", "M3"])
@@ -67,7 +102,7 @@ def parse_args() -> argparse.Namespace:
     return build_parser().parse_args()
 
 
-def _run_single(args, variant_name: str, seed: int) -> dict:
+def _run_single(args, variant_name: str, seed: int, rq2_winner: dict) -> dict:
     backbone = BACKBONE
     variant = VARIANTS[variant_name]
 
@@ -83,7 +118,9 @@ def _run_single(args, variant_name: str, seed: int) -> dict:
 
     base_cfg = build_model_config(variant["config_name"])
     model_kwargs = dict(base_cfg["model_kwargs"])
+    model_kwargs = apply_watch_winner(model_kwargs, rq2_winner)
     train_kwargs = enforce_final_grid(base_cfg["train_kwargs"])
+    train_kwargs.pop("confidence_alpha", None)
 
     if variant_name != "M0":
         encoder_cfg = model_kwargs.get("item_encoder", {})
@@ -108,6 +145,7 @@ def _run_single(args, variant_name: str, seed: int) -> dict:
     model = build_model(backbone, stats["n_items"], stats["n_users"], model_kwargs, max_len, data_dir=data_dir).to(device)
     train_loader = build_train_loader(backbone, data_dir, stats, train_kwargs, model_kwargs=model_kwargs)
     val_loader = get_eval_loader(data_dir / "splits" / "val_sequences.csv", stats, batch_size=batch_size, max_len=max_len)
+    test_loader = get_eval_loader(data_dir / "splits" / "test_sequences.csv", stats, batch_size=batch_size, max_len=max_len)
     optimizer = build_optimizer(backbone, model, train_kwargs)
     scheduler = build_scheduler(optimizer, train_kwargs, len(train_loader))
     criterion_fn = build_criterion_fn(backbone, train_kwargs)
@@ -129,22 +167,25 @@ def _run_single(args, variant_name: str, seed: int) -> dict:
     mlflow_cfg["tags"]["preprocessing_version"] = args.preprocessing_version
     mlflow_cfg["tags"]["data_source"] = str(data_dir.resolve())
 
-    return trainer.train(model=model, train_loader=train_loader, val_loader=val_loader, optimizer=optimizer, epochs=train_kwargs["epochs"], criterion_fn=criterion_fn, eval_fn=eval_fn, gradient_clip=train_kwargs.get("gradient_clip", 5.0), val_loss_loader=val_loss_loader, early_stop_patience=train_kwargs.get("early_stop_patience", 10), early_stop_min_delta=train_kwargs.get("early_stop_min_delta", 1e-4), scheduler=scheduler, mlflow_params=mlflow_cfg)
+    return trainer.train(model=model, train_loader=train_loader, val_loader=val_loader, test_loader=test_loader, optimizer=optimizer, epochs=train_kwargs["epochs"], criterion_fn=criterion_fn, eval_fn=eval_fn, gradient_clip=train_kwargs.get("gradient_clip", 5.0), val_loss_loader=val_loss_loader, early_stop_patience=train_kwargs.get("early_stop_patience", 10), early_stop_min_delta=train_kwargs.get("early_stop_min_delta", 1e-4), scheduler=scheduler, mlflow_params=mlflow_cfg)
 
 
 def main() -> None:
     args = parse_args()
     configure_mlflow(mlflow_module=mlflow)
     backbone = BACKBONE
+    rq2_winner = load_rq2_winner(Path(args.rq2_winner))
+    print(f"RQ2 winner: variant={rq2_winner['best_variant']}, alpha={rq2_winner.get('best_alpha')}")
+
     total = len(args.variants) * len(args.seeds)
-    print(f"RQ3 metadata tuning (gSASRec-only): {len(args.variants)} variants x {len(args.seeds)} seeds = {total} runs")
+    print(f"RQ3 metadata tuning (BERT4Rec-only): {len(args.variants)} variants x {len(args.seeds)} seeds = {total} runs")
     print(f"Variants: {args.variants}")
     print(f"Seeds:    {args.seeds}")
     for i, variant in enumerate(args.variants):
         for j, seed in enumerate(args.seeds):
             run_num = i * len(args.seeds) + j + 1
             print(f"\n[{run_num}/{total}] backbone={backbone}, variant={variant}, seed={seed}")
-            _run_single(args, variant, seed)
+            _run_single(args, variant, seed, rq2_winner)
     print(f"\nDone. Results logged to MLflow experiment '{EXPERIMENT_NAME}'.")
     print(f"Run: make rq3-report RQ3_BENCHMARK_ID={args.benchmark_id}")
 

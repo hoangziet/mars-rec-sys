@@ -8,7 +8,7 @@ STATS_OUTPUT_DIR ?= experiments/benchmark/$(BENCHMARK_ID)/stats
 PREPROCESSING_VERSION ?= mars-preprocess-v1
 RQ4_BASELINE_VARIANT ?= V0
 
-.PHONY: preprocess rq1-smoke rq1-full rq1-report rq1-compare test rq2-alpha rq2-alpha-report rq2-variants rq2-report rq2-compare rq2-all rq3-precompute rq3-tune rq3-report rq3-all rq4-init rq4-ablation rq4-collect rq4-compare rq4-subgroup rq4-report rq4-all
+.PHONY: preprocess rq1-smoke rq1-full rq1-report rq1-compare test rq2-alpha rq2-alpha-report rq2-variants rq2-report rq2-compare rq2-all rq3-precompute rq3-tune rq3-report rq3-compare rq3-all rq4-init rq4-ablation rq4-collect rq4-compare rq4-subgroup rq4-report rq4-all
 
 preprocess:
 	uv run python data/preprocess.py
@@ -69,12 +69,15 @@ rq3-precompute:
 	uv run python scripts/rq3_precompute_embeddings.py --data-dir $(DATA_DIR)
 
 rq3-tune: rq3-precompute
-	uv run python scripts/rq3_tune_metadata.py --variants $(RQ3_VARIANTS) --seeds $(RQ3_SEEDS) --benchmark-id $(RQ3_BENCHMARK_ID) --data-dir $(DATA_DIR)
+	uv run python scripts/rq3_tune_metadata.py --rq2-winner $(RQ2_OUTPUT_DIR)/rq2_best_watch.json --variants $(RQ3_VARIANTS) --seeds $(RQ3_SEEDS) --benchmark-id $(RQ3_BENCHMARK_ID) --data-dir $(DATA_DIR)
 
 rq3-report:
-	uv run python scripts/rq3_report.py --benchmark-id $(RQ3_BENCHMARK_ID) --output-dir $(RQ3_OUTPUT_DIR)
+	uv run python scripts/rq3_report.py --benchmark-id $(RQ3_BENCHMARK_ID) --rq2-winner $(RQ2_OUTPUT_DIR)/rq2_best_watch.json --output-dir $(RQ3_OUTPUT_DIR)
 
-rq3-all: rq3-tune rq3-report
+rq3-compare:
+	uv run python scripts/rq3_compare.py --runs-file $(RQ3_OUTPUT_DIR)/rq3_runs.csv --summary-file $(RQ3_OUTPUT_DIR)/rq3_summary.json --output-dir $(RQ3_OUTPUT_DIR)
+
+rq3-all: rq3-tune rq3-report rq3-compare
 
 # --- RQ4: Final Ablation ---
 RQ4_SEEDS ?= 42 123 2024 3407 9999 7 21 77 314 1337

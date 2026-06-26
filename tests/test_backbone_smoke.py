@@ -19,11 +19,11 @@ def test_rq2_tune_help_has_no_winner_artifact_flag():
 
 
 def test_rq3_tune_help_has_no_winner_artifact_flag():
-    """RQ3 is gSASRec-only: no --winner-artifact flag should be exposed."""
+    """RQ3 is BERT4Rec-only: accepts --rq2-winner, no --winner-artifact flag."""
     from scripts.rq3_tune_metadata import build_parser
 
     parser = build_parser()
-    args = parser.parse_args(["--benchmark-id", "rq3-x"])
+    args = parser.parse_args(["--rq2-winner", "/tmp/rq2_best_watch.json", "--benchmark-id", "rq3-x"])
     assert not hasattr(args, "winner_artifact")
 
 
