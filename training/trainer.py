@@ -321,6 +321,14 @@ class Trainer:
         patience_counter = 0
 
         for epoch in range(1, epochs + 1):
+            # Ensure sequential datasets rotate their negatives per epoch.
+            # The dataset must have a set_epoch(int) method.  If the
+            # loader does not carry one (e.g. a raw list), this is a no-op.
+            dataset = getattr(train_loader, "dataset", None)
+            set_epoch = getattr(dataset, "set_epoch", None)
+            if callable(set_epoch):
+                set_epoch(epoch - 1)
+
             # Train
             train_loss = self._train_one_epoch(
                 model, train_loader, optimizer, criterion_fn, gradient_clip,
