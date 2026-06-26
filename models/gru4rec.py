@@ -89,6 +89,7 @@ class GRU4Rec(nn.Module):
         nn.init.xavier_uniform_(self.gru.weight_ih_l0)
         if self.proj is not None:
             nn.init.xavier_uniform_(self.proj.weight)
+        nn.init.zeros_(self.item_bias.weight)
 
     def _encode(self, input_seq: torch.Tensor) -> torch.Tensor:
         """Run GRU over left-padded item sequence, return last-position hidden state.
@@ -170,6 +171,8 @@ class GRU4Rec(nn.Module):
         h = self._encode(input_seq)
         pos_score = (h * self.item_emb(pos_items)).sum(dim=-1, keepdim=True) + self.item_bias(pos_items).squeeze(-1).unsqueeze(-1)  # (B, 1)
         neg_score = (h.unsqueeze(1) * self.item_emb(neg_items)).sum(dim=-1) + self.item_bias(neg_items).squeeze(-1)                # (B, K)
+        pos_score = F.elu(pos_score, alpha=0.5)
+        neg_score = F.elu(neg_score, alpha=0.5)
         neg_softmax = torch.softmax(neg_score, dim=1)                          # (B, K)
         bpr_term = torch.sigmoid(pos_score - neg_score)                        # (B, K)
         loss_bpr = -torch.log((neg_softmax * bpr_term).sum(dim=1) + 1e-24).mean()
