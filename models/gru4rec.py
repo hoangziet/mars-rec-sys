@@ -77,6 +77,8 @@ class GRU4Rec(nn.Module):
         if hidden_dim != emb_dim:
             self.proj = nn.Linear(hidden_dim, emb_dim, bias=False)
 
+        self.item_bias = nn.Embedding(n_items + 1, 1, padding_idx=0)
+
         self._init_weights()
 
     def _init_weights(self) -> None:
@@ -134,7 +136,7 @@ class GRU4Rec(nn.Module):
         Pairwise benchmark paths call ``top1_loss`` or ``bpr_max_loss`` directly.
         """
         h = self._encode(input_seq)
-        logits = h @ self.item_emb.weight.T
+        logits = h @ self.item_emb.weight.T + self.item_bias.weight.T
         return F.cross_entropy(logits, pos_items)
 
     def top1_loss(
@@ -149,8 +151,8 @@ class GRU4Rec(nn.Module):
         where i=positive, j=negatives.
         """
         h = self._encode(input_seq)
-        pos_score = (h * self.item_emb(pos_items)).sum(dim=-1, keepdim=True)  # (B, 1)
-        neg_score = (h.unsqueeze(1) * self.item_emb(neg_items)).sum(dim=-1)   # (B, K)
+        pos_score = (h * self.item_emb(pos_items)).sum(dim=-1, keepdim=True) + self.item_bias(pos_items).squeeze(-1).unsqueeze(-1)  # (B, 1)
+        neg_score = (h.unsqueeze(1) * self.item_emb(neg_items)).sum(dim=-1) + self.item_bias(neg_items).squeeze(-1)                # (B, K)
         diff = neg_score - pos_score                                           # (B, K)
         loss = torch.sigmoid(diff).mean() + torch.sigmoid(neg_score.pow(2)).mean()
         return loss
@@ -166,8 +168,8 @@ class GRU4Rec(nn.Module):
         L = -log( Σ softmax_neg(s_j) * σ(s_i - s_j) ) + λ * Σ softmax_neg(s_j) * s_j²
         """
         h = self._encode(input_seq)
-        pos_score = (h * self.item_emb(pos_items)).sum(dim=-1, keepdim=True)  # (B, 1)
-        neg_score = (h.unsqueeze(1) * self.item_emb(neg_items)).sum(dim=-1)   # (B, K)
+        pos_score = (h * self.item_emb(pos_items)).sum(dim=-1, keepdim=True) + self.item_bias(pos_items).squeeze(-1).unsqueeze(-1)  # (B, 1)
+        neg_score = (h.unsqueeze(1) * self.item_emb(neg_items)).sum(dim=-1) + self.item_bias(neg_items).squeeze(-1)                # (B, K)
         neg_softmax = torch.softmax(neg_score, dim=1)                          # (B, K)
         bpr_term = torch.sigmoid(pos_score - neg_score)                        # (B, K)
         loss_bpr = -torch.log((neg_softmax * bpr_term).sum(dim=1) + 1e-24).mean()
@@ -189,8 +191,8 @@ class GRU4Rec(nn.Module):
 
         hidden = self._encode_sequence(input_seq)
 
-        pos_score = (hidden * self.item_emb(pos_items)).sum(dim=-1)
-        neg_score = torch.einsum("bld,blkd->blk", hidden, self.item_emb(neg_items))
+        pos_score = (hidden * self.item_emb(pos_items)).sum(dim=-1) + self.item_bias(pos_items).squeeze(-1)
+        neg_score = torch.einsum("bld,blkd->blk", hidden, self.item_emb(neg_items)) + self.item_bias(neg_items).squeeze(-1)
 
         pos_score = F.elu(pos_score, alpha=elu_param)
         neg_score = F.elu(neg_score, alpha=elu_param)
@@ -204,8 +206,8 @@ class GRU4Rec(nn.Module):
         return per_position.sum() / loss_mask.sum().clamp_min(1)
 
     def predict(self, input_seq: torch.Tensor) -> torch.Tensor:
-        """Return scores (B, n_items+1) via dot-product with item_emb."""
-        return self._encode(input_seq) @ self.item_emb.weight.T
+        """Return scores (B, n_items+1) via dot-product with item_emb + bias."""
+        return self._encode(input_seq) @ self.item_emb.weight.T + self.item_bias.weight.T
 
     def forward(self, input_seq: torch.Tensor) -> torch.Tensor:
         """Alias for predict — returns scores over full item vocab."""
