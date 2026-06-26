@@ -260,3 +260,35 @@ def test_gru_legacy_bpr_max_still_works():
     with torch.no_grad():
         loss = model.bpr_max_loss(seq, pos, neg)
     assert torch.isfinite(loss).item()
+
+
+# ---------------------------------------------------------------------------
+# Additive mask padding invariance tests
+# ---------------------------------------------------------------------------
+
+
+def test_attention_output_is_finite_with_heavy_padding():
+    """No NaN/Inf even with sequences that are mostly padding."""
+    for factory in [_make_sasrec, _make_gsasrec]:
+        torch.manual_seed(0)
+        model = factory(num_layers=2).eval()
+        # 3 of 5 positions are padding
+        seq = torch.tensor([[0, 0, 0, 1, 2]])
+        with torch.no_grad():
+            enc = model._encode(seq)
+            h = model._last_hidden(seq)
+            out = model.predict(seq)
+        assert torch.isfinite(enc).all().item(), f"{factory.__name__}: encode NaN/Inf"
+        assert torch.isfinite(h).all().item(), f"{factory.__name__}: last_hidden NaN/Inf"
+        assert torch.isfinite(out).all().item(), f"{factory.__name__}: predict NaN/Inf"
+
+
+def test_padding_hidden_is_zero_after_every_block():
+    """Padding positions must be exactly zero after each block and after final ln."""
+    for factory in [_make_sasrec, _make_gsasrec]:
+        torch.manual_seed(0)
+        model = factory(num_layers=2).eval()
+        seq = torch.tensor([[0, 0, 1, 2, 3]])
+        with torch.no_grad():
+            enc = model._encode(seq)
+        assert torch.all(enc[:, :2] == 0), f"{factory.__name__}: padding not zero"
