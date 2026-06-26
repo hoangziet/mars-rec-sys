@@ -81,17 +81,13 @@ class SASRecBlock(nn.Module):
             # Pre-LN
             residual = x
             z = self.ln1(x)
-            attn_out, _ = self.attn(z, z, z, attn_mask=attn_mask,
-                                     key_padding_mask=padding_mask)
-            attn_out = torch.nan_to_num(attn_out, nan=0.0)
+            attn_out, _ = self.attn(z, z, z, attn_mask=attn_mask)
             x = residual + self.dropout1(attn_out)
             residual = x
             x = residual + self.dropout2(self.ffn(self.ln2(x)))
         else:
             # Post-LN
-            attn_out, _ = self.attn(x, x, x, attn_mask=attn_mask,
-                                     key_padding_mask=padding_mask)
-            attn_out = torch.nan_to_num(attn_out, nan=0.0)
+            attn_out, _ = self.attn(x, x, x, attn_mask=attn_mask)
             x = self.ln1(x + self.dropout1(attn_out))
             x = self.ln2(x + self.dropout2(self.ffn(x)))
         return x
@@ -138,6 +134,7 @@ class SASRec(nn.Module):
         self.n_items = n_items
         self.max_len = max_len
         self.hidden_dim = hidden_dim
+        self.num_heads = num_heads
         self.pad_token = 0
 
         self.item_emb = nn.Embedding(n_items + 1, hidden_dim, padding_idx=0)
@@ -177,13 +174,21 @@ class SASRec(nn.Module):
 
         x = self.emb_dropout(x)
 
-        causal_mask = torch.triu(
-            torch.ones(L, L, device=input_seq.device, dtype=torch.bool), diagonal=1
-        )
+        # RecBole-style additive attention mask: causal + padding-key exclusion.
+        # Padding queries are allowed to attend their own position (self-diagonal)
+        # so softmax never sees an entirely masked row (which would produce NaN).
+        causal = torch.tril(torch.ones(L, L, dtype=torch.bool, device=input_seq.device)).unsqueeze(0)   # [1, L, L]
+        valid_keys = input_seq.ne(self.pad_token).unsqueeze(1)                                           # [B, 1, L]
+        allowed = causal & valid_keys                                                                    # [B, L, L]
+        pad_queries = input_seq.eq(self.pad_token).unsqueeze(-1)                                         # [B, L, 1]
+        diag = torch.eye(L, dtype=torch.bool, device=input_seq.device).unsqueeze(0)                      # [1, L, L]
+        allowed = allowed | (pad_queries & diag)                                                         # [B, L, L]
+        add_mask = torch.zeros(allowed.shape, dtype=x.dtype, device=input_seq.device)
+        add_mask = add_mask.masked_fill(~allowed, -10000.0)
+        add_mask = add_mask.repeat_interleave(self.num_heads, dim=0)                                     # [B*H, L, L]
 
-        attn_padding_mask = input_seq.eq(self.pad_token)
         for block in self.blocks:
-            x = block(x, attn_mask=causal_mask, padding_mask=attn_padding_mask)
+            x = block(x, attn_mask=add_mask)
             x = x.masked_fill(pad_hidden_mask, 0.0)
 
         x = self.final_ln(x)
