@@ -141,19 +141,12 @@ def test_shifted_dataset_left_pads_short_sequence(tmp_path: Path):
     assert torch.all(sample["neg_items"][:3] == 0)
 
 
-def test_dataset_epoch_changes_negatives_reproducibly(tmp_path: Path):
+def test_dataset_negatives_change_between_consecutive_calls(tmp_path: Path):
+    """Verify negatives are resampled on every __getitem__ call (fresh per call)."""
     csv_path = tmp_path / "train.csv"
     _write_train_csv(csv_path)
 
-    first = ShiftedSequenceDataset(
-        str(csv_path),
-        n_items=30,
-        max_len=4,
-        num_negatives=16,
-        negative_sampling="catalog_except_positive",
-        seed=42,
-    )
-    second = ShiftedSequenceDataset(
+    dataset = ShiftedSequenceDataset(
         str(csv_path),
         n_items=30,
         max_len=4,
@@ -162,19 +155,32 @@ def test_dataset_epoch_changes_negatives_reproducibly(tmp_path: Path):
         seed=42,
     )
 
-    first.set_epoch(0)
-    second.set_epoch(0)
-    epoch_zero_a = first[0]["neg_items"]
-    epoch_zero_b = second[0]["neg_items"]
+    first_call = dataset[0]["neg_items"]
+    second_call = dataset[0]["neg_items"]
 
-    first.set_epoch(1)
-    second.set_epoch(1)
-    epoch_one_a = first[0]["neg_items"]
-    epoch_one_b = second[0]["neg_items"]
+    assert not torch.equal(first_call, second_call), \
+        "Negatives must change between consecutive __getitem__ calls"
 
-    assert torch.equal(epoch_zero_a, epoch_zero_b)
-    assert torch.equal(epoch_one_a, epoch_one_b)
-    assert not torch.equal(epoch_zero_a, epoch_one_a)
+
+def test_dataset_set_epoch_is_noop_does_not_crash(tmp_path: Path):
+    """set_epoch is kept for API compatibility but no longer changes behavior."""
+    csv_path = tmp_path / "train.csv"
+    _write_train_csv(csv_path)
+
+    dataset = ShiftedSequenceDataset(
+        str(csv_path),
+        n_items=10,
+        max_len=4,
+        num_negatives=4,
+        negative_sampling="catalog_except_positive",
+        seed=42,
+    )
+
+    # Must not crash
+    dataset.set_epoch(0)
+    _ = dataset[0]
+    dataset.set_epoch(5)
+    _ = dataset[0]
 
 
 def test_rq1_train_loader_emits_shifted_batch(tmp_path: Path):
