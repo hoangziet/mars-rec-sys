@@ -546,7 +546,10 @@ class FullSortEvalDataset(Dataset):
         n_items: int,
         max_len: int = 50,
         pad_token: int = 0,
+        watch_num_bins: int = 5,
     ) -> None:
+        from pipeline.watch_features import WATCH_MASK_ID, WATCH_PAD_ID, engagement_to_watch_bin
+
         df = pd.read_csv(csv_path)
         self.max_len = max_len
         self.pad_token = pad_token
@@ -560,6 +563,9 @@ class FullSortEvalDataset(Dataset):
         self.seqs = [parse_seq(s) for s in df[seq_col]]
         self.targets = df[tgt_col].tolist()
 
+        has_engagement = "engagement_sequence" in df.columns
+        engagement_seqs = [parse_float_seq(s) for s in df["engagement_sequence"]] if has_engagement else [[0.0] * len(s) for s in self.seqs]
+
         for i, (seq, target) in enumerate(zip(self.seqs, self.targets, strict=False)):
             if int(target) in set(seq):
                 raise RuntimeError(
@@ -569,6 +575,16 @@ class FullSortEvalDataset(Dataset):
         self._padded_seqs = [
             pad_sequence(seq, max_len, pad_token) for seq in self.seqs
         ]
+
+        # Pre-build watch_input_ids for eval.
+        # Historical positions use engagement bins; the prediction (last) position
+        # will receive WATCH_MASK_ID via evaluate_bert4rec's shift logic.
+        self._watch_input_ids = []
+        for seq, eng in zip(self.seqs, engagement_seqs):
+            watch_ids = [engagement_to_watch_bin(v, watch_num_bins) for v in eng[-max_len:]]
+            padded = [WATCH_PAD_ID] * (max_len - len(watch_ids)) + watch_ids
+            self._watch_input_ids.append(torch.tensor(padded, dtype=torch.long))
+        self._watch_mask_id = torch.tensor(WATCH_MASK_ID, dtype=torch.long)
 
         # Pre-build history masks: (n_users, n_items+1) bool tensor.
         # True = masked (seen or padding), False = rankable.
@@ -592,6 +608,7 @@ class FullSortEvalDataset(Dataset):
             "mask": torch.tensor(mask, dtype=torch.bool),
             "target": torch.tensor(self.targets[idx], dtype=torch.long),
             "history_mask": self._history_masks[idx],  # (n_items+1,)
+            "watch_input_ids": self._watch_input_ids[idx],
         }
 
 
@@ -799,6 +816,7 @@ def get_eval_loader(
     batch_size: int = 64,
     max_len: int = 50,
     num_workers: int = 0,
+    watch_num_bins: int = 5,
 ) -> DataLoader:
     """Build full-sort evaluation DataLoader.
 
@@ -810,6 +828,7 @@ def get_eval_loader(
         n_items=stats["n_items"],
         max_len=max_len,
         pad_token=0,
+        watch_num_bins=watch_num_bins,
     )
     return DataLoader(
         dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers

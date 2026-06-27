@@ -213,7 +213,7 @@ def main() -> None:
     with open(output_dir / "rq4_subgroup_analysis.md", "w") as f:
         f.write("# RQ4 Subgroup Analysis\n\n")
 
-    for group_col in ["engagement", "history", "popularity", "meta"]:
+        for group_col in ["engagement", "history", "popularity", "meta"]:
             f.write(f"## {group_col}\n\n")
             group_metrics = [r for r in all_metrics if r["group"] == group_col]
             group_imps = [r for r in improvements if r["group"] == group_col]
