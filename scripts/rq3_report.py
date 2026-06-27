@@ -48,6 +48,31 @@ REQUIRED_PROVENANCE_FIELDS = (
 )
 
 
+def write_final_report(
+    output_dir: Path,
+    *,
+    benchmark_id: str,
+    best_variant: str,
+    base_watch_variant: str,
+    base_watch_alpha: float | None,
+    summary_rows: list[dict],
+) -> None:
+    with open(output_dir / "rq3_final_report.md", "w") as f:
+        f.write("# RQ3 Final Report\n\n")
+        f.write(f"Benchmark: {benchmark_id}\n\n")
+        f.write(f"Best metadata variant: **{best_variant}**\n\n")
+        f.write(f"Base watch variant from RQ2: **{base_watch_variant}**\n\n")
+        f.write(f"Base watch alpha from RQ2: **{base_watch_alpha}**\n\n")
+        f.write("Variants ranked by mean validation NDCG@10.\n\n")
+        f.write("| Rank | Variant | Seeds | Val NDCG@10 |\n")
+        f.write("| ---: | --- | ---: | ---: |\n")
+        for row in summary_rows:
+            f.write(
+                f"| {row['rank']} | {row['variant']} | {row['n_seeds']} | "
+                f"{row['val_ndcg_at_10_mean']:.4f} ± {row['val_ndcg_at_10_std']:.4f} |\n"
+            )
+
+
 def _validate_variant_names(selected: list[dict]) -> None:
     allowed = set(VARIANT_ORDER)
     invalid = sorted({str(r["variant"]) for r in selected if str(r["variant"]) not in allowed})
@@ -239,6 +264,15 @@ def main() -> None:
         f.write("| ---: | --- | ---: | ---: |\n")
         for row in summary_rows:
             f.write(f"| {row['rank']} | {row['variant']} | {row['n_seeds']} | {row['val_ndcg_at_10_mean']:.4f} ± {row['val_ndcg_at_10_std']:.4f} |\n")
+
+    write_final_report(
+        output_dir,
+        benchmark_id=args.benchmark_id,
+        best_variant=best_variant,
+        base_watch_variant=rq2_winner["best_variant"],
+        base_watch_alpha=rq2_winner.get("best_alpha"),
+        summary_rows=summary_rows,
+    )
 
     observed_variants = sorted({str(r["variant"]) for r in selected})
     observed_seeds = sorted({int(r["seed"]) for r in selected})

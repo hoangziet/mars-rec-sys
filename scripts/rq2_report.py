@@ -31,6 +31,29 @@ PRIMARY_METRIC = "best_val_ndcg_at_10"
 VARIANT_ORDER = {"baseline": 0, "wl": 1, "we": 2, "wlwe": 3}
 
 
+def write_final_report(
+    output_dir: Path,
+    *,
+    benchmark_id: str,
+    best_variant: str,
+    best_alpha: float | None,
+    summary_rows: list[dict],
+) -> None:
+    with open(output_dir / "rq2_final_report.md", "w") as f:
+        f.write("# RQ2 Final Report\n\n")
+        f.write(f"Benchmark: {benchmark_id}\n\n")
+        f.write(f"Best variant: **{best_variant}**\n\n")
+        f.write(f"Best alpha: **{best_alpha}**\n\n")
+        f.write("Variants ranked by mean validation NDCG@10.\n\n")
+        f.write("| Rank | Variant | Seeds | Val NDCG@10 |\n")
+        f.write("| ---: | --- | ---: | ---: |\n")
+        for row in summary_rows:
+            f.write(
+                f"| {row['rank']} | {row['variant']} | {row['n_seeds']} | "
+                f"{row['val_ndcg_at_10_mean']:.4f} ± {row['val_ndcg_at_10_std']:.4f} |\n"
+            )
+
+
 def write_outputs(selected_runs: list[dict], alpha_artifact: dict, output_dir: Path, benchmark_id: str) -> str:
     """Write summary CSV, JSON, runs CSV, markdown, and best-watch JSON artifact.
 
@@ -96,6 +119,14 @@ def write_outputs(selected_runs: list[dict], alpha_artifact: dict, output_dir: P
         f.write("| ---: | --- | ---: | ---: |\n")
         for row in summary_rows:
             f.write(f"| {row['rank']} | {row['variant']} | {row['n_seeds']} | {row['val_ndcg_at_10_mean']:.4f} ± {row['val_ndcg_at_10_std']:.4f} |\n")
+
+    write_final_report(
+        output_dir,
+        benchmark_id=benchmark_id,
+        best_variant=best_variant,
+        best_alpha=alpha_artifact.get("best_alpha"),
+        summary_rows=summary_rows,
+    )
 
     # Write winner artifact
     observed_variants = sorted({r["variant"] for r in selected_runs})

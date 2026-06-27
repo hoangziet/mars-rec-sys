@@ -31,6 +31,9 @@ def test_rq2_report_writes_best_variant_artifact():
         winner = json.loads((out / "rq2_best_watch.json").read_text())
         assert winner["best_variant"] == "wlwe"
         assert winner["best_alpha"] == 1.0
+        final_report = (out / "rq2_final_report.md").read_text()
+        assert "RQ2 Final Report" in final_report
+        assert "Best variant: **wlwe**" in final_report
 
 
 def test_rq2_report_tie_breaks_by_variant_order():
@@ -63,6 +66,25 @@ def test_rq2_report_writes_summary_csv_and_runs():
         with open(out / "rq2_runs.csv") as f:
             runs = list(csv.DictReader(f))
             assert len(runs) == 2
+
+
+def test_rq3_report_writes_final_markdown(tmp_path):
+    summary_rows = [
+        {"rank": 1, "variant": "M3", "n_seeds": 5, "val_ndcg_at_10_mean": 0.3200, "val_ndcg_at_10_std": 0.0020},
+        {"rank": 2, "variant": "M0", "n_seeds": 5, "val_ndcg_at_10_mean": 0.3000, "val_ndcg_at_10_std": 0.0010},
+    ]
+    rq3_report.write_final_report(
+        tmp_path,
+        benchmark_id="rq3-x",
+        best_variant="M3",
+        base_watch_variant="wlwe",
+        base_watch_alpha=2.0,
+        summary_rows=summary_rows,
+    )
+    text = (tmp_path / "rq3_final_report.md").read_text()
+    assert "RQ3 Final Report" in text
+    assert "Best metadata variant: **M3**" in text
+    assert "Base watch variant from RQ2: **wlwe**" in text
 
 
 # ---------- rq3_report: same contract ----------
