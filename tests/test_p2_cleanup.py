@@ -130,10 +130,10 @@ def test_item_encoder_buffers_not_persistent():
     assert not bad, f"Persistent buffers leaked into state_dict: {bad}"
 
 
-def test_enforce_final_grid_forces_batch_size_128():
+def test_enforce_final_grid_preserves_batch_size():
     train_kwargs = {"batch_size": 256, "epochs": 30, "lr": 1e-3}
     out = enforce_final_grid(train_kwargs)
-    assert out["batch_size"] == 128
+    assert out["batch_size"] == 256
     assert out["epochs"] == 30
     assert out["lr"] == 1e-3
     assert train_kwargs["batch_size"] == 256

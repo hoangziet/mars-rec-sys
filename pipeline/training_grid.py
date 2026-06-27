@@ -5,17 +5,16 @@ Grid-construction helpers shared by RQ2/RQ3/RQ4.
 
 Routines
 --------
-- enforce_final_grid()  — force batch_size=128 and other grid constraints
-                            shared by all final-stage runs.
+- enforce_final_grid()  — preserve the configured training grid while
+                            copying train_kwargs for final-stage runs.
 """
 
 
 def enforce_final_grid(train_kwargs: dict) -> dict:
-    """Force grid-constraint values into a copy of train_kwargs.
+    """Return a copy of train_kwargs for final-stage runs.
 
-    RQ2/RQ3/RQ4 must all use the same batch_size=128 (matching the
-    final ablation grid) regardless of any other value in train_kwargs.
+    The final studies must follow the explicit model config. In particular,
+    ``batch_size`` must come from the config file rather than a hidden runtime
+    override, so this helper intentionally preserves all values verbatim.
     """
-    out = dict(train_kwargs)
-    out["batch_size"] = 128
-    return out
+    return dict(train_kwargs)
