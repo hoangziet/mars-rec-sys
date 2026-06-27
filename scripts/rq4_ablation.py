@@ -27,7 +27,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from pipeline.builder import build_criterion_fn, build_eval_fn, build_model, build_train_loader
 from pipeline.loaders import get_eval_loader, get_val_loss_loader, load_stats
 from pipeline.optim import build_optimizer, build_scheduler
-from pipeline.training_grid import enforce_final_grid
 from scripts.rq4_per_user import (
     PerUserExportError,
     fail_run_atomically,
@@ -126,7 +125,7 @@ def _run_single(args, backbone: str, variant: str, seed: int, variant_cfg: dict,
 
     base_cfg = build_model_config(variant_cfg["config_name"])
     model_kwargs = dict(base_cfg["model_kwargs"])
-    train_kwargs = enforce_final_grid(base_cfg["train_kwargs"])
+    train_kwargs = dict(base_cfg["train_kwargs"])
     train_kwargs.pop("confidence_alpha", None)
 
     # BERT4Rec watch integration

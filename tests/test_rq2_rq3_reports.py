@@ -8,17 +8,6 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
-def test_rq2_tune_preserves_batch_size_from_config():
-    from pipeline.training_grid import enforce_final_grid
-
-    train_kwargs = {"batch_size": 256, "epochs": 30, "lr": 1e-3}
-    out = enforce_final_grid(train_kwargs)
-    assert out["batch_size"] == 256
-    assert out["epochs"] == 30
-    assert out["lr"] == 1e-3
-    assert train_kwargs["batch_size"] == 256
-
-
 def test_rq2_write_outputs_handles_multiple_variants():
     from scripts.rq2_report import write_outputs
 

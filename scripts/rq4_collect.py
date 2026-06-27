@@ -40,6 +40,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="RQ4: collect ablation results from MLflow.")
     parser.add_argument("--benchmark-id", required=True)
     parser.add_argument("--protocol", default=None, help="Protocol manifest (validates exact runs, created before training)")
+    parser.add_argument("--per-user-dir", default=None, help="Directory containing per-user CSVs written by rq4_ablation")
     parser.add_argument("--data-dir", default="data/processed", help="Processed data directory (must match training data dir)")
     parser.add_argument("--output-dir", default=None)
     return parser
@@ -315,7 +316,7 @@ def main() -> None:
             errors.append(f"{r['variant']} seed={r['seed']}: missing metrics {missing_metrics}")
 
     output_dir = Path(args.output_dir) if args.output_dir else Path("experiments") / "rq4" / args.benchmark_id
-    per_user_dir = output_dir / "per_user"
+    per_user_dir = Path(args.per_user_dir) if args.per_user_dir else output_dir / "per_user"
     errors.extend(_validate_per_user_on_disk(selected, per_user_dir))
 
     if errors:
@@ -327,7 +328,7 @@ def main() -> None:
     # Always validate the per-user CSV on disk, regardless of whether
     # --protocol was given. The collector cannot trust the MLflow tag
     # alone — the file on disk must also be valid.
-    per_user_dir = output_dir / "per_user"
+    per_user_dir = Path(args.per_user_dir) if args.per_user_dir else output_dir / "per_user"
     per_user_errors = _validate_per_user_on_disk(selected, per_user_dir)
     if per_user_errors:
         raise RuntimeError(

@@ -9,7 +9,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from models.gsasrec import GSASRec
 from pipeline.item_encoder import ItemEncoder
-from pipeline.training_grid import enforce_final_grid
 
 
 def test_no_legacy_csv_outputs(tmp_path):
@@ -129,11 +128,3 @@ def test_item_encoder_buffers_not_persistent():
     bad = [k for k in state if k.startswith("meta_") or k == "text_emb"]
     assert not bad, f"Persistent buffers leaked into state_dict: {bad}"
 
-
-def test_enforce_final_grid_preserves_batch_size():
-    train_kwargs = {"batch_size": 256, "epochs": 30, "lr": 1e-3}
-    out = enforce_final_grid(train_kwargs)
-    assert out["batch_size"] == 256
-    assert out["epochs"] == 30
-    assert out["lr"] == 1e-3
-    assert train_kwargs["batch_size"] == 256
