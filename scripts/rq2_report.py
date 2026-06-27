@@ -167,6 +167,27 @@ def main() -> None:
     if not selected:
         raise RuntimeError(f"No reportable runs found for benchmark {args.benchmark_id}")
 
+    # Validate grid: no duplicate (variant, seed) pairs, consistent seed sets
+    pair_counts: dict[tuple[str, int], int] = {}
+    for row in selected:
+        key = (row["variant"], row["seed"])
+        pair_counts[key] = pair_counts.get(key, 0) + 1
+    dupes = {k: v for k, v in pair_counts.items() if v > 1}
+    if dupes:
+        raise RuntimeError(
+            f"Duplicate (variant, seed) runs found: {dupes}. "
+            "Delete stale runs from MLflow before re-running the report."
+        )
+    by_variant_seeds: dict[str, set[int]] = {}
+    for row in selected:
+        by_variant_seeds.setdefault(row["variant"], set()).add(row["seed"])
+    seed_sets = list(by_variant_seeds.values())
+    if len(set(frozenset(s) for s in seed_sets)) > 1:
+        raise RuntimeError(
+            f"All variants must share the same seed set. Got: "
+            f"{ {v: sorted(s) for v, s in by_variant_seeds.items()} }"
+        )
+
     output_dir = Path(args.output_dir) if args.output_dir else Path("experiments") / "rq2" / args.benchmark_id
     best_variant = write_outputs(selected, alpha_artifact, output_dir, args.benchmark_id)
     print(f"Best variant: {best_variant}")

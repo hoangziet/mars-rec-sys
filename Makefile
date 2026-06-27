@@ -34,7 +34,7 @@ test:
 
 # --- RQ2: Watch Integration ---
 RQ2_ALPHAS ?= 0.25 0.5 1.0 2.0
-RQ2_SEEDS ?= 42
+RQ2_SEEDS ?= 42 123 2024
 RQ2_VARIANT_SEEDS ?= 42 123 2024 3407 9999
 RQ2_ALPHA_BENCHMARK_ID ?= rq2-watch-alpha
 RQ2_VARIANT_BENCHMARK_ID ?= rq2-watch-variants

@@ -76,6 +76,27 @@ def main() -> None:
     if not selected:
         raise RuntimeError(f"No reportable alpha runs found for benchmark {args.benchmark_id}")
 
+    # Validate grid: no duplicate (alpha, seed) pairs, consistent seed sets
+    pairs: dict[tuple[float, int], int] = {}
+    for row in selected:
+        key = (float(row["alpha"]), int(row["seed"]))
+        pairs[key] = pairs.get(key, 0) + 1
+    dupes = {k: v for k, v in pairs.items() if v > 1}
+    if dupes:
+        raise RuntimeError(
+            f"Duplicate (alpha, seed) runs found: {dupes}. "
+            "Delete stale runs from MLflow before re-running the report."
+        )
+    by_alpha_seeds: dict[float, set[int]] = {}
+    for row in selected:
+        by_alpha_seeds.setdefault(float(row["alpha"]), set()).add(int(row["seed"]))
+    seed_sets = list(by_alpha_seeds.values())
+    if len(set(frozenset(s) for s in seed_sets)) > 1:
+        raise RuntimeError(
+            f"All alphas must share the same seed set. Got: "
+            f"{ {a: sorted(s) for a, s in by_alpha_seeds.items()} }"
+        )
+
     by_alpha: dict[float, list[float]] = {}
     for row in selected:
         by_alpha.setdefault(row["alpha"], []).append(row["val_ndcg_at_10"])
