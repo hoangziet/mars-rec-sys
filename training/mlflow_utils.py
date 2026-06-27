@@ -72,19 +72,28 @@ def assert_tracking_server_reachable(settings: MlflowSettings, *, client: Mlflow
 def ensure_experiment_active(*, mlflow_module: types.ModuleType, experiment_name: str):
     """Restore a soft-deleted experiment before calling ``set_experiment``.
 
-    MLflow leaves deleted experiments in a soft-deleted state. Reusing the same
-    name later raises unless the experiment is restored first.
+    MLflow leaves deleted experiments in a soft-deleted state and
+    ``get_experiment_by_name`` still returns them.  Reusing the same name
+    later raises unless the experiment is restored first.
     """
     exp = mlflow_module.get_experiment_by_name(experiment_name)
-    if exp is not None:
+    if exp is not None and getattr(exp, "lifecycle_stage", "active") != "deleted":
         return exp
 
     tracking = getattr(mlflow_module, "tracking", None)
-    entities = getattr(mlflow_module, "entities", None)
     if tracking is None or not hasattr(tracking, "MlflowClient"):
         return None
 
     client = tracking.MlflowClient()
+
+    if exp is not None:
+        # Already resolved by name but soft-deleted — just restore it.
+        client.restore_experiment(exp.experiment_id)
+        return client.get_experiment(exp.experiment_id)
+
+    # Not found by name at all; search across all view types in case a
+    # stale instance exists only in the backend.
+    entities = getattr(mlflow_module, "entities", None)
     view_type = getattr(getattr(entities, "ViewType", None), "ALL", None)
     search_kwargs = {"view_type": view_type} if view_type is not None else {}
     for candidate in client.search_experiments(**search_kwargs):
