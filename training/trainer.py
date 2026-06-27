@@ -22,7 +22,11 @@ import torch
 from tqdm import tqdm
 
 from training.mlflow_contract import ARTIFACT_PATHS
-from training.mlflow_utils import configure_mlflow, sanitize_metric_name
+from training.mlflow_utils import (
+    configure_mlflow,
+    ensure_experiment_active,
+    sanitize_metric_name,
+)
 
 
 def _should_use_tqdm() -> bool:
@@ -204,6 +208,10 @@ class Trainer:
             return
         experiment_name = self._mlflow_config.get("experiment_name", "mars_rec_sys")
         run_name = self._mlflow_config.get("run_name", self.model_name)
+        ensure_experiment_active(
+            mlflow_module=self._mlflow,
+            experiment_name=experiment_name,
+        )
         self._mlflow.set_experiment(experiment_name)
         self._mlflow_run = self._mlflow.start_run(run_name=run_name)
         self.last_run_id = self._mlflow_run.info.run_id
