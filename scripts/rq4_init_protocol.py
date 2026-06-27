@@ -13,7 +13,7 @@ no longer part of the RQ4 protocol.
 Usage:
     uv run python scripts/rq4_init_protocol.py \\
         --benchmark-id rq4-ablation-v1 \\
-        --rq2-winners experiments/rq2/.../rq2_best_alpha.json \\
+        --rq2-winners experiments/rq2/.../rq2_best_watch.json \\
         --rq3-winners experiments/rq3/.../rq3_best_variant.json
 """
 
@@ -33,7 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Create RQ4 frozen protocol manifest for BERT4Rec ablation.")
     parser.add_argument("--benchmark-id", required=True)
     parser.add_argument("--rq2-winners", required=True,
-        help="Path to rq2_best_alpha.json")
+        help="Path to rq2_best_watch.json")
     parser.add_argument("--rq3-winners", required=True,
         help="Path to rq3_best_variant.json")
     parser.add_argument("--variants", nargs="+", default=["V0", "V1", "V2", "V3"])

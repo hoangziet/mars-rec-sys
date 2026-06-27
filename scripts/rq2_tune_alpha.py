@@ -28,7 +28,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from pipeline.builder import build_criterion_fn, build_eval_fn, build_model, build_train_loader
 from pipeline.loaders import get_eval_loader, get_val_loss_loader, load_stats
 from pipeline.optim import build_optimizer, build_scheduler
-from pipeline.training_grid import enforce_final_grid
 from training.configs import build_model_config
 from training.mlflow_contract import RQ2_ALPHA_EXPERIMENT_NAME, build_run_name, build_training_tags
 from training.mlflow_utils import collect_common_run_metadata, configure_mlflow
@@ -66,7 +65,7 @@ def _run_single(args, alpha: float, seed: int) -> dict:
 
     base_cfg = build_model_config(backbone)
     model_kwargs = dict(base_cfg["model_kwargs"])
-    train_kwargs = enforce_final_grid(base_cfg["train_kwargs"])
+    train_kwargs = dict(base_cfg["train_kwargs"])
     train_kwargs.pop("confidence_alpha", None)
 
     model_kwargs["watch_mode"] = "loss"
