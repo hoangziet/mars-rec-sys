@@ -60,7 +60,7 @@ rq2-all: rq2-alpha rq2-alpha-report rq2-variants rq2-report rq2-compare
 
 # --- RQ3: Metadata Tuning ---
 RQ3_VARIANTS ?= M0 M1 M2 M3
-RQ3_SEEDS ?= 42 123 2024
+RQ3_SEEDS ?= 42 123 2024 3407 9999
 RQ3_BENCHMARK_ID ?= rq3-metadata-tune
 RQ3_OUTPUT_DIR ?= experiments/rq3/$(RQ3_BENCHMARK_ID)
 
