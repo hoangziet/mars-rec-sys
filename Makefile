@@ -82,7 +82,7 @@ rq3-compare:
 rq3-all: rq3-tune rq3-report rq3-compare
 
 # --- RQ4: Final Ablation ---
-RQ4_SEEDS ?= 42 123 2024 3407 9999 7 21 77 314 1337
+RQ4_SEEDS ?= 42 123 2024 3407 9999
 RQ4_BENCHMARK_ID ?= rq4-ablation
 RQ4_ROOT_DIR ?= experiments/rq4/$(RQ4_BENCHMARK_ID)
 RQ4_REPORT_OUTPUT_DIR ?= $(RQ4_ROOT_DIR)/reports
