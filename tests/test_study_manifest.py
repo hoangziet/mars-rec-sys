@@ -14,6 +14,7 @@ from scripts.study_manifest import (
     load_manifest,
     mark_completed,
     mark_failed,
+    manifest_path_for_output_dir,
 )
 
 M = {"variants": ["a", "b"], "seeds": [1, 2], "benchmark_id": "test", "backbone": "bert4rec"}
@@ -94,3 +95,13 @@ def test_load_manifest_accepts_completed_for_report(tmp_path):
     finalize_manifest(path)
     data = load_manifest(path, require_completed=True)
     assert data["status"] == "completed"
+
+
+def test_manifest_path_for_reports_dir_uses_parent_manifest(tmp_path):
+    reports_dir = tmp_path / "rq3-x" / "reports"
+    assert manifest_path_for_output_dir(reports_dir) == tmp_path / "rq3-x" / "benchmark_manifest.json"
+
+
+def test_manifest_path_for_root_dir_uses_local_manifest(tmp_path):
+    root_dir = tmp_path / "rq3-x"
+    assert manifest_path_for_output_dir(root_dir) == root_dir / "benchmark_manifest.json"

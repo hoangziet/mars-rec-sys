@@ -13,6 +13,13 @@ def build_run_key(variant: str, seed: int) -> str:
     return f"{variant}:{seed}"
 
 
+def manifest_path_for_output_dir(output_dir: Path) -> Path:
+    """Resolve the benchmark manifest path from a root or reports/stats dir."""
+    if output_dir.name in {"reports", "stats"}:
+        return output_dir.parent / "benchmark_manifest.json"
+    return output_dir / "benchmark_manifest.json"
+
+
 def create_manifest(
     path: Path,
     *,
