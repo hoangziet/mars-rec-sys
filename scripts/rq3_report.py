@@ -33,6 +33,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from scripts.study_manifest import load_manifest
 from training.mlflow_contract import RQ3_EXPERIMENT_NAME
 from training.mlflow_utils import configure_mlflow
 
@@ -167,6 +168,9 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    output_dir = Path(args.output_dir) if args.output_dir else Path(f"experiments/rq3/{args.benchmark_id}")
+    load_manifest(output_dir / "benchmark_manifest.json", require_completed=True)
+
     configure_mlflow(mlflow_module=mlflow)
 
     rq2_winner = json.loads(Path(args.rq2_winner).read_text())
@@ -235,7 +239,6 @@ def main() -> None:
         row["rank"] = rank
 
     best_variant = summary_rows[0]["variant"]
-    output_dir = Path(args.output_dir) if args.output_dir else Path("experiments") / "rq3" / args.benchmark_id
     output_dir.mkdir(parents=True, exist_ok=True)
 
     with open(output_dir / "rq3_variant_summary.csv", "w", newline="") as f:

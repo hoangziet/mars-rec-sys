@@ -28,6 +28,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from scripts.rq4_per_user import validate_per_user_file
+from scripts.study_manifest import load_manifest
 from training.mlflow_utils import configure_mlflow
 
 from training.mlflow_contract import RQ4_EXPERIMENT_NAME
@@ -211,6 +212,10 @@ def main() -> None:
     args = parse_args()
     if not args.protocol:
         raise RuntimeError("--protocol is required for rq4_collect")
+
+    output_dir = Path(args.output_dir) if args.output_dir else Path("experiments") / "rq4" / args.benchmark_id
+    load_manifest(output_dir / "benchmark_manifest.json", require_completed=True)
+
     configure_mlflow(mlflow_module=mlflow)
 
     client = mlflow.tracking.MlflowClient()
@@ -315,14 +320,12 @@ def main() -> None:
         if missing_metrics:
             errors.append(f"{r['variant']} seed={r['seed']}: missing metrics {missing_metrics}")
 
-    output_dir = Path(args.output_dir) if args.output_dir else Path("experiments") / "rq4" / args.benchmark_id
     per_user_dir = Path(args.per_user_dir) if args.per_user_dir else output_dir / "per_user"
     errors.extend(_validate_per_user_on_disk(selected, per_user_dir))
 
     if errors:
         raise RuntimeError("Protocol validation failed:\n" + "\n".join(f"  - {e}" for e in errors))
 
-    output_dir = Path(args.output_dir) if args.output_dir else Path("experiments") / "rq4" / args.benchmark_id
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Always validate the per-user CSV on disk, regardless of whether

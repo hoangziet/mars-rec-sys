@@ -35,6 +35,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from pipeline.builder import build_criterion_fn, build_eval_fn, build_model, build_train_loader
 from pipeline.loaders import get_eval_loader, get_val_loss_loader, load_stats
 from pipeline.optim import build_optimizer, build_scheduler
+from scripts.study_manifest import create_manifest, finalize_manifest, is_completed, mark_completed
 from training.configs import build_model_config
 from training.mlflow_contract import RQ3_EXPERIMENT_NAME, build_run_name, build_training_tags
 from training.mlflow_utils import collect_common_run_metadata, configure_mlflow
@@ -176,6 +177,16 @@ def main() -> None:
     rq2_winner = load_rq2_winner(Path(args.rq2_winner))
     print(f"RQ2 winner: variant={rq2_winner['best_variant']}, alpha={rq2_winner.get('best_alpha')}")
 
+    manifest_path = Path(args.output_dir) / "rq3" / args.benchmark_id / "benchmark_manifest.json"
+    if not manifest_path.exists():
+        create_manifest(
+            manifest_path,
+            variants=args.variants,
+            seeds=args.seeds,
+            benchmark_id=args.benchmark_id,
+            backbone=BACKBONE,
+        )
+
     total = len(args.variants) * len(args.seeds)
     print(f"RQ3 metadata tuning (BERT4Rec-only): {len(args.variants)} variants x {len(args.seeds)} seeds = {total} runs")
     print(f"Variants: {args.variants}")
@@ -183,8 +194,14 @@ def main() -> None:
     for i, variant in enumerate(args.variants):
         for j, seed in enumerate(args.seeds):
             run_num = i * len(args.seeds) + j + 1
+            if is_completed(manifest_path, variant, seed):
+                print(f"\n[{run_num}/{total}] SKIP variant={variant}, seed={seed} (already completed)")
+                continue
             print(f"\n[{run_num}/{total}] backbone={backbone}, variant={variant}, seed={seed}")
             _run_single(args, variant, seed, rq2_winner)
+            mark_completed(manifest_path, variant, seed)
+
+    finalize_manifest(manifest_path)
     print(f"\nDone. Results logged to MLflow experiment '{EXPERIMENT_NAME}'.")
     print(f"Run: make rq3-report RQ3_BENCHMARK_ID={args.benchmark_id}")
 

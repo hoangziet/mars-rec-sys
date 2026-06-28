@@ -34,6 +34,7 @@ from scripts.rq4_per_user import (
     validate_per_user_file,
     write_per_user_atomic,
 )
+from scripts.study_manifest import create_manifest, finalize_manifest, is_completed, mark_completed
 from training.configs import build_model_config
 from training.mlflow_contract import RQ4_EXPERIMENT_NAME, build_run_name, build_training_tags
 from training.mlflow_utils import collect_common_run_metadata, configure_mlflow
@@ -295,15 +296,30 @@ def main() -> None:
     print(f"Best metadata variant: {rq3['best_variant']}")
     print(f"Benchmark ID: {benchmark_id}")
 
+    manifest_path = Path(args.output_dir) / "rq4" / benchmark_id / "benchmark_manifest.json"
+    if not manifest_path.exists():
+        create_manifest(
+            manifest_path,
+            variants=variants_list,
+            seeds=seeds,
+            benchmark_id=benchmark_id,
+            backbone=backbone,
+        )
+
     failed_runs: list[tuple[str, int]] = []
     for i, variant in enumerate(variants_list):
         variant_cfg = _get_variant_config(variant, rq2, rq3)
         for j, seed in enumerate(seeds):
             run_num = i * len(seeds) + j + 1
+            if is_completed(manifest_path, variant, seed):
+                print(f"\n[{run_num}/{total}] SKIP {variant}, seed={seed} (already completed)")
+                continue
             print(f"\n[{run_num}/{total}] {variant}, seed={seed}")
             result = _run_single(args, backbone, variant, seed, variant_cfg, benchmark_id, protocol)
             if result is None:
                 failed_runs.append((variant, seed))
+            else:
+                mark_completed(manifest_path, variant, seed)
 
     if failed_runs:
         n_failed = len(failed_runs)
@@ -314,6 +330,7 @@ def main() -> None:
             f"Run `rq4-collect` to verify which seeds are missing."
         )
 
+    finalize_manifest(manifest_path)
     print(f"\nDone. {total} runs completed. Results logged to MLflow experiment '{EXPERIMENT_NAME}'.")
     print(f"Run: make rq4-collect")
 
