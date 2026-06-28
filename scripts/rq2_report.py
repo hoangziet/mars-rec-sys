@@ -23,6 +23,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from scripts.study_manifest import load_manifest
 from training.mlflow_contract import RQ2_VARIANT_EXPERIMENT_NAME
 from training.mlflow_utils import configure_mlflow
 
@@ -155,6 +156,9 @@ def main() -> None:
     parser.add_argument("--output-dir", default=None)
     args = parser.parse_args()
 
+    output_dir = Path(args.output_dir) if args.output_dir else Path(f"experiments/rq2/{args.benchmark_id}")
+    load_manifest(output_dir / "benchmark_manifest.json", require_completed=True)
+
     configure_mlflow(mlflow_module=mlflow)
     alpha_artifact = json.loads(Path(args.alpha_artifact).read_text())
 
@@ -219,7 +223,6 @@ def main() -> None:
             f"{ {v: sorted(s) for v, s in by_variant_seeds.items()} }"
         )
 
-    output_dir = Path(args.output_dir) if args.output_dir else Path("experiments") / "rq2" / args.benchmark_id
     best_variant = write_outputs(selected, alpha_artifact, output_dir, args.benchmark_id)
     print(f"Best variant: {best_variant}")
     print(f"Best alpha: {alpha_artifact['best_alpha']}")

@@ -28,6 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from pipeline.builder import build_criterion_fn, build_eval_fn, build_model, build_train_loader
 from pipeline.loaders import get_eval_loader, get_val_loss_loader, load_stats
 from pipeline.optim import build_optimizer, build_scheduler
+from scripts.study_manifest import create_manifest, finalize_manifest, is_completed, mark_completed
 from training.configs import build_model_config
 from training.mlflow_contract import RQ2_ALPHA_EXPERIMENT_NAME, build_run_name, build_training_tags
 from training.mlflow_utils import collect_common_run_metadata, configure_mlflow
@@ -107,15 +108,34 @@ def _run_single(args, alpha: float, seed: int) -> dict:
 def main() -> None:
     args = build_parser().parse_args()
     configure_mlflow(mlflow_module=mlflow)
+
+    manifest_path = Path(args.output_dir) / "rq2" / args.benchmark_id / "benchmark_manifest.json"
+    alpha_variants = [f"alpha-{a}" for a in args.alphas]
+    if not manifest_path.exists():
+        create_manifest(
+            manifest_path,
+            variants=alpha_variants,
+            seeds=args.seeds,
+            benchmark_id=args.benchmark_id,
+            backbone=BACKBONE,
+        )
+
     total = len(args.alphas) * len(args.seeds)
     print(f"RQ2 alpha tuning (BERT4Rec-WL): {len(args.alphas)} alphas x {len(args.seeds)} seeds = {total} runs")
     print(f"Alphas: {args.alphas}")
     print(f"Seeds:  {args.seeds}")
     for i, alpha in enumerate(args.alphas):
+        variant = f"alpha-{alpha}"
         for j, seed in enumerate(args.seeds):
             run_num = i * len(args.seeds) + j + 1
+            if is_completed(manifest_path, variant, seed):
+                print(f"\n[{run_num}/{total}] SKIP alpha={alpha}, seed={seed} (already completed)")
+                continue
             print(f"\n[{run_num}/{total}] backbone={BACKBONE}, alpha={alpha}, seed={seed}")
             _run_single(args, alpha, seed)
+            mark_completed(manifest_path, variant, seed)
+
+    finalize_manifest(manifest_path)
     print(f"\nDone. Results logged to MLflow experiment '{EXPERIMENT_NAME}'.")
     print(f"Run: make rq2-report RQ2_ALPHA_BENCHMARK_ID={args.benchmark_id}")
 

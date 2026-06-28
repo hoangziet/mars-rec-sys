@@ -215,6 +215,7 @@ def test_rq4_collect_result_manifest_carries_bert4rec_backbone(tmp_path, monkeyp
 
     monkeypatch.setattr(rq4_collect, "mlflow", _FakeMlflow())
     monkeypatch.setattr(rq4_collect, "configure_mlflow", _fake_configure_mlflow)
+    monkeypatch.setattr(rq4_collect, "load_manifest", lambda *a, **k: {})
     monkeypatch.setattr(rq4_collect, "_validate_provenance_tags", lambda *a, **k: [])
     monkeypatch.setattr(rq4_collect, "_validate_per_user_on_disk", lambda *a, **k: [])
 

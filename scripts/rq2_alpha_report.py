@@ -17,6 +17,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from scripts.study_manifest import load_manifest
 from training.mlflow_contract import RQ2_ALPHA_EXPERIMENT_NAME
 from training.mlflow_utils import configure_mlflow
 
@@ -29,6 +30,9 @@ def main() -> None:
     parser.add_argument("--benchmark-id", required=True)
     parser.add_argument("--output-dir", default=None)
     args = parser.parse_args()
+
+    output_dir = Path(args.output_dir) if args.output_dir else Path(f"experiments/rq2/{args.benchmark_id}")
+    load_manifest(output_dir / "benchmark_manifest.json", require_completed=True)
 
     configure_mlflow(mlflow_module=mlflow)
 
@@ -110,7 +114,6 @@ def main() -> None:
             best_mean = mean_val
             best_alpha = alpha
 
-    output_dir = Path(args.output_dir) if args.output_dir else Path("experiments") / "rq2" / args.benchmark_id
     output_dir.mkdir(parents=True, exist_ok=True)
 
     winner = {
