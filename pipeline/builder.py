@@ -180,7 +180,51 @@ def build_model(
 
     if model_name == "bert4rec":
         from models.bert4rec import BERT4Rec
-        return BERT4Rec(n_items=n_items, max_len=max_len, **model_kwargs)
+        from pipeline.item_encoder import ItemEncoder
+        from pipeline.metadata_utils import MetadataVocab, build_metadata_tensors, load_item_metadata
+
+        item_encoder_cfg = model_kwargs.pop("item_encoder", None)
+        item_encoder = None
+        if item_encoder_cfg:
+            vocab = MetadataVocab.load(item_encoder_cfg["metadata_vocab_path"])
+            meta_df = load_item_metadata(
+                item_encoder_cfg.get("metadata_csv_path", str(data_dir / "item_features" / "item_metadata.csv")),
+                n_items,
+            )
+            meta_tensors = build_metadata_tensors(vocab, meta_df, n_items)
+
+            text_emb = None
+            if item_encoder_cfg.get("use_text", False):
+                text_emb_path = Path(item_encoder_cfg["text_emb_path"])
+                manifest_path = text_emb_path.with_name("text_embeddings_manifest.json")
+                if manifest_path.exists():
+                    manifest = json.loads(manifest_path.read_text())
+                    _validate_text_embedding_manifest(
+                        embeddings_path=text_emb_path,
+                        manifest=manifest,
+                        item_id_map_path=data_dir / "mappings" / "item_id_map.csv",
+                        metadata_csv_path=Path(
+                            item_encoder_cfg.get("metadata_csv_path", str(data_dir / "item_features" / "item_metadata.csv"))
+                        ),
+                        n_items=n_items,
+                    )
+                else:
+                    raise RuntimeError(
+                        f"Text embeddings manifest not found: {manifest_path}. "
+                        f"Re-run `make rq3-precompute` to generate it."
+                    )
+                text_emb = torch.load(text_emb_path, weights_only=True)
+
+            item_encoder = ItemEncoder(
+                n_items=n_items,
+                hidden_dim=model_kwargs.get("hidden_dim", 64),
+                metadata_tensors=meta_tensors,
+                text_embeddings=text_emb,
+                use_structured=item_encoder_cfg.get("use_structured", True),
+                use_text=item_encoder_cfg.get("use_text", True),
+            )
+
+        return BERT4Rec(n_items=n_items, max_len=max_len, item_encoder=item_encoder, **model_kwargs)
 
     if model_name == "bprmf":
         from models.bprmf import BPRMF
@@ -249,18 +293,16 @@ def build_criterion_fn(model_name: str, train_kwargs: dict):
         return fn
 
     if model_name == "bert4rec":
-        import torch.nn.functional as F
-
         def fn(model, batch, device):
             input_seq = batch["input_seq"].to(device)
             labels = batch["labels"].to(device)
-            logits = model(input_seq)
-            mask = (labels != 0)
-            if mask.sum() == 0:
-                return torch.tensor(0.0, device=device, requires_grad=True)
-            logits_masked = logits[mask]
-            labels_masked = labels[mask]
-            return F.cross_entropy(logits_masked, labels_masked)
+            engagement = batch.get("engagement", None)
+            watch_input_ids = batch.get("watch_input_ids", None)
+            if engagement is not None:
+                engagement = engagement.to(device)
+            if watch_input_ids is not None:
+                watch_input_ids = watch_input_ids.to(device)
+            return model.loss(input_seq, labels, engagement=engagement, watch_input_ids=watch_input_ids)
         return fn
 
     if model_name == "bprmf":
@@ -365,6 +407,7 @@ def build_train_loader(
             extra["dupe_factor"] = train_kwargs.get("dupe_factor", 1)
             extra["prop_sliding_window"] = train_kwargs.get("prop_sliding_window", -1.0)
             extra["force_last_item_mask"] = train_kwargs.get("force_last_item_mask", False)
+            extra["watch_num_bins"] = (model_kwargs or {}).get("watch_num_bins", train_kwargs.get("watch_num_bins", 5))
         return get_train_loader(
             model_name,
             data_dir / "splits" / "train_sequences.csv",

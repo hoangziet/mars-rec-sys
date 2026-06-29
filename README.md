@@ -111,20 +111,28 @@ RQ1 benchmark
 make rq1-report           -> rq1_winner.json (for reporting/audit only;
                               not consumed by RQ2–RQ4)
    ↓
-make rq2-tune             -> RQ2 alpha grid on gSASRec
+make rq2-alpha            -> RQ2 Stage A alpha grid on BERT4Rec-WL
    ↓
-make rq2-report           -> rq2_best_alpha.json (backbone=gsasrec + provenance)
+make rq2-alpha-report     -> reports/rq2_best_alpha.json
+   ↓
+make rq2-variants         -> RQ2 Stage B baseline/WL/WE/WLWE on BERT4Rec
+   ↓
+make rq2-report           -> reports/rq2_best_watch.json
+   ↓
+make rq2-compare          -> stats/rq2_statistical_comparison.csv
    ↓
 make rq3-precompute       -> metadata/text artifacts
    ↓
-make rq3-tune             -> RQ3 M0–M3 grid on gSASRec
+make rq3-tune             -> RQ3 M0–M3 grid on BERT4Rec winner from RQ2
    ↓
-make rq3-report           -> rq3_best_variant.json (backbone=gsasrec + provenance)
+make rq3-report           -> reports/rq3_best_variant.json
+   ↓
+make rq3-compare          -> stats/rq3_statistical_comparison.csv
    ↓
 make rq4-init             -> frozen rq4_protocol_manifest.json
-                            (backbone=gsasrec + baseline_variant + provenance)
+                            (backbone=bert4rec + baseline_variant + provenance)
    ↓
-make rq4-ablation         -> V0–V3 × 10 seeds (gSASRec only)
+make rq4-ablation         -> V0–V3 × 10 seeds (BERT4Rec watch+metadata ablation)
    ↓
 make rq4-collect          -> validates exact runs, on-disk per-user CSVs,
                               writes rq4_result_manifest.json
@@ -349,13 +357,17 @@ scripts/
   train_all.py               benchmark runner for RQ1
   rq1_report.py              benchmark reporter (writes rq1_winner.json)
   rq1_compare.py             winner-versus-baseline statistical comparison
-  rq2_tune_alpha.py          RQ2 alpha grid (gSASRec only, backbone frozen in script)
-  rq2_report.py              RQ2 reporter (writes rq2_best_alpha.json)
+  rq2_tune_alpha.py          RQ2 Stage A alpha grid (BERT4Rec-WL)
+  rq2_alpha_report.py        RQ2 alpha reporter (writes reports/rq2_best_alpha.json)
+  rq2_compare_variants.py    RQ2 Stage B watch variant runner
+  rq2_report.py              RQ2 reporter (writes reports/rq2_best_watch.json)
+  rq2_compare.py             RQ2 statistical comparison
   rq3_precompute_embeddings.py
-  rq3_tune_metadata.py       RQ3 metadata grid (gSASRec only, backbone frozen in script)
+  rq3_tune_metadata.py       RQ3 metadata grid (BERT4Rec winner from RQ2)
   rq3_report.py              RQ3 reporter (writes rq3_best_variant.json)
-  rq4_init_protocol.py       freeze RQ4 protocol (--rq2-winners + --rq3-winners; backbone=gsasrec)
-  rq4_ablation.py            RQ4 V0–V3 ablation runner
+  rq3_compare.py             RQ3 statistical comparison
+  rq4_init_protocol.py       freeze RQ4 protocol (--rq2-winners + --rq3-winners; backbone=bert4rec)
+  rq4_ablation.py            RQ4 V0–V3 BERT4Rec ablation runner
   rq4_per_user.py            atomic per-user CSV write helper
   rq4_collect.py             RQ4 collector (validates per-user files)
   rq4_compare.py             RQ4 statistical comparison

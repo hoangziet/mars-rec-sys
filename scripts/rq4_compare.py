@@ -42,10 +42,11 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import scipy.stats
 from statsmodels.stats.multitest import multipletests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from training.stat_tests import compute_seed_paired_t_test
 
 PRIMARY_METRIC = "ndcg_at_10"
 METRIC_LABEL = "NDCG@10"
@@ -223,10 +224,10 @@ def _seed_level_ttest(per_user: pd.DataFrame, comp_variant: str, base_variant: s
     if len(comp_vals) < 2 or len(base_vals) < 2:
         return {"t_stat": None, "t_p": None, "n_seeds": min(len(comp_vals), len(base_vals))}
 
-    t_result = scipy.stats.ttest_rel(comp_vals, base_vals, alternative="two-sided")
+    stats = compute_seed_paired_t_test(comp_vals, base_vals)
     return {
-        "t_stat": float(t_result.statistic),
-        "t_p": float(t_result.pvalue),
+        "t_stat": stats["t_statistic"],
+        "t_p": stats["raw_p_value"],
         "n_seeds": len(comp_vals),
     }
 

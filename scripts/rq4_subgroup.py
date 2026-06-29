@@ -7,7 +7,7 @@ Reads per-user CSVs from rq4_ablation, derives subgroups from train data,
 computes NDCG@10 per subgroup per variant, and reports improvement over V0.
 
 Groups:
-    - Users with watch signal vs without
+    - Users by mean engagement strength (high/mid/low)
     - Short history vs long history (median split)
     - Head items vs tail items (top 20% vs bottom 80% by train interaction count)
     - Items with complete metadata vs missing metadata
@@ -28,7 +28,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from pipeline.loaders import parse_seq
+from pipeline.loaders import parse_float_seq, parse_seq
 
 PRIMARY_METRIC = "ndcg_at_10"
 
@@ -49,16 +49,23 @@ def parse_args() -> argparse.Namespace:
 def _derive_subgroups(data_dir: Path) -> dict:
     train_df = pd.read_csv(data_dir / "splits" / "train_sequences.csv")
 
-    has_watch = {}
-    if "watch_signal_sequence" in train_df.columns:
+    mean_engagement_bucket: dict[int, str] = {}
+    if "engagement_sequence" in train_df.columns:
         for _, row in train_df.iterrows():
             uid = int(row["user_idx"])
-            seq = parse_seq(row["watch_signal_sequence"])
-            has_watch[uid] = any(v == 1 for v in seq) if seq else False
+            engagement = parse_float_seq(row["engagement_sequence"])
+            mean_value = float(np.mean(engagement)) if engagement else 0.0
+            if mean_value >= 0.66:
+                label = "high_engagement"
+            elif mean_value >= 0.33:
+                label = "mid_engagement"
+            else:
+                label = "low_engagement"
+            mean_engagement_bucket[uid] = label
     else:
         for _, row in train_df.iterrows():
             uid = int(row["user_idx"])
-            has_watch[uid] = False
+            mean_engagement_bucket[uid] = "unavailable"
 
     seq_lengths = dict(zip(train_df["user_idx"], train_df["sequence_length"]))
     median_len = int(train_df["sequence_length"].median())
@@ -82,7 +89,7 @@ def _derive_subgroups(data_dir: Path) -> dict:
                 complete_meta_items.add(int(row["item_idx"]))
 
     return {
-        "has_watch": has_watch,
+        "mean_engagement_bucket": mean_engagement_bucket,
         "seq_lengths": seq_lengths,
         "median_len": median_len,
         "head_items": head_items,
@@ -94,13 +101,13 @@ def _assign_subgroup(row, subgroups: dict) -> dict:
     uid = int(row["user_idx"])
     target = int(row["target_item"])
 
-    watch = "has_watch" if subgroups["has_watch"].get(uid, False) else "no_watch"
+    engagement = subgroups["mean_engagement_bucket"].get(uid, "unavailable")
     seq_len = subgroups["seq_lengths"].get(uid, 0)
     history = "short" if seq_len <= subgroups["median_len"] else "long"
     popularity = "head" if target in subgroups["head_items"] else "tail"
     meta = "complete_meta" if target in subgroups["complete_meta_items"] else "missing_meta"
 
-    return {"watch": watch, "history": history, "popularity": popularity, "meta": meta}
+    return {"engagement": engagement, "history": history, "popularity": popularity, "meta": meta}
 
 
 def _compute_subgroup_metrics(per_user: pd.DataFrame, group_col: str) -> list[dict]:
@@ -186,7 +193,7 @@ def main() -> None:
 
     # Compute metrics per subgroup
     all_metrics = []
-    for group_col in ["watch", "history", "popularity", "meta"]:
+    for group_col in ["engagement", "history", "popularity", "meta"]:
         all_metrics.extend(_compute_subgroup_metrics(per_user, group_col))
 
     improvements = _compute_improvements(all_metrics, baseline_variant=baseline_variant)
@@ -206,7 +213,7 @@ def main() -> None:
     with open(output_dir / "rq4_subgroup_analysis.md", "w") as f:
         f.write("# RQ4 Subgroup Analysis\n\n")
 
-        for group_col in ["watch", "history", "popularity", "meta"]:
+        for group_col in ["engagement", "history", "popularity", "meta"]:
             f.write(f"## {group_col}\n\n")
             group_metrics = [r for r in all_metrics if r["group"] == group_col]
             group_imps = [r for r in improvements if r["group"] == group_col]
@@ -238,7 +245,9 @@ def main() -> None:
         "head_item_fraction": 0.2,
         "n_head_items": len(subgroups["head_items"]),
         "n_complete_meta_items": len(subgroups["complete_meta_items"]),
-        "n_users_with_watch": sum(1 for v in subgroups["has_watch"].values() if v),
+        "n_users_high_engagement": sum(1 for v in subgroups["mean_engagement_bucket"].values() if v == "high_engagement"),
+        "n_users_mid_engagement": sum(1 for v in subgroups["mean_engagement_bucket"].values() if v == "mid_engagement"),
+        "n_users_low_engagement": sum(1 for v in subgroups["mean_engagement_bucket"].values() if v == "low_engagement"),
     }
     (output_dir / "rq4_subgroup_thresholds.json").write_text(json.dumps(thresholds, indent=2))
 

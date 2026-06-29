@@ -24,6 +24,7 @@ from pipeline.negative_sampling import (
     sample_uniform_excluding_targets,
     sample_unseen_user,
 )
+from pipeline.watch_features import WATCH_MASK_ID, WATCH_PAD_ID, engagement_to_watch_bin
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -371,6 +372,7 @@ class MaskedSequenceDataset(Dataset):
         dupe_factor: int = 1,
         prop_sliding_window: float = -1.0,
         force_last_item_mask: bool = False,
+        watch_num_bins: int = 5,
     ) -> None:
         df = pd.read_csv(csv_path)
         self.max_len = max_len
@@ -381,16 +383,26 @@ class MaskedSequenceDataset(Dataset):
         self.dupe_factor = max(1, int(dupe_factor))
         self.prop_sliding_window = prop_sliding_window
         self.force_last_item_mask = force_last_item_mask
+        self.watch_num_bins = int(watch_num_bins)
 
         if is_train:
             raw_seqs = [parse_seq(s) for s in df["item_sequence"]]
-            self.instances: list[tuple[list[int], str]] = []
-            for seq in raw_seqs:
-                for window in self._build_train_windows(seq):
+            engagement_col = "engagement_sequence" if "engagement_sequence" in df.columns else None
+            raw_engagements = [parse_float_seq(s) for s in df[engagement_col]] if engagement_col else [[0.0] * len(s) for s in raw_seqs]
+            for seq, eng in zip(raw_seqs, raw_engagements):
+                if len(eng) != len(seq):
+                    raise ValueError(
+                        f"Engagement sequence length ({len(eng)}) does not match "
+                        f"item sequence length ({len(seq)})"
+                    )
+            self.instances: list[tuple[list[int], str, list[float]]] = []
+            for seq, eng in zip(raw_seqs, raw_engagements):
+                for window, start_idx in self._build_train_windows(seq):
+                    engagement_window = eng[start_idx : start_idx + len(window)]
                     for _ in range(self.dupe_factor):
-                        self.instances.append((window, "random"))
+                        self.instances.append((window, "random", engagement_window))
                     if self.force_last_item_mask and window:
-                        self.instances.append((window, "last"))
+                        self.instances.append((window, "last", engagement_window))
             self.seqs = None
             self.targets = None
         else:
@@ -400,12 +412,12 @@ class MaskedSequenceDataset(Dataset):
             self.targets = df[tgt_col].tolist()
             self.instances = []
 
-    def _build_train_windows(self, seq: list[int]) -> list[list[int]]:
+    def _build_train_windows(self, seq: list[int]) -> list[tuple[list[int], int]]:
         """Expand long sequences using the sliding-window strategy from BERT4Rec."""
         if not seq:
             return []
         if len(seq) <= self.max_len:
-            return [seq]
+            return [(seq, 0)]
 
         if self.prop_sliding_window == -1.0:
             sliding_step = self.max_len
@@ -414,30 +426,36 @@ class MaskedSequenceDataset(Dataset):
 
         begin_indices = list(range(len(seq) - self.max_len, 0, -sliding_step))
         begin_indices.append(0)
-        return [seq[i:i + self.max_len] for i in begin_indices[::-1]]
+        return [(seq[i:i + self.max_len], i) for i in begin_indices[::-1]]
 
     def __len__(self) -> int:
         return len(self.instances) if self.is_train else len(self.seqs)
 
     def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
         if self.is_train:
-            seq, mode = self.instances[idx]
+            seq, mode, engagement_seq = self.instances[idx]
             masked_seq = seq.copy()
             labels = [0] * len(seq)
+            watch_ids = [engagement_to_watch_bin(v, self.watch_num_bins) for v in engagement_seq]
             if mode == "last":
                 masked_seq[-1] = self.mask_token
                 labels[-1] = seq[-1]
+                watch_ids[-1] = WATCH_MASK_ID
             else:
                 for i, item in enumerate(seq):
                     if np.random.random() < self.mask_prob:
                         masked_seq[i] = self.mask_token
                         labels[i] = item
+                        watch_ids[i] = WATCH_MASK_ID
                 if seq and not any(labels):
                     force = np.random.randint(len(seq))
                     masked_seq[force] = self.mask_token
                     labels[force] = seq[force]
+                    watch_ids[force] = WATCH_MASK_ID
             padded_seq = pad_sequence(masked_seq, self.max_len, self.pad_token)
             padded_lbl = pad_sequence(labels, self.max_len, 0)
+            padded_watch = [WATCH_PAD_ID] * (self.max_len - len(watch_ids)) + watch_ids
+            padded_engagement = [0.0] * (self.max_len - len(engagement_seq)) + engagement_seq
         else:
             seq = self.seqs[idx]
             masked_seq = seq + [self.mask_token]
@@ -445,10 +463,14 @@ class MaskedSequenceDataset(Dataset):
             labels[-1] = self.targets[idx]
             padded_seq = pad_sequence(masked_seq, self.max_len, self.pad_token)
             padded_lbl = pad_sequence(labels, self.max_len, 0)
+            padded_watch = [WATCH_PAD_ID] * (self.max_len - 1) + [WATCH_MASK_ID]
+            padded_engagement = [0.0] * self.max_len
 
         return {
             "input_seq": torch.tensor(padded_seq, dtype=torch.long),
             "labels": torch.tensor(padded_lbl, dtype=torch.long),
+            "engagement": torch.tensor(padded_engagement, dtype=torch.float32),
+            "watch_input_ids": torch.tensor(padded_watch, dtype=torch.long),
         }
 
 
@@ -524,7 +546,10 @@ class FullSortEvalDataset(Dataset):
         n_items: int,
         max_len: int = 50,
         pad_token: int = 0,
+        watch_num_bins: int = 5,
     ) -> None:
+        from pipeline.watch_features import WATCH_MASK_ID, WATCH_PAD_ID, engagement_to_watch_bin
+
         df = pd.read_csv(csv_path)
         self.max_len = max_len
         self.pad_token = pad_token
@@ -538,6 +563,9 @@ class FullSortEvalDataset(Dataset):
         self.seqs = [parse_seq(s) for s in df[seq_col]]
         self.targets = df[tgt_col].tolist()
 
+        has_engagement = "engagement_sequence" in df.columns
+        engagement_seqs = [parse_float_seq(s) for s in df["engagement_sequence"]] if has_engagement else [[0.0] * len(s) for s in self.seqs]
+
         for i, (seq, target) in enumerate(zip(self.seqs, self.targets, strict=False)):
             if int(target) in set(seq):
                 raise RuntimeError(
@@ -547,6 +575,16 @@ class FullSortEvalDataset(Dataset):
         self._padded_seqs = [
             pad_sequence(seq, max_len, pad_token) for seq in self.seqs
         ]
+
+        # Pre-build watch_input_ids for eval.
+        # Historical positions use engagement bins; the prediction (last) position
+        # will receive WATCH_MASK_ID via evaluate_bert4rec's shift logic.
+        self._watch_input_ids = []
+        for seq, eng in zip(self.seqs, engagement_seqs):
+            watch_ids = [engagement_to_watch_bin(v, watch_num_bins) for v in eng[-max_len:]]
+            padded = [WATCH_PAD_ID] * (max_len - len(watch_ids)) + watch_ids
+            self._watch_input_ids.append(torch.tensor(padded, dtype=torch.long))
+        self._watch_mask_id = torch.tensor(WATCH_MASK_ID, dtype=torch.long)
 
         # Pre-build history masks: (n_users, n_items+1) bool tensor.
         # True = masked (seen or padding), False = rankable.
@@ -570,6 +608,7 @@ class FullSortEvalDataset(Dataset):
             "mask": torch.tensor(mask, dtype=torch.bool),
             "target": torch.tensor(self.targets[idx], dtype=torch.long),
             "history_mask": self._history_masks[idx],  # (n_items+1,)
+            "watch_input_ids": self._watch_input_ids[idx],
         }
 
 
@@ -609,6 +648,7 @@ def get_train_loader(
             dupe_factor=dupe_factor,
             prop_sliding_window=prop_sliding_window,
             force_last_item_mask=force_last_item_mask,
+            watch_num_bins=kwargs.pop("watch_num_bins", 5),
         )
     elif model_type == "bprmf":
         dataset = BPRDataset(train_csv, n_items=n_items)
@@ -776,6 +816,7 @@ def get_eval_loader(
     batch_size: int = 64,
     max_len: int = 50,
     num_workers: int = 0,
+    watch_num_bins: int = 5,
 ) -> DataLoader:
     """Build full-sort evaluation DataLoader.
 
@@ -787,6 +828,7 @@ def get_eval_loader(
         n_items=stats["n_items"],
         max_len=max_len,
         pad_token=0,
+        watch_num_bins=watch_num_bins,
     )
     return DataLoader(
         dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers

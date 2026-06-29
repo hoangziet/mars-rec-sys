@@ -6,14 +6,14 @@ Create the frozen protocol manifest for RQ4 ablation.
 Must be run BEFORE training. The protocol manifest is immutable and
 used by rq4_collect to validate exact run counts.
 
-RQ4 is gSASRec-only: the backbone is frozen to "gsasrec" and validated
+RQ4 is BERT4Rec-only: the backbone is frozen to "bert4rec" and validated
 against the RQ2 and RQ3 winner artifacts. The RQ1 winner artifact is
 no longer part of the RQ4 protocol.
 
 Usage:
     uv run python scripts/rq4_init_protocol.py \\
         --benchmark-id rq4-ablation-v1 \\
-        --rq2-winners experiments/rq2/.../rq2_best_alpha.json \\
+        --rq2-winners experiments/rq2/.../rq2_best_watch.json \\
         --rq3-winners experiments/rq3/.../rq3_best_variant.json
 """
 
@@ -30,10 +30,10 @@ DEFAULT_SEEDS = [42, 123, 2024, 3407, 9999, 7, 21, 77, 314, 1337]
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Create RQ4 frozen protocol manifest for gSASRec ablation.")
+    parser = argparse.ArgumentParser(description="Create RQ4 frozen protocol manifest for BERT4Rec ablation.")
     parser.add_argument("--benchmark-id", required=True)
     parser.add_argument("--rq2-winners", required=True,
-        help="Path to rq2_best_alpha.json")
+        help="Path to rq2_best_watch.json")
     parser.add_argument("--rq3-winners", required=True,
         help="Path to rq3_best_variant.json")
     parser.add_argument("--variants", nargs="+", default=["V0", "V1", "V2", "V3"])
@@ -60,16 +60,16 @@ def main() -> None:
     if "best_variant" not in variant_data:
         raise ValueError(f"RQ3 winners JSON missing 'best_variant': {args.rq3_winners}")
 
-    # RQ4 is gSASRec-only: both RQ2 and RQ3 winner artifacts must declare
-    # backbone="gsasrec". This freezes the contract without falling back
+    # RQ4 is BERT4Rec-only: both RQ2 and RQ3 winner artifacts must declare
+    # backbone="bert4rec". This freezes the contract without falling back
     # to the RQ1 winner artifact.
-    if alpha_data.get("backbone") != "gsasrec":
+    if alpha_data.get("backbone") != "bert4rec":
         raise RuntimeError(
-            f"RQ2 winner artifact backbone must be 'gsasrec', got {alpha_data.get('backbone')!r}"
+            f"RQ2 winner artifact backbone must be 'bert4rec', got {alpha_data.get('backbone')!r}"
         )
-    if variant_data.get("backbone") != "gsasrec":
+    if variant_data.get("backbone") != "bert4rec":
         raise RuntimeError(
-            f"RQ3 winner artifact backbone must be 'gsasrec', got {variant_data.get('backbone')!r}"
+            f"RQ3 winner artifact backbone must be 'bert4rec', got {variant_data.get('backbone')!r}"
         )
 
     # Variants must be unique — duplicates would silently inflate run counts
@@ -130,12 +130,13 @@ def main() -> None:
 
     manifest = {
         "benchmark_id": args.benchmark_id,
-        "backbone": "gsasrec",
+        "backbone": "bert4rec",
         "variants": args.variants,
         "baseline_variant": args.baseline_variant,
         "neural_seeds": args.seeds,
         "expected_runs": len(args.variants) * len(args.seeds),
-        "best_alpha": float(alpha_data["best_alpha"]),
+        "rq2_best_variant": alpha_data.get("best_variant"),
+        "rq2_best_alpha": float(alpha_data["best_alpha"]) if "best_alpha" in alpha_data else None,
         "best_metadata_variant": str(variant_data["best_variant"]),
         "rq2_benchmark_id": alpha_data.get("benchmark_id"),
         "rq3_benchmark_id": variant_data.get("benchmark_id"),
@@ -154,7 +155,8 @@ def main() -> None:
     print(f"Protocol manifest written: {path}")
     print(f"  Backbone: {manifest['backbone']}")
     print(f"  Baseline variant: {manifest['baseline_variant']}")
-    print(f"  Best alpha: {manifest['best_alpha']}")
+    print(f"  RQ2 best variant: {manifest['rq2_best_variant']}")
+    print(f"  RQ2 best alpha: {manifest['rq2_best_alpha']}")
     print(f"  Best metadata variant: {manifest['best_metadata_variant']}")
     print(f"  Variants: {args.variants}")
     print(f"  Seeds: {len(args.seeds)}")

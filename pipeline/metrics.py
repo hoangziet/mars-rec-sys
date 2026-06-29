@@ -166,10 +166,17 @@ def evaluate_bert4rec(
 
     Appends [MASK] to the end of each input sequence so the model predicts at
     the last position, matching the training objective.
+
+    When the model uses watch embeddings, watch_input_ids are also shifted and
+    the prediction position receives WATCH_MASK_ID, matching the training
+    behaviour for masked positions.
     """
+    from pipeline.watch_features import WATCH_MASK_ID
+
     model.eval()
     all_ranks: list[int] = []
     mask_token = model.mask_token
+    watch_needed = model.watch_mode in {"embedding", "both"}
 
     for batch in _progress(eval_loader, desc="eval bert4rec"):
         input_seq    = batch["input_seq"].to(device)     # (B, L)
@@ -182,9 +189,16 @@ def evaluate_bert4rec(
         )
         input_seq = torch.cat([input_seq[:, 1:], mask_col], dim=1)
 
-        logits      = model(input_seq)             # (B, L, n_items + 1)
-        # The model now outputs n_items+1 columns (padding + real items) after
-        # the input-only MASK token was removed from the output vocabulary.
+        watch_input_ids = None
+        if watch_needed and "watch_input_ids" in batch:
+            watch_ids = batch["watch_input_ids"].to(device)
+            mask_watch = torch.full(
+                (watch_ids.size(0), 1), WATCH_MASK_ID,
+                dtype=torch.long, device=device,
+            )
+            watch_input_ids = torch.cat([watch_ids[:, 1:], mask_watch], dim=1)
+
+        logits      = model(input_seq, watch_input_ids=watch_input_ids)
         assert logits.size(-1) == model.n_items + 1, (
             f"BERT4Rec output must have n_items + 1 columns, got {logits.size(-1)}"
         )

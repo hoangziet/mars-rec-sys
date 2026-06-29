@@ -27,7 +27,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from pipeline.builder import build_criterion_fn, build_eval_fn, build_model, build_train_loader
 from pipeline.loaders import get_eval_loader, get_val_loss_loader, load_stats
 from pipeline.optim import build_optimizer, build_scheduler
-from pipeline.training_grid import enforce_final_grid
 from scripts.rq4_per_user import (
     PerUserExportError,
     fail_run_atomically,
@@ -35,6 +34,7 @@ from scripts.rq4_per_user import (
     validate_per_user_file,
     write_per_user_atomic,
 )
+from scripts.study_manifest import create_manifest, finalize_manifest, is_completed, mark_completed
 from training.configs import build_model_config
 from training.mlflow_contract import RQ4_EXPERIMENT_NAME, build_run_name, build_training_tags
 from training.mlflow_utils import collect_common_run_metadata, configure_mlflow
@@ -42,18 +42,17 @@ from training.trainer import NoValidCheckpointError, Trainer
 
 
 def _validate_protocol_backbone(protocol: dict) -> str:
-    """RQ4 is gSASRec-only — refuse any protocol whose backbone is not gsasrec.
+    """RQ4 is BERT4Rec-only — refuse any protocol whose backbone is not bert4rec.
 
     The protocol is frozen by ``rq4-init`` from the RQ2/RQ3 winners, and the
-    init step already enforces backbone="gsasrec". This guard is the last
+    init step already enforces backbone="bert4rec". This guard is the last
     line of defense: if someone hand-edits the protocol manifest or runs
     rq4-ablation against a stale file, we fail loud here.
     """
     backbone = protocol.get("backbone")
-    if backbone != "gsasrec":
+    if backbone != "bert4rec":
         raise RuntimeError(
-            f"RQ4 is gSASRec-only, but protocol backbone is {backbone!r}. "
-            f"Re-run rq4-init from gSASRec RQ2/RQ3 winners."
+            f"RQ4 is BERT4Rec-only, but protocol backbone is {backbone!r}."
         )
     return backbone
 
@@ -89,16 +88,27 @@ def parse_args() -> argparse.Namespace:
     return build_parser().parse_args()
 
 
-def _get_variant_config(variant: str, best_alpha: float, best_variant: str) -> dict:
-    use_structured, use_text = METADATA_FLAGS[best_variant]
+def _get_variant_config(variant: str, rq2: dict, rq3: dict) -> dict:
+    watch_variant = rq2.get("best_variant", rq2.get("rq2_best_variant", "baseline"))
+    watch_alpha = float(rq2.get("best_alpha", rq2.get("rq2_best_alpha", 0)) or 0)
+    use_structured, use_text = METADATA_FLAGS[rq3["best_variant"]]
+
+    watch_mode_map = {
+        "baseline": "none",
+        "wl": "loss",
+        "we": "embedding",
+        "wlwe": "both",
+    }
+    watch_mode = watch_mode_map.get(watch_variant, "none")
+
     if variant == "V0":
-        return {"config_name": "gsasrec", "use_structured": False, "use_text": False, "confidence_alpha": 0.0}
+        return {"config_name": "bert4rec", "watch_mode": "none", "watch_alpha": 0.0, "use_structured": False, "use_text": False}
     elif variant == "V1":
-        return {"config_name": "gsasrec", "use_structured": False, "use_text": False, "confidence_alpha": best_alpha}
+        return {"config_name": "bert4rec", "watch_mode": watch_mode, "watch_alpha": watch_alpha, "use_structured": False, "use_text": False}
     elif variant == "V2":
-        return {"config_name": "gsasrec_metadata", "use_structured": use_structured, "use_text": use_text, "confidence_alpha": 0.0}
+        return {"config_name": "bert4rec_metadata", "watch_mode": "none", "watch_alpha": 0.0, "use_structured": use_structured, "use_text": use_text}
     elif variant == "V3":
-        return {"config_name": "gsasrec_metadata", "use_structured": use_structured, "use_text": use_text, "confidence_alpha": best_alpha}
+        return {"config_name": "bert4rec_metadata", "watch_mode": watch_mode, "watch_alpha": watch_alpha, "use_structured": use_structured, "use_text": use_text}
     else:
         raise ValueError(f"Unknown variant: {variant}")
 
@@ -116,11 +126,16 @@ def _run_single(args, backbone: str, variant: str, seed: int, variant_cfg: dict,
 
     base_cfg = build_model_config(variant_cfg["config_name"])
     model_kwargs = dict(base_cfg["model_kwargs"])
-    train_kwargs = enforce_final_grid(base_cfg["train_kwargs"])
-    train_kwargs["confidence_alpha"] = variant_cfg["confidence_alpha"]
+    train_kwargs = dict(base_cfg["train_kwargs"])
+    train_kwargs.pop("confidence_alpha", None)
 
-    if variant_cfg["config_name"] == "gsasrec_metadata":
-        encoder_cfg = model_kwargs.get("item_encoder", {})
+    # BERT4Rec watch integration
+    model_kwargs["watch_mode"] = variant_cfg["watch_mode"]
+    model_kwargs["watch_alpha"] = variant_cfg["watch_alpha"]
+    model_kwargs["watch_num_bins"] = model_kwargs.get("watch_num_bins", 5)
+
+    if variant_cfg["config_name"] == "bert4rec_metadata":
+        encoder_cfg = model_kwargs.pop("item_encoder", {})
         encoder_cfg["use_structured"] = variant_cfg["use_structured"]
         encoder_cfg["use_text"] = variant_cfg["use_text"]
         encoder_cfg["metadata_vocab_path"] = str(data_dir / "item_features" / "metadata_vocab.json")
@@ -156,7 +171,8 @@ def _run_single(args, backbone: str, variant: str, seed: int, variant_cfg: dict,
     mlflow_cfg["tags"]["rq"] = "rq4"
     mlflow_cfg["tags"]["benchmark_id"] = benchmark_id
     mlflow_cfg["tags"]["backbone"] = backbone
-    mlflow_cfg["tags"]["confidence_alpha"] = str(variant_cfg["confidence_alpha"])
+    mlflow_cfg["tags"]["watch_mode"] = variant_cfg["watch_mode"]
+    mlflow_cfg["tags"]["watch_alpha"] = str(variant_cfg["watch_alpha"])
     mlflow_cfg["tags"]["use_structured"] = str(variant_cfg["use_structured"]).lower()
     mlflow_cfg["tags"]["use_text"] = str(variant_cfg["use_text"]).lower()
     mlflow_cfg["tags"]["protocol_version"] = protocol.get("benchmark_id", "unknown")
@@ -255,15 +271,19 @@ def main() -> None:
     configure_mlflow(mlflow_module=mlflow)
 
     protocol = json.loads(Path(args.protocol).read_text())
-    best_alpha = float(protocol["best_alpha"])
-    best_variant = protocol["best_metadata_variant"]
     seeds = [int(s) for s in protocol["neural_seeds"]]
     variants_list = protocol["variants"]
     benchmark_id = protocol["benchmark_id"]
 
+    rq2 = {
+        "best_variant": protocol.get("rq2_best_variant", protocol.get("best_variant", "baseline")),
+        "best_alpha": protocol.get("rq2_best_alpha", protocol.get("best_alpha", 0)),
+    }
+    rq3 = {"best_variant": protocol["best_metadata_variant"]}
+
     # The backbone MUST come from the protocol manifest (frozen by
-    # rq4-init from the gSASRec RQ2/RQ3 winners). We enforce gsasrec-only
-    # here so a stale or hand-edited protocol cannot drive a non-gsasrec
+    # rq4-init from the BERT4Rec RQ2/RQ3 winners). We enforce BERT4Rec-only
+    # here so a stale or hand-edited protocol cannot drive a non-bert4rec
     # run. The RQ4 contract uses light provenance only
     # (preprocessing_version + data_source).
     backbone = _validate_protocol_backbone(protocol)
@@ -272,19 +292,34 @@ def main() -> None:
     total = len(variants_list) * len(seeds)
     print(f"RQ4 ablation: backbone={backbone}, {len(variants_list)} variants x {len(seeds)} seeds = {total} runs")
     print(f"Protocol: {args.protocol}")
-    print(f"Best alpha: {best_alpha}")
-    print(f"Best metadata variant: {best_variant}")
+    print(f"RQ2 best variant: {rq2['best_variant']}, RQ2 best alpha: {rq2['best_alpha']}")
+    print(f"Best metadata variant: {rq3['best_variant']}")
     print(f"Benchmark ID: {benchmark_id}")
+
+    manifest_path = Path(args.output_dir) / "rq4" / benchmark_id / "benchmark_manifest.json"
+    if not manifest_path.exists():
+        create_manifest(
+            manifest_path,
+            variants=variants_list,
+            seeds=seeds,
+            benchmark_id=benchmark_id,
+            backbone=backbone,
+        )
 
     failed_runs: list[tuple[str, int]] = []
     for i, variant in enumerate(variants_list):
-        variant_cfg = _get_variant_config(variant, best_alpha, best_variant)
+        variant_cfg = _get_variant_config(variant, rq2, rq3)
         for j, seed in enumerate(seeds):
             run_num = i * len(seeds) + j + 1
+            if is_completed(manifest_path, variant, seed):
+                print(f"\n[{run_num}/{total}] SKIP {variant}, seed={seed} (already completed)")
+                continue
             print(f"\n[{run_num}/{total}] {variant}, seed={seed}")
             result = _run_single(args, backbone, variant, seed, variant_cfg, benchmark_id, protocol)
             if result is None:
                 failed_runs.append((variant, seed))
+            else:
+                mark_completed(manifest_path, variant, seed)
 
     if failed_runs:
         n_failed = len(failed_runs)
@@ -295,6 +330,7 @@ def main() -> None:
             f"Run `rq4-collect` to verify which seeds are missing."
         )
 
+    finalize_manifest(manifest_path)
     print(f"\nDone. {total} runs completed. Results logged to MLflow experiment '{EXPERIMENT_NAME}'.")
     print(f"Run: make rq4-collect")
 

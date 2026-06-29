@@ -7,13 +7,11 @@ import sys
 from pathlib import Path
 
 import numpy as np
-import scipy.stats
-from statsmodels.stats.multitest import multipletests
-from statsmodels.stats.weightstats import DescrStatsW
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from training.mlflow_contract import HEURISTIC_MODELS
+from training.stat_tests import apply_holm_correction, compute_seed_paired_t_test
 
 
 PRIMARY_METRIC = "test_NDCG_at_10"
@@ -95,18 +93,6 @@ def relative_improvement(winner_mean: float, baseline_mean: float) -> float | No
     return (winner_mean - baseline_mean) / baseline_mean
 
 
-def _count_wins_ties_losses(differences: np.ndarray) -> tuple[int, int, int]:
-    tie_mask = np.isclose(differences, 0.0)
-    wins = int(np.sum((differences > 0) & ~tie_mask))
-    ties = int(np.sum(tie_mask))
-    losses = int(np.sum((differences < 0) & ~tie_mask))
-    assert wins + ties + losses == len(differences), (
-        f"wins({wins}) + ties({ties}) + losses({losses}) "
-        f"!= {len(differences)}"
-    )
-    return wins, ties, losses
-
-
 def _format_p_value(value: float | None) -> str:
     if value is None:
         return "-"
@@ -119,39 +105,7 @@ def _compute_paired_stats(
     winner_values: np.ndarray,
     baseline_values: np.ndarray,
 ) -> dict:
-    differences = winner_values - baseline_values
-
-    if np.all(differences == 0):
-        return {
-            "mean_difference": 0.0,
-            "std_difference": 0.0,
-            "ci95_low": 0.0,
-            "ci95_high": 0.0,
-            "t_statistic": 0.0,
-            "raw_p_value": 1.0,
-            "wins": 0,
-            "ties": len(differences),
-            "losses": 0,
-        }
-
-    wins, ties, losses = _count_wins_ties_losses(differences)
-    t_result = scipy.stats.ttest_rel(
-        winner_values, baseline_values, alternative="two-sided"
-    )
-    diff_stats = DescrStatsW(differences)
-    ci_low, ci_high = diff_stats.tconfint_mean(alpha=0.05)
-
-    return {
-        "mean_difference": float(differences.mean()),
-        "std_difference": float(differences.std(ddof=1)),
-        "ci95_low": float(ci_low),
-        "ci95_high": float(ci_high),
-        "t_statistic": float(t_result.statistic),
-        "raw_p_value": float(t_result.pvalue),
-        "wins": wins,
-        "ties": ties,
-        "losses": losses,
-    }
+    return compute_seed_paired_t_test(winner_values, baseline_values)
 
 
 def _run_comparisons(
@@ -227,15 +181,7 @@ def _run_comparisons(
             )
 
     if neural_results:
-        raw_p_values = [r["raw_p_value"] for r in neural_results]
-        reject, adjusted_p, _, _ = multipletests(
-            raw_p_values, alpha=0.05, method="holm"
-        )
-        for result, adjusted_val, significant in zip(
-            neural_results, adjusted_p, reject, strict=True
-        ):
-            result["holm_adjusted_p_value"] = float(adjusted_val)
-            result["significant_after_holm"] = bool(significant)
+        apply_holm_correction(neural_results, p_key="raw_p_value")
 
     for baseline in heuristic_baselines:
         baseline_rows = [r for r in run_rows if r["model"] == baseline]
