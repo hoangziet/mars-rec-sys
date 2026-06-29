@@ -119,7 +119,9 @@ class BERT4Rec(nn.Module):
         )
         return torch.nan_to_num(
             torch.cat([padding_logits, real_item_logits], dim=-1),
-            nan=float("-inf"),
+            nan=0.0,
+            posinf=0.0,
+            neginf=0.0,
         )
 
     def loss(self, input_seq, labels, engagement=None, watch_input_ids=None):
