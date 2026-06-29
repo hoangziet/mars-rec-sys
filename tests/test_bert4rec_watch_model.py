@@ -52,3 +52,11 @@ def test_bert4rec_forward_with_no_watch_mode_unchanged():
     model = BERT4Rec(n_items=20, max_len=4, hidden_dim=8, num_heads=2, num_layers=1, dropout=0.0)
     logits = model(torch.tensor([[1, 2, 3, 4]]))
     assert logits.shape == (1, 4, 21)
+
+
+def test_bert4rec_forward_sanitizes_non_finite_logits():
+    model = BERT4Rec(n_items=20, max_len=4, hidden_dim=8, num_heads=2, num_layers=1, dropout=0.0)
+    with torch.no_grad():
+        model.item_embedding.weight[1].fill_(float("nan"))
+    logits = model(torch.tensor([[1, 2, 3, 4]]))
+    assert torch.isfinite(logits).all()
