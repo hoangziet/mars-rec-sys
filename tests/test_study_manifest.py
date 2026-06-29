@@ -105,3 +105,8 @@ def test_manifest_path_for_reports_dir_uses_parent_manifest(tmp_path):
 def test_manifest_path_for_root_dir_uses_local_manifest(tmp_path):
     root_dir = tmp_path / "rq3-x"
     assert manifest_path_for_output_dir(root_dir) == root_dir / "benchmark_manifest.json"
+
+
+def test_manifest_path_for_stats_dir_uses_parent_manifest(tmp_path):
+    stats_dir = tmp_path / "rq4-x" / "stats"
+    assert manifest_path_for_output_dir(stats_dir) == tmp_path / "rq4-x" / "benchmark_manifest.json"

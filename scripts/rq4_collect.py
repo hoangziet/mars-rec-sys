@@ -28,7 +28,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from scripts.rq4_per_user import validate_per_user_file
-from scripts.study_manifest import load_manifest
+from scripts.study_manifest import load_manifest, manifest_path_for_output_dir
 from training.mlflow_utils import configure_mlflow
 
 from training.mlflow_contract import RQ4_EXPERIMENT_NAME
@@ -214,7 +214,7 @@ def main() -> None:
         raise RuntimeError("--protocol is required for rq4_collect")
 
     output_dir = Path(args.output_dir) if args.output_dir else Path("experiments") / "rq4" / args.benchmark_id
-    load_manifest(output_dir / "benchmark_manifest.json", require_completed=True)
+    load_manifest(manifest_path_for_output_dir(output_dir), require_completed=True)
 
     configure_mlflow(mlflow_module=mlflow)
 
