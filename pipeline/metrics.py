@@ -210,6 +210,52 @@ def evaluate_bert4rec(
 
 
 @torch.no_grad()
+def evaluate_bert4rec_detailed(
+    model,
+    eval_loader,
+    device,
+    k_list: tuple = (10, 20),
+) -> tuple[dict, list[dict]]:
+    """Full-sort BERT4Rec evaluation with per-user detail export."""
+    from pipeline.watch_features import WATCH_MASK_ID
+
+    model.eval()
+    all_ranks: list[int] = []
+    per_user: list[dict] = []
+    mask_token = model.mask_token
+    watch_needed = model.watch_mode in {"embedding", "both"}
+
+    for batch in _progress(eval_loader, desc="eval bert4rec detail"):
+        input_seq = batch["input_seq"].to(device)
+        history_mask = batch["history_mask"].to(device)
+        target = batch["target"].to(device)
+        user_idx = batch["user"]
+
+        mask_col = torch.full((input_seq.size(0), 1), mask_token, dtype=torch.long, device=device)
+        input_seq = torch.cat([input_seq[:, 1:], mask_col], dim=1)
+
+        watch_input_ids = None
+        if watch_needed and "watch_input_ids" in batch:
+            watch_ids = batch["watch_input_ids"].to(device)
+            mask_watch = torch.full((watch_ids.size(0), 1), WATCH_MASK_ID, dtype=torch.long, device=device)
+            watch_input_ids = torch.cat([watch_ids[:, 1:], mask_watch], dim=1)
+
+        logits = model(input_seq, watch_input_ids=watch_input_ids)
+        last_logits = logits[:, -1, :]
+        ranks = _ranks_from_logits(last_logits, history_mask, target)
+        all_ranks.extend(ranks)
+
+        for i, rank in enumerate(ranks):
+            row = {"user_idx": int(user_idx[i]), "target_item": int(target[i]), "rank": rank}
+            for k in k_list:
+                row[f"hit_at_{k}"] = 1.0 if rank <= k else 0.0
+                row[f"ndcg_at_{k}"] = 1.0 / np.log2(rank + 1) if rank <= k else 0.0
+            per_user.append(row)
+
+    return compute_metrics_from_ranks(all_ranks, k_list), per_user
+
+
+@torch.no_grad()
 def evaluate_bprmf(
     model,
     eval_loader,
