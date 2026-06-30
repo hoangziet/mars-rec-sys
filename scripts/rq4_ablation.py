@@ -231,9 +231,12 @@ def _export_per_user(model, test_loader, device, variant, seed, output_dir, benc
     partial canonical artifact at the target path. Caller is responsible
     for marking the run FAILED on failure.
     """
-    from pipeline.metrics import evaluate_sequential_detailed
+    from pipeline.metrics import evaluate_bert4rec_detailed, evaluate_sequential_detailed
 
-    _, per_user = evaluate_sequential_detailed(model, test_loader, device)
+    if hasattr(model, "mask_token"):
+        _, per_user = evaluate_bert4rec_detailed(model, test_loader, device)
+    else:
+        _, per_user = evaluate_sequential_detailed(model, test_loader, device)
     for row in per_user:
         row["variant"] = variant
         row["seed"] = seed
