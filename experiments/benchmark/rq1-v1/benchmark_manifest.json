@@ -18,5 +18,36 @@
     3407,
     9999
   ],
-  "heuristic_seed": 42
+  "heuristic_seed": 42,
+  "status": "completed",
+  "completed_run_keys": [
+    "bert4rec:123:base",
+    "bert4rec:2024:base",
+    "bert4rec:3407:base",
+    "bert4rec:42:base",
+    "bert4rec:9999:base",
+    "bprmf:123:base",
+    "bprmf:2024:base",
+    "bprmf:3407:base",
+    "bprmf:42:base",
+    "bprmf:9999:base",
+    "gru4rec:123:base",
+    "gru4rec:2024:base",
+    "gru4rec:3407:base",
+    "gru4rec:42:base",
+    "gru4rec:9999:base",
+    "gsasrec:123:base",
+    "gsasrec:2024:base",
+    "gsasrec:3407:base",
+    "gsasrec:42:base",
+    "gsasrec:9999:base",
+    "itemcf:42:base",
+    "popularity:42:base",
+    "sasrec:123:base",
+    "sasrec:2024:base",
+    "sasrec:3407:base",
+    "sasrec:42:base",
+    "sasrec:9999:base"
+  ],
+  "failed_run_keys": []
 }

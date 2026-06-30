@@ -116,18 +116,6 @@ def main() -> None:
             f"RQ2={rq2_ds}, RQ3={rq3_ds}"
         )
 
-    output_dir = Path(args.output_dir) if args.output_dir else Path("experiments") / "rq4" / args.benchmark_id
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    path = output_dir / "rq4_protocol_manifest.json"
-    if path.exists():
-        raise RuntimeError(
-            f"Protocol manifest already exists: {path}. "
-            "Delete it first or use a new benchmark_id."
-        )
-
-    data_dir = Path(args.data_dir)
-
     manifest = {
         "benchmark_id": args.benchmark_id,
         "backbone": "bert4rec",
@@ -149,6 +137,20 @@ def main() -> None:
             "M3": {"use_structured": True,  "use_text": True},
         },
     }
+
+    output_dir = Path(args.output_dir) if args.output_dir else Path("experiments") / "rq4" / args.benchmark_id
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    path = output_dir / "rq4_protocol_manifest.json"
+    if path.exists():
+        existing = json.loads(path.read_text())
+        if existing == manifest:
+            print(f"Protocol manifest already exists and matches requested config: {path}")
+            return
+        raise RuntimeError(
+            f"Protocol manifest already exists and does not match requested config: {path}. "
+            "Delete it first or use a new benchmark_id."
+        )
 
     path.write_text(json.dumps(manifest, indent=2) + "\n")
 

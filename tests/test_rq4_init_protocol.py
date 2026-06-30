@@ -149,11 +149,47 @@ def test_init_rejects_rq3_winner_missing_key(tmp_path):
         sys.argv = saved
 
 
-def test_init_rejects_existing_manifest(tmp_path):
+def test_init_is_idempotent_when_existing_manifest_matches(tmp_path):
     rq2, rq3 = _write_winners(tmp_path)
     output = tmp_path / "out"
-    output.mkdir(parents=True, exist_ok=True)
-    (output / "rq4_protocol_manifest.json").write_text("{}")  # pre-existing
+    _run_with_argv([
+        "rq4_init_protocol.py",
+        "--benchmark-id", "test-rq4",
+        "--rq2-winners", str(rq2),
+        "--rq3-winners", str(rq3),
+        "--output-dir", str(output),
+        "--data-dir", str(tmp_path),
+        "--seeds", "42", "123",
+    ])
+
+    before = json.loads((output / "rq4_protocol_manifest.json").read_text())
+
+    _run_with_argv([
+        "rq4_init_protocol.py",
+        "--benchmark-id", "test-rq4",
+        "--rq2-winners", str(rq2),
+        "--rq3-winners", str(rq3),
+        "--output-dir", str(output),
+        "--data-dir", str(tmp_path),
+        "--seeds", "42", "123",
+    ])
+
+    after = json.loads((output / "rq4_protocol_manifest.json").read_text())
+    assert after == before
+
+
+def test_init_rejects_existing_manifest_when_config_differs(tmp_path):
+    rq2, rq3 = _write_winners(tmp_path)
+    output = tmp_path / "out"
+    _run_with_argv([
+        "rq4_init_protocol.py",
+        "--benchmark-id", "test-rq4",
+        "--rq2-winners", str(rq2),
+        "--rq3-winners", str(rq3),
+        "--output-dir", str(output),
+        "--data-dir", str(tmp_path),
+        "--seeds", "42", "123",
+    ])
 
     saved = sys.argv
     sys.argv = [
@@ -162,9 +198,11 @@ def test_init_rejects_existing_manifest(tmp_path):
         "--rq2-winners", str(rq2),
         "--rq3-winners", str(rq3),
         "--output-dir", str(output),
+        "--data-dir", str(tmp_path),
+        "--seeds", "42",
     ]
     try:
-        with pytest.raises(RuntimeError, match="already exists"):
+        with pytest.raises(RuntimeError, match="already exists|does not match"):
             rq4_init_protocol.main()
     finally:
         sys.argv = saved

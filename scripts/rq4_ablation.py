@@ -14,12 +14,10 @@ from __future__ import annotations
 
 import argparse
 import json
-import random
 import sys
 from pathlib import Path
 
 import mlflow
-import numpy as np
 import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -38,6 +36,7 @@ from scripts.study_manifest import create_manifest, finalize_manifest, is_comple
 from training.configs import build_model_config
 from training.mlflow_contract import RQ4_EXPERIMENT_NAME, build_run_name, build_training_tags
 from training.mlflow_utils import collect_common_run_metadata, configure_mlflow
+from training.repro import seed_everything
 from training.trainer import NoValidCheckpointError, Trainer
 
 
@@ -114,11 +113,7 @@ def _get_variant_config(variant: str, rq2: dict, rq3: dict) -> dict:
 
 
 def _run_single(args, backbone: str, variant: str, seed: int, variant_cfg: dict, benchmark_id: str, protocol: dict) -> dict:
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
+    seed_everything(seed)
 
     data_dir = Path(args.data_dir)
     stats = load_stats(data_dir / "reports" / "dataset_stats.json")

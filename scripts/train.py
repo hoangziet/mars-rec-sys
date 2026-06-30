@@ -9,12 +9,10 @@ Usage:
     uv run python scripts/train.py model=bprmf seed=123
 """
 
-import random
 import sys
 from pathlib import Path
 
 import hydra
-import numpy as np
 import torch
 from omegaconf import DictConfig
 
@@ -25,22 +23,10 @@ from pipeline.loaders import get_eval_loader, get_val_loss_loader, load_stats
 from pipeline.optim import build_optimizer, build_scheduler
 from training.mlflow_contract import build_run_name, build_training_tags, get_experiment_name_for_phase
 from training.mlflow_utils import collect_common_run_metadata
+from training.repro import seed_everything
 from training.trainer import Trainer
 
 TRAINABLE_MODELS = ("sasrec", "gsasrec", "gru4rec", "bert4rec", "bprmf")
-
-
-def seed_everything(seed: int) -> None:
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
-    if hasattr(torch.backends, "cudnn"):
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
-
-
 def validate_processed_layout(data_dir: Path) -> None:
     required = [
         data_dir / "reports" / "dataset_stats.json",

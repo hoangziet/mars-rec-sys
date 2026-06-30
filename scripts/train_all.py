@@ -13,7 +13,6 @@ Supported models:
 
 import argparse
 import json
-import random
 import sys
 from pathlib import Path
 
@@ -38,24 +37,12 @@ from pipeline.optim import build_optimizer, build_scheduler
 from scripts.train import validate_processed_layout
 from training.mlflow_contract import build_run_name, build_training_tags, get_experiment_name_for_phase
 from training.mlflow_utils import collect_common_run_metadata, configure_mlflow, sanitize_metric_name
+from training.repro import seed_everything
 from training.trainer import Trainer
 
 DEFAULT_SEEDS = [42, 123, 2024, 3407, 9999]
 NEURAL_MODELS = {"sasrec", "gsasrec", "gru4rec", "bert4rec", "bprmf"}
 HEURISTIC_MODELS = {"popularity", "itemcf"}
-
-
-def seed_everything(seed: int) -> None:
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
-    if hasattr(torch.backends, "cudnn"):
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
-
-
 def get_seeds_for_model(model_name: str, seeds: list[int]) -> list[int]:
     return list(seeds) if model_name in NEURAL_MODELS else [seeds[0]]
 
