@@ -1,0 +1,76 @@
+% ==================================================
+% CONCLUSION
+% ==================================================
+
+\section{Conclusion}
+
+\subsection{Summary of Contributions}
+
+This thesis studies next learning resource prediction on the MARS e-learning dataset. At the current writing stage, the completed contribution is the problem formulation, dataset analysis, planned methodology, and experimental design. The final model results will be added after training and evaluation are completed.
+
+\begin{enumerate}
+    \item \textbf{Problem formulation:} The project defines MARS recommendation as a sequential top-$K$ next-item prediction task.
+    \item \textbf{Dataset analysis:} The EDA identifies high sparsity, short user histories, long-tail item popularity, and partial metadata coverage.
+    \item \textbf{Experimental design:} The planned evaluation compares popularity, item-based collaborative filtering, BPR-MF, SASRec, and a gSASRec-oriented direction.
+\end{enumerate}
+
+\subsection{Key Findings}
+
+The current data analysis shows that:
+
+\begin{itemize}
+    \item The active MARS dataset contains 3,007 users, 958 items, and 24,622 interactions.
+    \item The interaction matrix is highly sparse, with 99.1453\% sparsity.
+    \item Only 1,676 users have at least three interactions and are eligible for leave-one-out evaluation.
+    \item Metadata is useful but uneven: software, theme, duration, and type are complete, while difficulty is available for 40.70\% of items.
+\end{itemize}
+
+[TBD: Add final findings about model performance after experiments are completed.]
+
+\subsection{Limitations}
+
+While promising, this work has several limitations:
+
+\begin{itemize}
+    \item Evaluation is limited to a single dataset; generalization to other e-learning platforms remains uncertain.
+    \item Many users have short histories, which limits sequential signal and makes personalization difficult.
+    \item Difficulty metadata is incomplete, so metadata-aware modeling must handle missing values carefully.
+    \item Offline metrics do not directly prove improved learning outcomes or learner satisfaction.
+    \item Prototype-scale deployment does not fully address large-scale production serving constraints.
+\end{itemize}
+
+\subsection{Future Work}
+
+Potential extensions of this research include:
+
+\begin{enumerate}
+    \item \textbf{Multi-Modal Resources:} Extending the model to handle diverse resource types (videos, documents, quizzes, assignments)
+    \item \textbf{Cross-Platform Generalization:} Evaluating on multiple e-learning datasets to assess generalization
+    \item \textbf{Real-Time Recommendations:} Developing online learning algorithms for practical deployment
+    \item \textbf{Explainability:} Adding interpretability mechanisms to explain why specific resources are recommended
+    \item \textbf{Pedagogical Constraints:} Incorporating learning objectives and prerequisite information more explicitly
+    \item \textbf{User Diversity:} Personalization based on learning styles, backgrounds, and goals
+\end{enumerate}
+
+\subsection{Broader Impact}
+
+This work contributes to the growing field of intelligent e-learning systems. By improving resource recommendations, we aim to:
+
+\begin{itemize}
+    \item Enhance student learning outcomes and engagement
+    \item Reduce cognitive load through curated learning sequences
+    \item Support educators in creating more effective learning experiences
+    \item Enable broader access to quality educational resources through better discovery
+\end{itemize}
+
+\subsection{Final Remarks}
+
+Sequential recommendation in e-learning is an important and practical research direction. The MARS dataset provides a challenging testbed because it combines real learner behavior, sparse interactions, short sequences, and useful but incomplete metadata. [TBD: Replace this placeholder with the final conclusion after all experiments are complete.]
+
+\vspace{1cm}
+
+\section*{References}
+
+[TBD: Add complete BibTeX entries and citations for SASRec, gSASRec, BPR-MF, GRU4Rec, TiSASRec, MARS dataset, and evaluation metrics before the final submission.]
+
+\newpage

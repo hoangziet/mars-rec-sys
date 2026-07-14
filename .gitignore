@@ -1,0 +1,63 @@
+# env
+.env
+.env.*
+
+# data
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+data/interim/*
+!data/interim/.gitkeep
+data/external/*
+!data/external/.gitkeep
+
+# python
+.venv/
+.mypy_cache/
+.pytest_cache/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# notebook
+.ipynb_checkpoints/
+*.ipynb
+
+# experiments
+experiments/*
+!experiments/.gitkeep
+
+# mlruns
+mlruns/
+
+# output
+outputs/
+result.txt
+
+# IDE
+.vscode/
+
+# models
+*.pt
+
+
+# others
+.claude/
+.codex/
+.agents/
+.serena/
+docs/
+AGENTS.md 
+CLAUDE.md
+.opencode/
+.sisyphus/
+skills-lock.json
+
+# VPS 
+forward-port-linux.sh
+forward-port-win.ps1
+
+# tests
+tests/
