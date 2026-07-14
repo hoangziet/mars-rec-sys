@@ -1,4 +1,4 @@
-"""Shared manifest helpers for RQ2/RQ3/RQ4 study campaigns.
+"""Shared manifest helpers for RQ2/RQ3 study campaigns.
 
 Follows the same lifecycle pattern as the RQ1 benchmark manifest.
 """

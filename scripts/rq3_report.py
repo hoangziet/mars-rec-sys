@@ -13,11 +13,12 @@ All selected runs are required to share the same:
     - benchmark_id
     - preprocessing_version
     - data_source
+    - no-watch contract (watch_mode=none, watch_alpha=0.0)
 Missing or mismatched provenance fails the report — there is no silent
-fallback to "mars-preprocess-v1" or "data/processed".
+fallback.
 
 Usage:
-    uv run python scripts/rq3_report.py --benchmark-id rq3-metadata-tune
+    uv run python scripts/rq3_report.py --benchmark-id rq3-metadata-base-ce
 """
 
 from __future__ import annotations
@@ -54,16 +55,13 @@ def write_final_report(
     *,
     benchmark_id: str,
     best_variant: str,
-    base_watch_variant: str,
-    base_watch_alpha: float | None,
     summary_rows: list[dict],
 ) -> None:
     with open(output_dir / "rq3_final_report.md", "w") as f:
         f.write("# RQ3 Final Report\n\n")
         f.write(f"Benchmark: {benchmark_id}\n\n")
         f.write(f"Best metadata variant: **{best_variant}**\n\n")
-        f.write(f"Base watch variant from RQ2: **{base_watch_variant}**\n\n")
-        f.write(f"Base watch alpha from RQ2: **{base_watch_alpha}**\n\n")
+        f.write("Watch integration: disabled (`watch_mode=none`, `watch_alpha=0.0`).\n\n")
         f.write("Variants ranked by mean validation NDCG@10.\n\n")
         f.write("| Rank | Variant | Seeds | Val NDCG@10 |\n")
         f.write("| ---: | --- | ---: | ---: |\n")
@@ -80,11 +78,36 @@ def _validate_variant_names(selected: list[dict]) -> None:
     if invalid:
         raise RuntimeError(f"Invalid metadata_variant values in selected runs: {invalid}")
 
+
+def _validate_no_watch(selected: list[dict]) -> None:
+    """All selected runs must confirm no-watch contract."""
+    for r in selected:
+        wm = r.get("watch_mode")
+        wa = r.get("watch_alpha")
+        if wm is None or wa is None:
+            raise RuntimeError(
+                f"{r['run_id']} ({r['run_name']}): missing watch tags "
+                f"(watch_mode={wm!r}, watch_alpha={wa!r})"
+            )
+        if wm != "none":
+            raise RuntimeError(
+                f"{r['run_id']} ({r['run_name']}): watch_mode={wm!r}, "
+                "expected 'none'. All RQ3 runs must use no-watch configuration."
+            )
+        try:
+            if float(wa) != 0.0:
+                raise RuntimeError(
+                    f"{r['run_id']} ({r['run_name']}): watch_alpha={wa!r}, "
+                    "expected 0.0."
+                )
+        except (ValueError, TypeError) as exc:
+            raise RuntimeError(
+                f"{r['run_id']} ({r['run_name']}): watch_alpha={wa!r} "
+                f"is not numeric: {exc}"
+            ) from exc
+
+
 def _validate_rq3_grid(selected: list[dict]) -> None:
-    """Validate that every (variant, seed) appears exactly once and seeds are
-    consistent across variants. The expected grid is derived from the runs,
-    not hardcoded — a partial variant sweep is valid if complete.
-    """
     if not selected:
         raise RuntimeError("No runs to validate")
     actual_pairs = {(str(r["variant"]), int(r["seed"])) for r in selected}
@@ -108,7 +131,6 @@ def _validate_rq3_grid(selected: list[dict]) -> None:
 
 
 def _parse_seed(run, run_id: str) -> int:
-    """Strict seed parsing — never silently coerce to 0."""
     raw = run.data.params.get("seed")
     if raw is None:
         raise RuntimeError(
@@ -126,12 +148,6 @@ def _parse_seed(run, run_id: str) -> int:
 
 
 def _validate_provenance(selected: list[dict]) -> dict:
-    """All selected runs must share the same provenance.
-
-    Required fields: backbone, benchmark_id, preprocessing_version,
-    data_source. Missing any field on any run, or any
-    disagreement across runs, fails the report.
-    """
     expected: dict[str, str] = {}
     for r in selected:
         for key in REQUIRED_PROVENANCE_FIELDS:
@@ -155,9 +171,8 @@ def _validate_provenance(selected: list[dict]) -> dict:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="RQ3: report metadata tuning results.")
+    parser = argparse.ArgumentParser(description="RQ3: report metadata tuning results (BERT4Rec base, no watch).")
     parser.add_argument("--benchmark-id", required=True)
-    parser.add_argument("--rq2-winner", required=True, help="Path to rq2_best_watch.json")
     parser.add_argument("--output-dir", default=None)
     return parser
 
@@ -172,8 +187,6 @@ def main() -> None:
     load_manifest(manifest_path_for_output_dir(output_dir), require_completed=True)
 
     configure_mlflow(mlflow_module=mlflow)
-
-    rq2_winner = json.loads(Path(args.rq2_winner).read_text())
 
     client = mlflow.tracking.MlflowClient()
     experiment = client.get_experiment_by_name(EXPERIMENT_NAME)
@@ -209,6 +222,8 @@ def main() -> None:
             "variant": variant,
             "seed": seed,
             "val_ndcg_at_10": val_ndcg,
+            "watch_mode": tags.get("watch_mode"),
+            "watch_alpha": tags.get("watch_alpha"),
             "provenance": provenance,
             "run_id": run.info.run_id,
             "run_name": run.info.run_name,
@@ -218,6 +233,7 @@ def main() -> None:
     if not selected:
         raise RuntimeError(f"No reportable runs found for benchmark {args.benchmark_id}")
     _validate_variant_names(selected)
+    _validate_no_watch(selected)
     _validate_rq3_grid(selected)
     provenance = _validate_provenance(selected)
     if provenance["backbone"] != "bert4rec":
@@ -246,11 +262,9 @@ def main() -> None:
         writer.writeheader()
         writer.writerows(summary_rows)
 
-    # Write summary JSON (for compare stage)
     with open(output_dir / "rq3_summary.json", "w") as f:
         json.dump(summary_rows, f, indent=2)
 
-    # Write runs CSV (for compare stage)
     run_fields = ["variant", "seed", "val_ndcg_at_10"]
     if any("test_NDCG_at_10" in r for r in selected):
         run_fields.append("test_NDCG_at_10")
@@ -262,6 +276,7 @@ def main() -> None:
     with open(output_dir / "rq3_variant_table.md", "w") as f:
         f.write("# RQ3 Metadata Variant Tuning\n\n")
         f.write(f"Best variant: **{best_variant}**\n\n")
+        f.write("Watch integration: disabled (`watch_mode=none`, `watch_alpha=0.0`).\n\n")
         f.write("Variants ranked by mean validation NDCG@10.\n\n")
         f.write("| Rank | Variant | Seeds | Val NDCG@10 |\n")
         f.write("| ---: | --- | ---: | ---: |\n")
@@ -272,8 +287,6 @@ def main() -> None:
         output_dir,
         benchmark_id=args.benchmark_id,
         best_variant=best_variant,
-        base_watch_variant=rq2_winner["best_variant"],
-        base_watch_alpha=rq2_winner.get("best_alpha"),
         summary_rows=summary_rows,
     )
 
@@ -285,8 +298,8 @@ def main() -> None:
             "best_variant": best_variant,
             "benchmark_id": args.benchmark_id,
             "backbone": "bert4rec",
-            "base_watch_variant": rq2_winner["best_variant"],
-            "base_watch_alpha": rq2_winner.get("best_alpha"),
+            "watch_mode": "none",
+            "watch_alpha": 0.0,
             "candidate_grid": observed_variants,
             "seeds": observed_seeds,
             "selection_metric": PRIMARY_METRIC,
