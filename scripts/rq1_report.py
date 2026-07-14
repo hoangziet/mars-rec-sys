@@ -291,7 +291,7 @@ def main() -> None:
             )
 
     # ------------------------------------------------------------------
-    # Winner artifact (machine-readable contract for RQ2/RQ3/RQ4)
+    # Winner artifact (machine-readable contract for RQ2/RQ3)
     # ------------------------------------------------------------------
     winner_row = summary_rows[0]
     winner_model = winner_row["model"]
@@ -326,20 +326,20 @@ def main() -> None:
     )
 
     # ------------------------------------------------------------------
-    # Backbone notice (warn if winner cannot drive RQ2/RQ3/RQ4)
+    # Backbone notice (warn if winner cannot drive RQ2/RQ3)
     # ------------------------------------------------------------------
     from training.winner_artifact import is_heuristic_backbone, is_supported_backbone
 
     if winner_model in HEURISTIC_MODELS or is_heuristic_backbone(winner_model):
         print(
             f"\nWARNING: Winner '{winner_model}' is a heuristic / non-sequential model. "
-            "RQ2/RQ3/RQ4 require a neural backbone (sasrec/gsasrec/gru4rec/bert4rec/bprmf). "
+            "RQ2/RQ3 require a neural backbone (sasrec/gsasrec/gru4rec/bert4rec/bprmf). "
             "Re-run RQ1 with at least one neural model in the candidate set."
         )
     elif not is_supported_backbone(winner_model):
         print(
             f"\nWARNING: Winner '{winner_model}' is not a supported backbone for "
-            "RQ2/RQ3/RQ4. Allowed: sasrec, gsasrec, gru4rec, bert4rec, bprmf."
+            "RQ2/RQ3. Allowed: sasrec, gsasrec, gru4rec, bert4rec, bprmf."
         )
 
     print(f"\nWinner: {winner_model}")

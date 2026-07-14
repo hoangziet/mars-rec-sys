@@ -6,7 +6,6 @@ RQ2_EXPERIMENT_NAME = "mars_confidence_tuning"
 RQ2_ALPHA_EXPERIMENT_NAME = "mars_watch_alpha_tuning"
 RQ2_VARIANT_EXPERIMENT_NAME = "mars_watch_variant_comparison"
 RQ3_EXPERIMENT_NAME = "mars_metadata_tuning"
-RQ4_EXPERIMENT_NAME = "mars_final_ablation"
 
 TRAINING_EXPERIMENTS = {
     "smoke": SMOKE_EXPERIMENT_NAME,
@@ -15,7 +14,6 @@ TRAINING_EXPERIMENTS = {
     "rq2_alpha_tuning": RQ2_ALPHA_EXPERIMENT_NAME,
     "rq2_variant_comparison": RQ2_VARIANT_EXPERIMENT_NAME,
     "rq3_tuning": RQ3_EXPERIMENT_NAME,
-    "rq4_final": RQ4_EXPERIMENT_NAME,
 }
 
 SHARED_EXPERIMENTS = {

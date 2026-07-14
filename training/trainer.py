@@ -63,8 +63,8 @@ def _flatten_dict(d: dict, prefix: str = "") -> dict:
 class NoValidCheckpointError(RuntimeError):
     """Raised by Trainer.train() when no valid checkpoint was produced.
 
-    Callers (e.g. rq4_ablation) must catch this specifically — it is
-    not a system error and should skip per-user export, not crash the
+    Callers must catch this specifically — it is
+    not a system error and should skip downstream reporting, not crash the
     entire campaign. Any other RuntimeError indicates a real bug and
     must propagate.
     """
@@ -187,7 +187,7 @@ class Trainer:
         self._mlflow = None
         self._mlflow_run = None
         # Stable handle to the most recently opened MLflow run, preserved
-        # across close() so post-train artifact promotion (e.g. rq4_ablation)
+        # across close() so post-train artifact promotion
         # can still find the run after the trainer terminates it.
         self.last_run_id: str | None = None
         self._mlflow_config = mlflow_config or {}

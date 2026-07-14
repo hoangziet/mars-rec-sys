@@ -1,7 +1,7 @@
 [project]
 name = "mars-rec-sys"
 version = "0.1.0"
-description = "Sequential course recommendation on the MARS e-learning dataset (7 models, full-sort evaluation, MLflow tracking, RQ1-RQ4 research workflow)."
+description = "Sequential course recommendation on the MARS e-learning dataset (7 models, full-sort evaluation, MLflow tracking, RQ1-RQ3 research workflow)."
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
 dependencies = [

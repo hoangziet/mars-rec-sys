@@ -52,7 +52,11 @@ AGENTS.md
 CLAUDE.md
 .opencode/
 .sisyphus/
+skills-lock.json
 
 # VPS 
 forward-port-linux.sh
 forward-port-win.ps1
+
+# tests
+tests/

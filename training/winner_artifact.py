@@ -18,12 +18,12 @@ winner of an RQ1 benchmark:
     }
 
 This artifact is kept for **reporting and audit** of the RQ1 benchmark.
-It is **NOT** consumed by the RQ2–RQ4 follow-up studies:
+It is **NOT** consumed by the RQ2–RQ3 follow-up studies:
 
-- RQ2 alpha tuning, RQ3 metadata tuning, and RQ4 final ablation are
-  all hardcoded to gSASRec as the backbone.
-- The RQ2 / RQ3 winner artifacts and the RQ4 protocol manifest are
-  the actual contract that drives RQ2–RQ4.
+- RQ2 alpha tuning and RQ3 metadata tuning are
+  all hardcoded to BERT4Rec as the backbone.
+- The RQ2 / RQ3 winner artifacts are
+  the actual contract that drives RQ2–RQ3.
 
 ``load_winner_artifact`` is still useful for external analysis, audits,
 or custom tooling that wants to read the RQ1 record. It validates the

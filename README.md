@@ -85,32 +85,13 @@ Writes winner-versus-baseline stats to `experiments/benchmark/<benchmark_id>/sta
 - `rq1_seed_pairs.csv` — per-seed paired values for every neural comparison
 - `rq1_significance.md` — formatted summary table
 
-## RQ2–RQ4 Workflow
+## RQ2–RQ3 Workflow
 
-RQ2–RQ4 are gSASRec-only follow-up studies. RQ1 remains the benchmark
-for model comparison, but it does not control the backbone used for
-RQ2–RQ4. The backbone is frozen to `gsasrec` in each RQ2/RQ3/RQ4
-script, and `rq4-init` re-validates that the RQ2 and RQ3 winner
-artifacts also declare `gsasrec` as the backbone.
-
-```text
-RQ1 benchmark (any model)
-   ↓
-RQ2 alpha tuning on gSASRec
-   ↓
-RQ3 metadata tuning on gSASRec
-   ↓
-RQ4 final gSASRec ablation
-```
+RQ2–RQ3 are BERT4Rec-only follow-up studies.
 
 The full flow:
 
 ```text
-RQ1 benchmark
-   ↓
-make rq1-report           -> rq1_winner.json (for reporting/audit only;
-                              not consumed by RQ2–RQ4)
-   ↓
 make rq2-alpha            -> RQ2 Stage A alpha grid on BERT4Rec-WL
    ↓
 make rq2-alpha-report     -> reports/rq2_best_alpha.json
@@ -123,50 +104,12 @@ make rq2-compare          -> stats/rq2_statistical_comparison.csv
    ↓
 make rq3-precompute       -> metadata/text artifacts
    ↓
-make rq3-tune             -> RQ3 M0–M3 grid on BERT4Rec winner from RQ2
+make rq3-tune             -> RQ3 M0–M3 grid on BERT4Rec base (no watch)
    ↓
 make rq3-report           -> reports/rq3_best_variant.json
    ↓
 make rq3-compare          -> stats/rq3_statistical_comparison.csv
-   ↓
-make rq4-init             -> frozen rq4_protocol_manifest.json
-                            (backbone=bert4rec + baseline_variant + provenance)
-   ↓
-make rq4-ablation         -> V0–V3 × 10 seeds (BERT4Rec watch+metadata ablation)
-   ↓
-make rq4-collect          -> validates exact runs, on-disk per-user CSVs,
-                              writes rq4_result_manifest.json
-   ↓
-make rq4-compare          -> user-level bootstrap/permutation + Holm correction
-                              (uses explicit baseline_variant, not variants[0])
-   ↓
-make rq4-subgroup         -> subgroup metrics from per-user outputs
-   ↓
-make rq4-report           -> final markdown report
 ```
-
-### RQ1 winner artifact (reporting/audit only)
-
-`rq1_report` writes a small JSON file recording the RQ1 winner. It is
-kept for reporting and audit, but it is no longer consumed by RQ2–RQ4:
-
-```json
-{
-  "schema_version": 1,
-  "benchmark_id": "rq1-2026-06-23",
-  "winner_model": "gsasrec",
-  "selection_metric": "best_val_ndcg_at_10",
-  "selection_split": "val",
-  "seed_set": [42, 123, 2024, 3407, 9999],
-  "data_source": "/abs/path/data/processed",
-  "preprocessing_version": "mars-preprocess-v1"
-}
-```
-
-RQ2–RQ4 do not read this file. The backbone in RQ2/RQ3 is the
-hardcoded constant `gsasrec` in each tune script; the backbone in RQ4
-is whatever `rq4-init` recorded into the protocol manifest (also
-`gsasrec`, re-validated by `rq4-ablation`).
 
 ### Fairness scope
 
@@ -189,66 +132,12 @@ Current declared exceptions:
 - `GRU4Rec` uses a paper-near pairwise ranking objective (`bpr_max`) rather than the full-catalog CE fallback.
 - `BERT4Rec` keeps a simplified masking pipeline, so it remains an adapted benchmark implementation rather than a full paper-faithful reproduction.
 
-### Provenance checks
-
-RQ2/RQ3 winner artifacts carry `backbone`, `data_source`,
-and `preprocessing_version` tags from the run that
-produced them. `rq2-report` and `rq3-report` validate that **every
-selected run agrees on all of these** and that the backbone is
-`gsasrec` — any mismatch or missing tag fails the report rather than
-silently writing a default. `rq4-init` re-checks that the RQ2 and RQ3
-winner artifacts also declare `gsasrec` before freezing the protocol.
-
-The RQ4 protocol uses **lightweight provenance** only:
-
-- `preprocessing_version` and `data_source` from the validated RQ2/RQ3 winners
-- `backbone = "gsasrec"`
-
-There is **no SHA256 hashing** of the dataset manifest, configs, or text
-embeddings, and **no git-commit runtime gate**. The research contract is
-gSASRec-only; the protocol manifest is checked for backbone and
-provenance consistency, not for byte-exact reproducibility of data or
-code.
-
-### RQ4 explicit baseline
-
-The RQ4 protocol manifest declares an explicit `baseline_variant`
-(default `V0`). `rq4-compare` reads this field and uses it as the
-baseline — it never silently picks `variants[0]`. Reordering the
-variant list or using a custom sweep will not silently change the
-baseline.
-
-### Atomic per-user artifact
-
-`rq4-ablation` writes per-user CSVs through `scripts/rq4_per_user.py`:
-write to temp file → validate → atomic rename → MLflow upload → only
-then promote `per_user_complete=true` and `reportable=true`. `rq4-collect`
-re-validates each on-disk CSV before including a run, so a stale or
-partial file cannot be misread as valid.
-
 ### Temporal watch signal
 
 `engagement_score` is attached by a temporal backward join: the pipeline uses
 the latest explicit watch event for the same `(user_id, item_id)` with
 `explicit.created_at <= implicit.created_at`. Interactions without a temporal
 match receive `engagement_score = 0.0` and `has_watch_signal = false`.
-
-### Required commands
-
-```bash
-make preprocess
-make rq3-precompute
-make rq2-tune
-make rq2-report
-make rq3-tune
-make rq3-report
-make rq4-init
-make rq4-ablation
-make rq4-collect
-make rq4-compare
-make rq4-subgroup
-make rq4-report
-```
 
 ## Single-model runs
 
@@ -289,7 +178,6 @@ make rq1-report BENCHMARK_ID=rq1-v1
 make rq1-compare BENCHMARK_ID=rq1-v1
 make rq2-all
 make rq3-all
-make rq4-all
 make test
 ```
 
@@ -306,7 +194,6 @@ make test
 | RQ1 (`benchmark`)            | `mars_benchmark`            |
 | RQ2 (tuning)                 | `mars_confidence_tuning`    |
 | RQ3 (tuning)                 | `mars_metadata_tuning`      |
-| RQ4 (final ablation)         | `mars_final_ablation`       |
 
 ### Shared experiments
 
@@ -363,16 +250,9 @@ scripts/
   rq2_report.py              RQ2 reporter (writes reports/rq2_best_watch.json)
   rq2_compare.py             RQ2 statistical comparison
   rq3_precompute_embeddings.py
-  rq3_tune_metadata.py       RQ3 metadata grid (BERT4Rec winner from RQ2)
+  rq3_tune_metadata.py       RQ3 metadata grid (BERT4Rec standalone, no watch)
   rq3_report.py              RQ3 reporter (writes rq3_best_variant.json)
   rq3_compare.py             RQ3 statistical comparison
-  rq4_init_protocol.py       freeze RQ4 protocol (--rq2-winners + --rq3-winners; backbone=bert4rec)
-  rq4_ablation.py            RQ4 V0–V3 BERT4Rec ablation runner
-  rq4_per_user.py            atomic per-user CSV write helper
-  rq4_collect.py             RQ4 collector (validates per-user files)
-  rq4_compare.py             RQ4 statistical comparison
-  rq4_subgroup.py            RQ4 subgroup metrics
-  rq4_report.py              RQ4 final markdown report
   predict.py                 inference helper
   test_mlflow_connection.py  MLflow smoke test
   publish_report_bundle.py
