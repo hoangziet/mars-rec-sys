@@ -26,7 +26,8 @@ __pycache__/
 *.ipynb
 
 # experiments
-experiments/
+experiments/*
+!experiments/.gitkeep
 
 # mlruns
 mlruns/
