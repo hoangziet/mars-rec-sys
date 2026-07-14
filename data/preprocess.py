@@ -624,8 +624,7 @@ def save_processed_outputs(
         json.dump(preprocessing_report, f, indent=2)
 
     # Write dataset manifest — one SHA256 per artifact that the models
-    # actually read.  This is used by rq4_init_protocol to freeze
-    # provenance down to the exact byte-level content of every processed file.
+    # actually read. This supports provenance and audit of processed data.
     _write_dataset_manifest(output_dir)
 
 

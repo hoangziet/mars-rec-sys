@@ -99,7 +99,7 @@ def test_phase_lookup_rejects_non_phase_workflows():
 
 
 def test_trainer_last_run_id_survives_close_for_post_train_promotion(monkeypatch, tmp_path):
-    """After train() returns, callers (e.g. rq4_ablation) need a stable
+    """After train() returns, callers need a stable
     handle on the MLflow run so they can promote per-user artifacts and
     flip reportable/per_user_complete tags. _mlflow_run is None after
     close (by design — the run is terminated), so Trainer exposes
@@ -167,6 +167,6 @@ def test_trainer_last_run_id_survives_close_for_post_train_promotion(monkeypatch
 
     assert trainer._mlflow_run is None, "_mlflow_run must be cleared on close"
     assert trainer.last_run_id == "rid-stable", (
-        "last_run_id must remain readable after close so RQ4 can promote "
+        "last_run_id must remain readable after close "
         "per-user artifacts on the just-finished run"
     )

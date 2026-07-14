@@ -9,7 +9,6 @@ from training.mlflow_contract import (
     BENCHMARK_EXPERIMENT_NAME,
     RQ2_EXPERIMENT_NAME,
     RQ3_EXPERIMENT_NAME,
-    RQ4_EXPERIMENT_NAME,
     SHARED_EXPERIMENTS,
     SMOKE_EXPERIMENT_NAME,
     TRAINING_EXPERIMENTS,
@@ -58,6 +57,4 @@ def test_contract_constants_expose_expected_shared_experiments():
     assert BENCHMARK_EXPERIMENT_NAME == "mars_benchmark"
     assert RQ2_EXPERIMENT_NAME == "mars_confidence_tuning"
     assert RQ3_EXPERIMENT_NAME == "mars_metadata_tuning"
-    assert RQ4_EXPERIMENT_NAME == "mars_final_ablation"
     assert SHARED_EXPERIMENTS == {"reports": "mars_reports"}
-    assert TRAINING_EXPERIMENTS["rq4_final"] == "mars_final_ablation"

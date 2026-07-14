@@ -86,7 +86,7 @@ def test_load_rejects_unknown_backbone(tmp_path):
 
 
 def test_load_rejects_heuristic_winner_by_default(tmp_path):
-    """Heuristic winners cannot drive RQ2/RQ3/RQ4 neural pipeline."""
+    """Heuristic winners cannot drive RQ2/RQ3 neural pipeline."""
     p = tmp_path / "w.json"
     _write_minimal(p, winner_model="popularity")
     with pytest.raises(WinnerArtifactError, match="not in the allowed backbone set"):

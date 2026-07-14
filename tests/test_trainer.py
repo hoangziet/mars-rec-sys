@@ -45,8 +45,8 @@ def _make_loader(n=2, input_dim=4):
 def test_trainer_raises_when_no_valid_checkpoint(tmp_path):
     """When all training is non-finite, trainer must raise NoValidCheckpointError.
 
-    The caller (rq4_ablation etc.) must catch this specifically and skip
-    per-user export / downstream reporting for that seed.
+    The caller must catch this specifically and skip downstream
+    reporting for that seed.
     """
     model = _NaNModel()
     trainer = Trainer("nan_test", "cpu", run_dir=tmp_path, use_mlflow=False)
