@@ -4,9 +4,12 @@ scripts/predict.py
 Load a trained model checkpoint and generate top-K recommendations for a user.
 
 Usage:
-    uv run python scripts/predict.py sasrec --user_id 42 --top_k 10
-    uv run python scripts/predict.py bprmf  --user_id 42 --top_k 20
-    uv run python scripts/predict.py sasrec --user_id 42 --show_titles
+    uv run python scripts/predict.py bert4rec --user_id 42 --top_k 10
+    uv run python scripts/predict.py sasrec --checkpoint path/to/best_model.pt --user_id 42
+
+When --checkpoint is not given, the script auto-discovers the best checkpoint
+from experiments/benchmark/rq1-v1/ by reading rq1_runs.csv and picking the seed
+with the highest best_val_ndcg_at_10 for the requested model.
 
 The user's training history is read from
     <data_dir>/splits/train_sequences.csv
@@ -36,7 +39,7 @@ from pipeline.loaders import load_stats, parse_seq, pad_sequence
 
 def load_checkpoint(model, ckpt_path: Path, device: torch.device):
     ckpt = torch.load(ckpt_path, map_location=device)
-    model.load_state_dict(ckpt["state_dict"])
+    model.load_state_dict(ckpt["state_dict"], strict=False)
     model.eval()
     return model
 
@@ -60,6 +63,49 @@ def load_item_titles(meta_csv: Path) -> dict[int, str]:
     if name_col is None:
         return {}
     return dict(zip(df[id_col].tolist(), df[name_col].tolist()))
+
+
+def _discover_best_checkpoint(model_name: str, experiments_dir: Path) -> Path | None:
+    """Find the checkpoint with the highest best_val_ndcg_at_10 for *model_name*
+    in the RQ1 benchmark campaign.
+
+    Returns None when no matching run is found.
+    """
+    runs_csv = experiments_dir / "benchmark" / "rq1-v1" / "reports" / "rq1_runs.csv"
+    if not runs_csv.exists():
+        return None
+
+    import pandas as pd
+    df = pd.read_csv(runs_csv)
+    model_runs = df[df["model"] == model_name]
+    if model_runs.empty:
+        return None
+
+    best = model_runs.loc[model_runs["best_val_ndcg_at_10"].idxmax()]
+    seed = int(best["seed"])
+
+    ckpt = experiments_dir / "benchmark" / "rq1-v1" / model_name / f"seed_{seed}" / "best_model.pt"
+    return ckpt if ckpt.exists() else None
+
+
+def _resolve_checkpoint(args, model_name: str) -> Path:
+    if args.checkpoint:
+        p = Path(args.checkpoint)
+        if p.exists():
+            return p
+        print(f"Checkpoint not found: {p}", file=sys.stderr)
+        sys.exit(1)
+
+    experiments_dir = Path("experiments")
+    ckpt = _discover_best_checkpoint(model_name, experiments_dir)
+    if ckpt is not None:
+        print(f"Auto-discovered checkpoint: {ckpt}")
+        return ckpt
+
+    print(f"No checkpoint found for {model_name}.", file=sys.stderr)
+    print(f"  RQ1 benchmark runs not found or {model_name} not in benchmark.", file=sys.stderr)
+    print(f"  Use --checkpoint to specify an explicit path.", file=sys.stderr)
+    sys.exit(1)
 
 
 # ---------------------------------------------------------------------------
@@ -117,7 +163,7 @@ def main():
     parser.add_argument("--user_id",   type=int, required=True, help="Remapped user index (1-based)")
     parser.add_argument("--top_k",     type=int, default=10)
     parser.add_argument("--data_dir",  default=DEFAULT_DATA_DIR)
-    parser.add_argument("--ckpt_dir",  default="experiments")
+    parser.add_argument("--checkpoint", default=None, help="Explicit path to best_model.pt")
     parser.add_argument("--show_titles", action="store_true", help="Show item titles if available")
     args = parser.parse_args()
 
@@ -134,11 +180,7 @@ def main():
         args.model, stats["n_items"], stats["n_users"], model_kwargs, max_len
     ).to(device)
 
-    ckpt_path = Path(args.ckpt_dir) / args.model / "best_model.pt"
-    if not ckpt_path.exists():
-        print(f"Checkpoint not found: {ckpt_path}", file=sys.stderr)
-        sys.exit(1)
-
+    ckpt_path = _resolve_checkpoint(args, args.model)
     model = load_checkpoint(model, ckpt_path, device)
 
     history = load_user_history(data_dir / "splits" / "train_sequences.csv", args.user_id)

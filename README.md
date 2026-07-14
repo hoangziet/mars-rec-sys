@@ -162,11 +162,17 @@ Models are ranked by validation `NDCG@10` (primary metric, checkpoint selection)
 
 ## Inference
 
-*Requires a trained checkpoint under `experiments/<model>/best_model.pt`.*
+Auto-discovers the best checkpoint from `experiments/benchmark/rq1-v1/`.
 
 ```bash
-uv run python scripts/predict.py sasrec --user_id 42 --top_k 10
-uv run python scripts/predict.py sasrec --user_id 42 --top_k 10 --show_titles
+uv run python scripts/predict.py bert4rec --user_id 42 --top_k 10
+uv run python scripts/predict.py sasrec --user_id 42 --show_titles --top_k 5
+```
+
+Or specify an explicit checkpoint:
+
+```bash
+uv run python scripts/predict.py bert4rec --checkpoint path/to/best_model.pt --user_id 42
 ```
 
 ## Makefile Shortcuts
