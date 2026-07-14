@@ -120,7 +120,7 @@ exceptions**:
 - same benchmark seed campaign for stochastic models
 - same validation-selection rule (`mean validation NDCG@10` across the campaign)
 - same early-stopping rule where a train loop exists
-- same common optimization recipe for neural models: `batch_size=256`, `epochs=50`, `lr=1e-3`, `beta2=0.98`, `weight_decay=1e-4`, `gradient_clip=5.0`, no warmup scheduler
+- same common optimization recipe for neural models: `batch_size=256`, `epochs=100`, `lr=1e-3`, `beta2=0.98`, `weight_decay=1e-4`, `gradient_clip=5.0`, no warmup scheduler
 
 RQ1 is a next-distinct-course benchmark: preprocessing deduplicates `(user_id, item_id)` by first encounter, so validation and test targets must not already appear in the user history.
 
@@ -162,6 +162,8 @@ Models are ranked by validation `NDCG@10` (primary metric, checkpoint selection)
 
 ## Inference
 
+*Requires a trained checkpoint under `experiments/<model>/best_model.pt`.*
+
 ```bash
 uv run python scripts/predict.py sasrec --user_id 42 --top_k 10
 uv run python scripts/predict.py sasrec --user_id 42 --top_k 10 --show_titles
@@ -192,7 +194,8 @@ make test
 | Single-model smoke (`train.py phase=smoke`) | `mars_smoke`      |
 | RQ1 smoke (`train_all.py`)   | `mars_benchmark`            |
 | RQ1 (`benchmark`)            | `mars_benchmark`            |
-| RQ2 (tuning)                 | `mars_confidence_tuning`    |
+| RQ2 alpha-tuning             | `mars_watch_alpha_tuning`   |
+| RQ2 variant comparison       | `mars_watch_variant_comparison` |
 | RQ3 (tuning)                 | `mars_metadata_tuning`      |
 
 ### Shared experiments
@@ -263,7 +266,7 @@ training/
   mlflow_utils.py
   winner_artifact.py         RQ1 winner artifact contract
 Makefile                     common local workflow shortcuts
-tests/                       local pytest suite (tracked)
+tests/                       local pytest suite (gitignored)
 docs/                        local specs/plans/research notes (gitignored)
 ```
 
